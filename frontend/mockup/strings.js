@@ -1,26 +1,26 @@
 /*
- * Английские подписи интерфейса.
+ * Английские подписи интерфейса
  *
  * Ключ - русский текст ровно в том виде, в каком он написан в разметке или в
  * коде. Так сделано намеренно: подписи разбросаны по двадцати файлам и по
  * сотне мест в index.html, и перевод на ключи означал бы правку каждого из
  * них - с риском разъехаться при первой же следующей правке. Здесь же
- * незнакомая строка просто остаётся русской, и это видно на экране.
+ * незнакомая строка просто остаётся русской, и это видно на экране
  *
  * `{}` - подстановка. Такие ключи узнают собранную строку целиком («Собрано:
  * mod.vpk»), а не её кусок. Поэтому строка с подстановкой в коде собирается
  * ОДНИМ шаблоном (`Разбор ${name}…`), а не склейкой кусков: кусок «Разбор»
- * словарь нашёл бы, а склеенную строку на экране - уже нет.
+ * словарь нашёл бы, а склеенную строку на экране - уже нет
  *
  * Сообщения Python (ошибки сеанса и воркеров) тоже здесь: они приходят
- * готовым текстом и попадают в те же подписи, что и всё остальное.
+ * готовым текстом и попадают в те же подписи, что и всё остальное
  *
  * Чего тут нет и быть не должно: имён предметов, материалов и файлов. Их
  * отдаёт Python уже на нужном языке (см. `api._lang`).
  */
 
 export const EN = {
-  // ── Шапка, разделы, ряд действий ──────────────────────────────────────
+  // Шапка, разделы, ряд действий
   'Оружие': 'Weapons',
   'Шапки': 'Cosmetics',
   'Частицы': 'Particles',
@@ -43,7 +43,7 @@ export const EN = {
   'Журнал': 'Log',
   'Очистить': 'Clear',
 
-  // ── Вид предмета: вкладки, команды, кнопки под альбомом ────────────────
+  // Вид предмета: вкладки, команды, кнопки под альбомом
   'Вместе': 'Together',
   'Текстура': 'Texture',
   'Текстура:': 'Texture:',
@@ -142,7 +142,7 @@ export const EN = {
   'Настройки этой текстуры': 'Settings for this texture',
   'Убрать материал из стиля': 'Remove the material from the style',
 
-  // ── Каталог ───────────────────────────────────────────────────────────
+  // Каталог
   'Категория': 'Category',
   'Назад': 'Back',
   'Вперёд': 'Forward',
@@ -176,7 +176,7 @@ export const EN = {
   'Эффект': 'Effect',
   'Выберите систему частиц.': 'Select a particle system.',
 
-  // ── Библиотека модов и работы ─────────────────────────────────────────
+  // Библиотека модов и работы
   'Свои работы и моды из VPK. Предмет из списка оружия открывается игровым - сохранённая работа открывается отсюда.':
     'Your saved works and VPK mods. An item picked from the weapons list opens as it is in the game - a saved work opens from here.',
   'Открыть VPK-мод…': 'Open a VPK mod…',
@@ -200,7 +200,7 @@ export const EN = {
   'Отложенные правки вернулись': 'The edits you set aside are back',
   'Правки удалены': 'Edits deleted',
 
-  // ── Сборка ────────────────────────────────────────────────────────────
+  // Сборка
   'Разрешение': 'Resolution',
   '256 × 256 · спрей': '256 × 256 · spray',
   '512 × 512 · обычное': '512 × 512 · normal',
@@ -208,7 +208,7 @@ export const EN = {
   '2048 × 2048 · ультра': '2048 × 2048 · ultra',
   'Формат VTF': 'VTF format',
   'Имя VPK': 'VPK name',
-  // Ключ - то, что видно в узле: сущности разметки браузер уже раскрыл.
+  // Ключ - то, что видно в узле: сущности разметки браузер уже раскрыл
   'Не более 50 символов, без \\ / : * ? " < > |':
     'Up to 50 characters, no \\ / : * ? " < > |',
   'Флаги VTF': 'VTF flags',
@@ -262,11 +262,11 @@ export const EN = {
   'Сборка успешно завершена: {}': 'Build finished: {}',
   'Ошибка сборки: {}': 'Build failed: {}',
 
-  // ── Состояние снизу ───────────────────────────────────────────────────
+  // Состояние снизу
   // Одно и то же «Готово» - и строка состояния, и кнопки подтверждения
   // (диалоги, посадка картинки, правка текстуры, обучение). Ключ у них общий,
   // поэтому перевод один: «Done» верно для кнопок и привычно для строки
-  // состояния, а «Ready» на кнопке читалось как ошибка.
+  // состояния, а «Ready» на кнопке читалось как ошибка
   'Готово': 'Done',
   'TF2 найден · tf/tf2_misc_dir.vpk': 'TF2 found · tf/tf2_misc_dir.vpk',
   'TF2 не найдена - укажите папку игры в настройках':
@@ -278,7 +278,7 @@ export const EN = {
   'Нет связи с Python: {}': 'No connection to Python: {}',
   'неизвестная ошибка': 'unknown error',
 
-  // ── Настройки ─────────────────────────────────────────────────────────
+  // Настройки
   'Игра и файлы': 'Game and files',
   'Работа и сборка': 'Work and build',
   'Обслуживание': 'Maintenance',
@@ -327,7 +327,7 @@ export const EN = {
     'These are the silent autosave records - works saved with the button are not listed here and will not be touched. Uncheck whatever you want to keep.',
   'Черновиков удалено: {}': 'Drafts deleted: {}',
 
-  // ── Диагностика ───────────────────────────────────────────────────────
+  // Диагностика
   'Диагностика мода': 'Mod diagnostics',
   'Проверяет собранный VPK: пути в VMT, форматы VTF, структуру мода - то, что в игре превращается в фиолетовую текстуру или невидимую модель.':
     'Checks a built VPK: VMT paths, VTF formats, mod structure - the things that turn into a purple texture or an invisible model in the game.',
@@ -339,12 +339,12 @@ export const EN = {
   'Ошибок: {} · предупреждений: {}': 'Errors: {} · warnings: {}',
   'Что делать: {}': 'What to do: {}',
 
-  // ── Редактор VMT и QC ─────────────────────────────────────────────────
+  // Редактор VMT и QC
   'Материал': 'Material',
   'Ctrl+S - сохранить · Esc - закрыть': 'Ctrl+S - save · Esc - close',
   'Как в игре': 'As in the game',
   '● Есть несохранённые изменения': '● Unsaved changes',
-  '✓ Используется свой VMT': '✓ A custom VMT is in use',
+  'Используется свой VMT': 'A custom VMT is in use',
   'Показывается оригинал из игры': 'Showing the game original',
   'Правка удалена, показан игровой оригинал':
     'Edit deleted, showing the game original',
@@ -357,7 +357,7 @@ export const EN = {
   'Сохранено': 'Saved',
   'Возвращён авто-QC': 'Auto QC restored',
 
-  // ── Своя модель ───────────────────────────────────────────────────────
+  // Своя модель
   'Своя модель убрана': 'Custom model removed',
   'Конвертация {}…': 'Converting {}…',
   'Как использовать модель?': 'How to use the model?',
@@ -375,7 +375,7 @@ export const EN = {
   'Своя модель: геометрия ваша, текстуры игровые':
     'Custom model: your geometry, game textures',
 
-  // ── Материалы и текстуры ──────────────────────────────────────────────
+  // Материалы и текстуры
   'У текстуры покадровая анимация': 'This texture is frame animated',
   'Своя картинка встанет одним кадром, и анимация пропадёт.':
     'A custom image becomes a single frame and the animation is lost.',
@@ -402,12 +402,12 @@ export const EN = {
   'Карты материала сняты': 'Material maps cleared',
   'У материала нет текстуры для превью': 'The material has no texture to preview',
 
-  // ── Превью ────────────────────────────────────────────────────────────
+  // Превью
   'Загрузка стиля: {}…': 'Loading the style: {}…',
   'Загрузка модели…': 'Loading the model…',
   'Загрузка текстуры…': 'Loading the texture…',
   'Сборка сцены: {}…': 'Building the scene: {}…',
-  // ── Звуки ──────────────────────────────────────────────────────────── //
+  // Звуки
   'Звуки': 'Sounds',
   'Событие': 'Event',
   'Название, предмет или файл': 'Name, item or file',
@@ -427,13 +427,13 @@ export const EN = {
   'Формат': 'Format',
   'Свои': 'Own',
   'Заменённые': 'Replaced',
-  // Кто звучит - говорящие, которые не классы.
+  // Кто звучит - говорящие, которые не классы
   'Диктор': 'Announcer',
   'Мисс Полинг': 'Miss Pauling',
   'Хэллоуин': 'Halloween',
   'Ап-Сап': 'Ap-Sap',
   'Прочие': 'Other',
-  // Варианты записи.
+  // Варианты записи
   'Обычные': 'Regular',
   'Роботы MvM': 'MvM robots',
   'Читаю звуки игры…': 'Reading the game sounds…',
@@ -498,7 +498,7 @@ export const EN = {
     'Model state: the game switches it by itself; here you can look at each one',
   'Собираю состояние…': 'Building the state…',
   'Такого состояния у модели нет': 'The model has no such state',
-  // ── Праздничная версия (гирлянда поверх оружия) ──
+  // Праздничная версия (гирлянда поверх оружия)
   'Версия': 'Version',
   'Гирлянда, которую игра вешает на это оружие. Её правки уходят в мод отдельной моделью и не задевают другие оружия':
     'The lights the game hangs on this weapon. Edits go into the mod as a separate model and do not touch other weapons',
@@ -506,6 +506,47 @@ export const EN = {
   'Праздничная': 'Festive',
   'Фестивайзер': 'Festivized',
   'Сделать праздничным': 'Make festive',
+  // Встречающее окно (welcome.js)
+  'Пропустить': 'Skip',
+  'Пройти обучение': 'Take the tour',
+  'Начать без обучения': 'Start without the tour',
+  'Пара настроек - и можно красить. Всё это потом меняется в «Настройках».':
+    'A couple of settings and you can start painting. All of this can be changed later in Settings.',
+  'Язык': 'Language',
+  'Тема': 'Theme',
+  'Игра': 'Game',
+  'Где установлена TF2': 'Where TF2 is installed',
+  'Модели и текстуры приложение берёт прямо из игры.': 'The app takes models and textures straight from the game.',
+  'Папка Team Fortress 2': 'Team Fortress 2 folder',
+  'Найти снова': 'Search again',
+  'Куда класть готовые моды': 'Where to put finished mods',
+  'Сюда приложение положит собранный VPK.': 'The app puts the built VPK here.',
+  'Папка приложения': 'App folder',
+  'Рядом с работами, переносите в игру сами': 'Next to your works, you move it into the game yourself',
+  'по умолчанию': 'default',
+  'Сразу в игру': 'Straight into the game',
+  'Сначала укажите папку игры': 'Set the game folder first',
+  'Своя папка': 'Custom folder',
+  'Выбрать на диске': 'Pick on disk',
+  'Укажите в «Настройках»': 'Set it in Settings',
+  'Серверы Valve': 'Valve servers',
+  'Как моды пройдут проверку игры': 'How mods get past the game check',
+  'Материалы мода лежат в папке, которую игра пропускает и в казуале. Перестал работать один способ - выберите другой.':
+    'Mod materials go into a folder the game lets through even in Casual. If one way stops working, pick the other.',
+  'Можно начинать': 'Ready to go',
+  'Короткое обучение покажет, где что лежит. Его можно пройти и позже из «Настроек».':
+    'A short tour shows where everything is. You can also take it later from Settings.',
+  'не указана': 'not set',
+  'Моды': 'Mods',
+  'Обход': 'Bypass',
+  'Игра на месте': 'Game found',
+  'Ищу игру…': 'Looking for the game…',
+  'Не нашёл - укажите папку игры': 'Not found - set the game folder',
+  'Нашёл игру': 'Found the game',
+  'Здесь нет TF2 - нужна папка Team Fortress 2': 'No TF2 here - pick the Team Fortress 2 folder',
+  'Ctrl+щелчок - показать только эту часть': 'Ctrl+click - show only this part',
+  'Видна только эта часть - Esc или Ctrl+щелчок по ней, чтобы вернуть':
+    'Only this part is shown - press Esc or Ctrl+click it to go back',
   'Снять гирлянду': 'Remove the lights',
   'Вшить гирлянду в модель: в игре она будет на обычном оружии':
     'Build the lights into the model: in game they show on the regular weapon',
@@ -602,7 +643,7 @@ export const EN = {
   'Перетащите фото 360° (2:1) - оно разрежется на все шесть граней':
     'Drop a 360° photo (2:1) - it will be split into all six faces',
 
-  // ── Части модели ──────────────────────────────────────────────────────
+  // Части модели
   'Части': 'Parts',
   'Картинка': 'Image',
   'Кисть': 'Brush',
@@ -639,7 +680,7 @@ export const EN = {
   'Цвет смешивается с оригиналом - так деталь выглядит естественнее':
     'The color blends with the original - that way the part looks more natural',
   'Объединить': 'Merge',
-  // ── Ножницы: выделение и «Отделить» ──────────────────────────────────
+  // Ножницы: выделение и «Отделить»
   'Деталь': 'Piece',
   'Остров': 'Island',
   'Острота рёбер': 'Edge sharpness',
@@ -667,7 +708,7 @@ export const EN = {
   'Ничего не выделено': 'Nothing is selected',
   'Выделено: {}': 'Selected: {}',
   'Нарезать по островам': 'Split by UV islands',
-  // ── Посадка картинки: отражение, копия, сетка ────────────────────────
+  // Посадка картинки: отражение, копия, сетка
   'Сетка': 'Mesh',
   'Показать сетку треугольников детали вместо её контура - на мелкой детали видно, куда именно ляжет картинка': 'Show the part’s triangle mesh instead of its outline - on a small part you see exactly where the picture lands',
   'Тяни мышью · размер - за квадратики, за край дальше противоположного - отражение · поворот - за маркер или стрелками · колесо - ближе': 'Drag to move · size - by the squares, past the opposite edge - mirror · rotate - by the handle or arrow keys · wheel - closer',
@@ -763,7 +804,7 @@ export const EN = {
     + 'the edges and the midpoint of the blend, the handle sets the direction',
   'Перекладываю…': 'Re-placing…',
 
-  // ── Посадка картинки на часть ─────────────────────────────────────────
+  // Посадка картинки на часть
   'Вписать': 'Fit',
   'Целиком': 'Whole',
   'Заполнить': 'Fill',
@@ -798,7 +839,7 @@ export const EN = {
   'Отменить правку (Ctrl+Z)': 'Undo (Ctrl+Z)',
   'Вернуть правку (Ctrl+Y)': 'Redo (Ctrl+Y)',
 
-  // ── Инструменты ───────────────────────────────────────────────────────
+  // Инструменты
   'Загрузка {}…': 'Loading {}…',
   'Не удалось открыть: {}': 'Could not open: {}',
   'Куда сохранить PCF': 'Where to save the PCF',
@@ -828,7 +869,7 @@ export const EN = {
   'Объединение…': 'Merging…',
   'Не получилось': 'It did not work out',
 
-  // ── Редактор частиц ───────────────────────────────────────────────────
+  // Редактор частиц
   'Обычный': 'Simple',
   'Эксперт': 'Expert',
   'Правая кнопка - действия над системой, модулем и параметром':
@@ -865,7 +906,7 @@ export const EN = {
   'Вернуть': 'Restore',
   'Свернуть': 'Collapse',
   'Развернуть': 'Expand',
-  // Части - своими материалами (parts_editor.py).
+  // Части - своими материалами (parts_editor.py)
   'Частям этого предмета свой материал не дать': 'Parts of this item can’t get a material of their own',
   'Выберите части': 'Select parts',
   'Откройте предмет заново': 'Open the item again',
@@ -890,7 +931,7 @@ export const EN = {
   'Часть отдана материалу «{}»: её красит его текстура':
     'This part belongs to the material “{}”: its texture paints it',
   'Щёлкай по частям: они уйдут в выбранный материал, повторный щелчок вернёт часть в общий': 'Click parts to move them into the selected material; click a part again to return it to the shared one',
-  // Кнопки окна (titlebar.js): свои ключи, «Свернуть» выше - про консоль.
+  // Кнопки окна (titlebar.js): свои ключи, «Свернуть» выше - про консоль
   'Свернуть окно': 'Minimize',
   'Развернуть окно': 'Maximize',
   'Свернуть в окно': 'Restore down',
@@ -1059,7 +1100,7 @@ export const EN = {
   'Собрано, но PCF на {} Б больше оригинала - в казуале не загрузится':
     'Built, but the PCF is {} B larger than the original - casual will not load it',
 
-  // ── Сообщения Python: ошибки сеанса ───────────────────────────────────
+  // Сообщения Python: ошибки сеанса
   'Сначала выберите предмет': 'Select an item first',
   'Сначала выберите шапку': 'Select a cosmetic first',
   'Сначала извлеките модель': 'Extract the model first',
@@ -1160,7 +1201,7 @@ export const EN = {
   'сборка VPK частиц не удалась: {}': 'building the particles VPK failed: {}',
   'не прочитать правку: {}': 'could not read the edit: {}',
 
-  // ── Обновление приложения ─────────────────────────────────────────────
+  // Обновление приложения
   'Проверить обновления': 'Check for updates',
   'проверяю…': 'checking…',
   'считаю…': 'counting…',
@@ -1184,9 +1225,9 @@ export const EN = {
   'Обновление не установлено: {}': 'the update was not installed: {}',
   'нечего устанавливать': 'nothing to install',
 
-  // ── Журнал ────────────────────────────────────────────────────────────
+  // Журнал
   // «Журнал» и «Свернуть» уже есть выше - второй раз их писать нельзя:
-  // TypeScript ловит это как ошибку, а без него молча побеждал бы последний.
+  // TypeScript ловит это как ошибку, а без него молча побеждал бы последний
   'Во всё окно': 'Full width',
   'Копировать': 'Copy',
   'Папка с логом': 'Log folder',
@@ -1206,7 +1247,7 @@ export const EN = {
   // Записи логгера Python переводятся тем же способом, что и остальные
   // подписи, - на границе показа. Начали с ошибок, где человеку сказано, что
   // делать: их он читает и по ним действует. Диагностика уровня INFO/DEBUG
-  // остаётся русской намеренно - её читает автор по присланному файлу.
+  // остаётся русской намеренно - её читает автор по присланному файлу
   'items_game.txt не найден в {}': 'items_game.txt not found in {}',
   "Секция 'items' не найдена в items_game.txt":
     "the 'items' section was not found in items_game.txt",
@@ -1215,13 +1256,13 @@ export const EN = {
   'Модель не найдена для {}. Проверенные пути: {}':
     'no model found for {}. Paths tried: {}',
 
-  // ── Диалог «не получилось» ────────────────────────────────────────────
+  // Диалог «не получилось»
   // Заголовок и объяснение приходят от Python уже на нужном языке
-  // (error_classifier), здесь только подписи самого окна.
+  // (error_classifier), здесь только подписи самого окна
   'Технические детали': 'Technical details',
   'Открыть журнал': 'Open the log',
 
-  // ── Редактор VMT: справочник и готовые эффекты ─────────────────────────
+  // Редактор VMT: справочник и готовые эффекты
   'Готовые эффекты ▾': 'Presets ▾',
   '← Назад': '← Back',
   'Изменений нет': 'No changes',
@@ -1239,7 +1280,7 @@ export const EN = {
   'Ничего не нашлось': 'Nothing found',
   'Уже есть в материале - курсор на нём': 'Already in the material, the cursor is on it',
 
-  // ── Сборка: краска игры по альфе ───────────────────────────────────────
+  // Сборка: краска игры по альфе
   'Игра перекрасит предмет в {}': 'The game will paint the item {}',
   'Этот предмет игра красит там, где у текстуры белый альфа-канал. У вашей картинки альфы нет, поэтому в игре покрасится весь предмет.': "The game paints this item where the texture's alpha channel is white. Your image has no alpha, so the whole item will be painted in game.",
   'Как на картинке': 'As in the image',
@@ -1251,7 +1292,7 @@ export const EN = {
   'Покрасится весь предмет': 'The whole item gets painted',
   'Собрать': 'Build',
 
-  // ── Шапка на модели ───────────────────────────────────────────────────
+  // Шапка на модели
   'Основное': 'Primary',
   'Вспомогательное': 'Secondary',
   'Сапёр': 'Sapper',
@@ -1260,7 +1301,7 @@ export const EN = {
   'Посмотрите шапку прямо на персонаже. Под кадром можно выбрать класс и оружие в руках.': 'See the hat right on the character. Below the view you can pick the class and the weapon in hand.',
   'Не удалось понять, какой класс носит эту шапку': "Couldn't tell which class wears this hat",
 
-  // ── Обучение (tour.js) ────────────────────────────────────────────────
+  // Обучение (tour.js)
   'Пройти обучение заново':
     'Replay the tutorial',
   'Пропустить обучение':
@@ -1550,9 +1591,9 @@ export const EN = {
   'Собираю предпросмотр…': 'Building the preview…',
   'Предпросмотр на модели. «Нанести» соберёт в полном размере.': 'Preview on the model. "Apply" builds it at full size.',
 
-  // ── Сообщения сервисов и воркеров: прогресс, ошибки, предупреждения ────
+  // Сообщения сервисов и воркеров: прогресс, ошибки, предупреждения
   // Приходят готовым текстом. Многострочные (итог сборки с предупреждениями,
-  // ошибка VPK с подробностями) i18n.js переводит построчно.
+  // ошибка VPK с подробностями) i18n.js переводит построчно
   'Поиск модели...': 'Searching for the model...',
   'Проверка файлов игры...': 'Checking game files...',
   'Инициализация извлечения модели...': 'Starting model extraction...',
@@ -1618,13 +1659,13 @@ export const EN = {
   'контрольная сумма не совпала - файл повреждён': 'checksum mismatch - the file is corrupted',
   'установщик не найден: {}': 'installer not found: {}',
   'установка поддерживается только на Windows': 'installing is only supported on Windows',
-  // Гирлянды: причина подставляется в «Гирлянда {} не собралась: {}».
+  // Гирлянды: причина подставляется в «Гирлянда {} не собралась: {}»
   'Гирлянда {} не собралась: {}': "The {} garland didn't build: {}",
   '{} нет в игре': '{} is not in the game',
   'в разборе {} нет QC или меша': 'the decompiled {} has no QC or mesh',
   'в QC нет $cdmaterials': 'the QC has no $cdmaterials',
   'VTF для {} не создался': "the VTF for {} wasn't created",
-  // Предупреждения сборки: строками под «Внимание:» в итоге сборки.
+  // Предупреждения сборки: строками под «Внимание:» в итоге сборки
   'Не найдена игровая текстура \'{}\' - в игре материал может быть фиолетовым. Загрузите свою текстуру в главный слот.':
     "Game texture '{}' not found - the material may be purple in game. Load your own texture into the main slot.",
   'Не найдена оригинальная текстура плеч \'{}\' - плечи вьюмодели могут быть фиолетовыми.':
@@ -1641,7 +1682,7 @@ export const EN = {
   'Открыть папку экспорта': 'Open export folder',
   'Выбрать папку': 'Choose folder',
   'Выбор папки доступен только в окне приложения': 'Folder picking only works in the app window',
-  // Раздел «Кастомизация»: как выглядит сборка (buildfx.js).
+  // Раздел «Кастомизация»: как выглядит сборка (buildfx.js)
   'Кастомизация': 'Customization',
   'Проиграть сборку': 'Play a build',
   'Проиграть с ошибкой': 'Play with an error',
@@ -1697,7 +1738,7 @@ export const EN = {
   'Сигнал в конце': 'Chime at the end',
   'Щелчки и сигнал': 'Clicks and chime',
   'этап {}': 'step {}',
-  // Этапы примера: те же, что у настоящей сборки оружия.
+  // Этапы примера: те же, что у настоящей сборки оружия
   'Подготовка сборки…': 'Preparing the build…',
   'Декомпиляция модели…': 'Decompiling the model…',
   'Обработка текстуры…': 'Processing the texture…',
@@ -1705,20 +1746,20 @@ export const EN = {
   'Упаковка VPK…': 'Packing the VPK…',
   'Мод собран · skin_mod.vpk': 'Mod built · skin_mod.vpk',
   'Ошибка: studiomdl не принял модель': 'Error: studiomdl rejected the model',
-  // Потолок кэша моделей (вкладка «Обслуживание»).
+  // Потолок кэша моделей (вкладка «Обслуживание»)
   'Размер кэша моделей': 'Model cache size',
   'Разобранные модели открываются без Crowbar. Когда кэш полон, первыми удаляются те, что давно не открывали.':
     'Unpacked models open without Crowbar. When the cache is full, the ones you have not opened for the longest go first.',
   'Без ограничения': 'No limit',
   'ГБ': 'GB',
   'Открыть папку': 'Open folder',
-  // Итог сборки в нижней полосе.
+  // Итог сборки в нижней полосе
   'Мод собран · {}': 'Mod built · {}',
   'предупреждение': 'warning',
   'предупреждения': 'warnings',
   'предупреждений': 'warnings',
 
-  // ── Конструктор узора блеска ──────────────────────────────────────────
+  // Конструктор узора блеска
   'Низкое': 'Low',
   'Среднее': 'Medium',
   'Высокое': 'High',

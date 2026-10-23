@@ -1,64 +1,64 @@
 """
-Конфиг файловых карт материала (Фаза 2).
+Конфиг файловых карт материала (Фаза 2)
 
-Пользователь грузит обычную картинку → приложение само:
+Пользователь грузит обычную картинку -> приложение само:
   1) генерит VTF с ПРАВИЛЬНЫМ форматом/флагами под тип карты,
   2) вписывает путь карты в VMT (путь авто-патчится под console/..., как у normal map),
-  3) добавляет сопутствующие параметры ($detailscale, $selfillum, $phong …).
+  3) добавляет сопутствующие параметры ($detailscale, $selfillum, $phong …)
 
 Почему это нельзя сделать через редактор VMT:
   • пользователь физически не знает авто-патченный путь console\…,
   • редактор не генерит VTF и не выставляет формат под тип карты
-    (например phong-exp нельзя в DXT1 — потеряется альфа).
+    (например phong-exp нельзя в DXT1 - потеряется альфа)
 
 Карты имеют смысл только на VertexLitGeneric (модели). На UnlitGeneric
-(spray/crit) — игнорируются (см. VMTService.add_material_map_params).
+(spray/crit) - игнорируются (см. VMTService.add_material_map_params)
 """
 
-# id_карты → правила. format/flags — для генерации VTF; path_param — параметр
-# VMT с путём к карте; extra_vmt — сопутствующие скалярные параметры;
-# numeric — какие из extra_vmt можно переопределить из UI; settings — свои
+# id_карты -> правила. format/flags - для генерации VTF; path_param - параметр
+# VMT с путём к карте; extra_vmt - сопутствующие скалярные параметры;
+# numeric - какие из extra_vmt можно переопределить из UI; settings - свои
 # настройки карты, которые не параметры VMT (их разбирает сборка):
 #   {"choices": (…), "default"} | {"min", "max", "default"} (+ "float",
 #   "step", "slider") | {"color": True} | {"file": True}; "show_if":
-#   {настройка: значение или список значений} — когда поле видно; "display"
-#   — что показать, пока поле не тронуто (пусто = «как у материала», в VMT
-#   ничего не пишется: иначе первое же «Применить» переписало бы родное).
+#   {настройка: значение или список значений} - когда поле видно; "display"
+#   - что показать, пока поле не тронуто (пусто = «как у материала», в VMT
+#   ничего не пишется: иначе первое же «Применить» переписало бы родное)
 #
 # Phong-карта ($phongexponenttexture) у движка поканальная (source-sdk-2013,
-# skin_ps20b.fxc): R — размер блика (1 + 149·R, но $phongexponent > 0 его
-# ПЕРЕКРЫВАЕТ — skin_dx9_helper.cpp), G — сила окраски блика цветом текстуры
-# ($phongalbedotint), A — маска обводки ($rimmask). Поэтому «Цвет блика» и
-# маска Rim light собираются в ту же текстуру {mat}_exp.
+# skin_ps20b.fxc): R - размер блика (1 + 149·R, но $phongexponent > 0 его
+# ПЕРЕКРЫВАЕТ - skin_dx9_helper.cpp), G - сила окраски блика цветом текстуры
+# ($phongalbedotint), A - маска обводки ($rimmask). Поэтому «Цвет блика» и
+# маска Rim light собираются в ту же текстуру {mat}_exp
 MATERIAL_MAPS = {
     "detail": {
         "suffix": "_detail",
         "format": "DXT1",          # detail тайлится, альфа не нужна
-        "flags": (),               # без CLAMP — иначе тайлинг сломается
+        "flags": (),               # без CLAMP - иначе тайлинг сломается
         "path_param": "$detail",
         "extra_vmt": {
             "$detailscale": "8",
-            # 0 — DecalModulate: темнее 128 затемняет, светлее высветляет.
+            # 0 - DecalModulate: темнее 128 затемняет, светлее высветляет.
             # Им пользуется Valve в своих detail (developer.valvesoftware.com/
-            # wiki/$detail). Раньше стоял 1 (только высветление).
+            # wiki/$detail). 1 только высветляет
             "$detailblendmode": "0",
             "$detailblendfactor": "1",
         },
         "numeric": ("$detailscale", "$detailblendmode", "$detailblendfactor"),
         # Режимы, что работают на VertexLitGeneric С $bumpmap (а он у оружия
-        # TF2 почти всегда): 0–4 всегда, 5–6 при $phong. 7–9 без $bumpmap не
-        # рисуются вовсе («Missing Shader Combo» — материал пропадает), поэтому
-        # их в выборе нет. Раньше «Multiply» писал 7 (это Two-Pattern
-        # DecalModulate), «Overlay» — 5 (это Unlit Additive).
+        # TF2 почти всегда): 0-4 всегда, 5-6 при $phong. 7-9 без $bumpmap не
+        # рисуются вовсе («Missing Shader Combo» - материал пропадает), поэтому
+        # их в выборе нет. 7 - это Two-Pattern DecalModulate, а не Multiply;
+        # 5 - Unlit Additive, а не Overlay
         "choices": {"$detailblendmode": ("0", "1", "2", "5")},
         "preview": "detail",
-        # Режим 2 накладывает цветную деталь по её альфе — DXT1 альфу теряет.
+        # Режим 2 накладывает цветную деталь по её альфе - DXT1 альфу теряет
         "format_by": {"$detailblendmode": {"2": "DXT5"}},
         "needs_alpha": False,
     },
     "selfillum": {
         "suffix": "_illum",
-        "format": "DXT1",          # маска свечения — оттенки серого
+        "format": "DXT1",          # маска свечения - оттенки серого
         "flags": (),
         "path_param": "$selfillummask",
         "extra_vmt": {"$selfillum": "1"},
@@ -67,9 +67,9 @@ MATERIAL_MAPS = {
         "derive_kind": "selfillum",   # можно вывести из базовой текстуры
         "preview": "glow",
         # Цвет, пульсация и затухание свечения (вики Valve: $selfillumtint,
-        # $selfillumfresnel; у Valve в TF2 790 и 292 материалов). Пульсация —
+        # $selfillumfresnel; у Valve в TF2 790 и 292 материалов). Пульсация -
         # прокси Sine и Multiply, как у Valve (68 материалов TF2 пульсируют
-        # $selfillumtint через Sine).
+        # $selfillumtint через Sine)
         "settings": {
             "glow_color": {"color": True, "default": "", "display": "#ffffff"},
             "glow_power": {"min": 0, "max": 400, "slider": True, "default": "", "display": 100},
@@ -85,27 +85,27 @@ MATERIAL_MAPS = {
     },
     "phongexp": {
         "suffix": "_exp",
-        "format": "DXT5",          # альфа критична (rim/маска) → НЕ DXT1
+        "format": "DXT5",          # альфа критична (rim/маска) -> НЕ DXT1
         "flags": (),
         "path_param": "$phongexponenttexture",
         "extra_vmt": {"$phong": "1", "$phongboost": "2"},
-        # Вики Valve: без $phongfresnelranges phong может не показаться; из
-        # 8511 phong-материалов TF2 без него только 7. Только если его нет —
-        # у оружия он свой.
+        # Вики Valve: без $phongfresnelranges phong может не показаться, из
+        # 8511 phong-материалов TF2 без него только 7. Только если его нет -
+        # у оружия он свой
         "vmt_defaults": {"$phongfresnelranges": "[0 0.5 1]"},
         "numeric": ("$phongboost",),
         "needs_alpha": True,
         "derive_kind": "phong",       # «Авто-блеск» из базовой текстуры
         "preview": "gloss",
         # Для phong нужен bumpmap (иначе Source не считает блик) + добавляем
-        # отражение мира для «вау». Эти параметры доклеиваются при derive-режиме.
+        # отражение мира для «вау». Эти параметры доклеиваются при derive-режиме
         "derive_auto_normal": True,
         "derive_extra_vmt": {"$envmap": "env_cubemap", "$envmaptint": "[ .3 .3 .3 ]"},
     },
-    # ── Цвет блика ($phongalbedotint / $phongtint) ─────────────────────────────
-    # Блик цветом самой текстуры — главный приём металла в TF2 (468 материалов
+    # Цвет блика ($phongalbedotint / $phongtint)
+    # Блик цветом самой текстуры - главный приём металла в TF2 (468 материалов
     # Valve), либо одним цветом (285). $phongtint отключает окраску текстурой,
-    # поэтому режимы взаимоисключающие.
+    # поэтому режимы взаимоисключающие
     "phongcolor": {
         "vmt_only": True,
         "format": "VMT",
@@ -113,7 +113,7 @@ MATERIAL_MAPS = {
         "extra_vmt": {"$phong": "1"},
         "vmt_defaults": {"$phongfresnelranges": "[0 0.5 1]"},
         "numeric": (),
-        # Своё превью — шар с бликом (phongwarp.js).
+        # Своё превью - шар с бликом (phongwarp.js)
         "preview": "phong",
         "settings": {
             "tint": {"choices": ("keep", "albedo", "color"), "default": "keep"},
@@ -121,9 +121,9 @@ MATERIAL_MAPS = {
                             "show_if": {"tint": "albedo"}},
             "tint_color": {"color": True, "default": "#ffc864",
                            "show_if": {"tint": "color"}},
-            # Где ярче блик: $phongfresnelranges [центр середина край] — у
-            # каждого оружия TF2 свои (чаще всего [.25 .5 1]). Пусто — как у
-            # предмета.
+            # Где ярче блик: $phongfresnelranges [центр середина край] - у
+            # каждого оружия TF2 свои (чаще всего [.25 .5 1]). Пусто - как у
+            # предмета
             "fres_center": {"min": 0, "max": 10, "float": True, "step": 0.05,
                             "default": "", "display": 0.25},
             "fres_mid": {"min": 0, "max": 10, "float": True, "step": 0.05,
@@ -134,20 +134,20 @@ MATERIAL_MAPS = {
     },
     "envmapmask": {
         "suffix": "_envmask",
-        "format": "DXT1",          # маска отражения — оттенки серого, альфа не нужна
+        "format": "DXT1",          # маска отражения - оттенки серого, альфа не нужна
         "flags": (),
         "path_param": "$envmapmask",
         "extra_vmt": {},
-        # Маска работает только при включённом отражении — но окружение
-        # предмета не трогаем: у золотых оно своё (cubemap_gold001), и раньше
-        # карта подменяла его обычным env_cubemap.
+        # Маска работает только при включённом отражении - но окружение
+        # предмета не трогаем: у золотых оно своё (cubemap_gold001), и карта
+        # не должна подменять его обычным env_cubemap
         "vmt_defaults": {"$envmap": "env_cubemap"},
         "numeric": (),
         "needs_alpha": False,
-        # «Авто»: маска из яркости базы (металл/светлое блестит сильнее).
+        # «Авто»: маска из яркости базы (металл/светлое блестит сильнее)
         "derive_kind": "envmapmask",
         "preview": "env",
-        # Окружение, цвет, сила и френель отражения (вики Valve, $envmap).
+        # Окружение, цвет, сила и френель отражения (вики Valve, $envmap)
         "settings": {
             "env_cubemap": {"choices": ("keep", "map", "specular", "gold", "saxxy", "sunset"),
                             "default": "keep"},
@@ -156,11 +156,11 @@ MATERIAL_MAPS = {
             "env_fresnel": {"min": 0, "max": 100, "slider": True, "default": "", "display": 0},
         },
     },
-    # ── Rim light (параметрический, без своей текстуры) ───────────────────────
+    # Rim light (параметрический, без своей текстуры)
     # Обводка светом по контуру. Маску берёт из АЛЬФЫ $phongexponenttexture
-    # (если включена phong-карта), иначе применяется равномерно. Требует $phong.
+    # (если включена phong-карта), иначе применяется равномерно. Требует $phong
     "rimlight": {
-        "vmt_only": True,          # текстуры нет — пишем только параметры VMT
+        "vmt_only": True,          # текстуры нет - пишем только параметры VMT
         "format": "VMT",           # для бейджа в диалоге
         "path_param": None,
         "extra_vmt": {
@@ -173,34 +173,34 @@ MATERIAL_MAPS = {
         "numeric": ("$rimlightexponent", "$rimlightboost"),
         "preview": "rim",
         # Где светится обводка: везде или по маске (альфа Phong-карты +
-        # $rimmask 1; так у 1713 материалов Valve).
+        # $rimmask 1; так у 1713 материалов Valve)
         "settings": {
             "rim_mask": {"choices": ("all", "auto", "file"), "default": "all"},
             "rim_threshold": {"min": 0, "max": 255, "default": "",
                               "show_if": {"rim_mask": "auto"}},
             "rim_image": {"file": True, "show_if": {"rim_mask": "file"}},
         },
-        # Rim считается phong-шейдером, а phong требует $bumpmap — без карты
+        # Rim считается phong-шейдером, а phong требует $bumpmap - без карты
         # нополей эффект НЕ виден. Поэтому гарантируем нормаль (не затирая
-        # существующую): генерим из базы, если в VMT ещё нет $bumpmap.
+        # существующую): генерим из базы, если в VMT ещё нет $bumpmap
         "derive_auto_normal": True,
     },
-    # ── Warp-карты (градиенты-lookup) ────────────────────────────────────────
+    # Warp-карты (градиенты-lookup)
     # Это не обычные текстуры, а градиенты: lightwarp ремапит освещённость,
-    # phongwarp — цвет/градиент блика. Им нужны CLAMP (без тайлинга) + NOMIP
-    # (иначе градиент размывается мип-уровнями) и формат без DXT-бандинга.
+    # phongwarp - цвет/градиент блика. Им нужны CLAMP (без тайлинга) + NOMIP
+    # (иначе градиент размывается мип-уровнями) и формат без DXT-бандинга
     "phongwarp": {
         "suffix": "_phongwarp",
-        "format": "BGR888",            # градиент → без DXT-бандинга
+        "format": "BGR888",            # градиент -> без DXT-бандинга
         "flags": ("CLAMPS", "CLAMPT"), # без тайлинга
         "options": {"nomipmaps": True},
-        "size": (256, 256),            # 2D-lookup (fresnel × half-angle) — фикс. размер
+        "size": (256, 256),            # 2D-lookup (fresnel × half-angle) - фикс. размер
         "path_param": "$phongwarptexture",
         "extra_vmt": {"$phong": "1"},  # phongwarp работает только при $phong
         "vmt_defaults": {"$phongfresnelranges": "[0 0.5 1]"},
         "numeric": (),
         "needs_alpha": False,
-        # Градиент блика собирается в приложении (services/phongwarp.py).
+        # Градиент блика собирается в приложении (services/phongwarp.py)
         "generator": "phongwarp",
     },
     "lightwarp": {
@@ -208,31 +208,31 @@ MATERIAL_MAPS = {
         "format": "BGR888",
         "flags": ("CLAMPS", "CLAMPT"),
         "options": {"nomipmaps": True},
-        # $lightwarptexture в Source — 1D-рампа 256×1 (освещённость 0..1 берётся
+        # $lightwarptexture в Source - 1D-рампа 256×1 (освещённость 0..1 берётся
         # как координата X). Игнорируем глобальный размер сборки и всегда делаем
-        # 256×1, иначе ремап освещения искажается / раздувается память.
+        # 256×1, иначе ремап освещения искажается / раздувается память
         "size": (256, 1),
         "path_param": "$lightwarptexture",
         "extra_vmt": {},               # lightwarp работает самостоятельно
         "numeric": (),
         "needs_alpha": False,
         # Полоску можно собрать в приложении (services/lightwarp.py), а не
-        # рисовать файл 256×1 вручную.
+        # рисовать файл 256×1 вручную
         "generator": "lightwarp",
     },
 }
 
-# Порядок ОБРАБОТКИ при сборке (стабильный, не влияет на UI).
+# Порядок ОБРАБОТКИ при сборке (стабильный, не влияет на UI)
 MAP_ORDER = ("detail", "selfillum", "phongexp", "phongcolor", "envmapmask",
              "rimlight", "phongwarp", "lightwarp")
 
-# Порядок ОТОБРАЖЕНИЯ в диалоге (сетка 2 столбца, ряд за рядом).
+# Порядок ОТОБРАЖЕНИЯ в диалоге (сетка 2 столбца, ряд за рядом)
 MAP_DISPLAY_ORDER = ("phongexp", "phongcolor", "rimlight", "envmapmask",
                      "selfillum", "detail", "phongwarp", "lightwarp")
 
 
-#: Окружения отражения: свои у TF2 (сколько материалов Valve их берёт —
-#: по tf2_misc/tf2_textures, 2026-10-13).
+#: Окружения отражения: свои у TF2 (сколько материалов Valve их берёт -
+#: по tf2_misc/tf2_textures)
 CUBEMAPS = {
     "map": "env_cubemap",                         # окружение карты (1349)
     "specular": "cubemaps/cubemap_specular001",   # студийный блик (132)
@@ -243,7 +243,7 @@ CUBEMAPS = {
 
 
 def generator(name: str):
-    """Модуль конструктора карты (clean_params, write_png) по имени."""
+    """Модуль конструктора карты (clean_params, write_png) по имени"""
     if name == "lightwarp":
         from src.services import lightwarp
         return lightwarp
@@ -254,7 +254,7 @@ def generator(name: str):
 
 
 def clean_settings(cfg: dict, entry: dict) -> dict:
-    """Свои настройки карты из присланного — по правилам `settings`."""
+    """Свои настройки карты из присланного - по правилам `settings`"""
     import os
     import re
 
@@ -288,21 +288,21 @@ def clean_settings(cfg: dict, entry: dict) -> dict:
 
 def normalize_maps(maps) -> dict:
     """
-    Оставляет от присланного набора карт только осмысленное.
+    Оставляет от присланного набора карт только осмысленное
 
     Проверка нужна не «на всякий случай»: запись уходит в генератор VTF и в
     VMT, и мусорный ключ там превращается в сломанный материал. Правила те же,
     что складывает диалог приложения (``MaterialMapsDialog.get_maps``):
 
-      • параметрическая карта (rimlight) — только ``{"enabled": True}``;
-      • авто-режим — ``{"derive": True}`` и необязательный порог;
-      • файл — существующий путь в ``image``; у полоски из конструктора
+      • параметрическая карта (rimlight) - только ``{"enabled": True}``;
+      • авто-режим - ``{"derive": True}`` и необязательный порог;
+      • файл - существующий путь в ``image``; у полоски из конструктора
         рядом её параметры ``generate`` (чтобы открыть конструктор снова);
-      • ``{"mod": True}`` — карта, что уже стоит в VMT мода, остаётся как есть;
-      • ``{"off": True}`` — карту мода сняли: сборка уберёт её из VMT. Явная
+      • ``{"mod": True}`` - карта, что уже стоит в VMT мода, остаётся как есть;
+      • ``{"off": True}`` - карту мода сняли: сборка уберёт её из VMT. Явная
         отметка, а не отсутствие записи: «не трогал» и «снял» сборка обязана
         различать, и пустая запись в работе не сохраняется;
-      • числовые параметры — только те, что карта объявила в ``numeric``.
+      • числовые параметры - только те, что карта объявила в ``numeric``
     """
     import os
 
@@ -343,7 +343,7 @@ def normalize_maps(maps) -> dict:
         choices = cfg.get('choices', {})
         for param in cfg.get('numeric', ()):
             value = str(entry.get(param, '')).strip()
-            # Значение вне списка (старый «Multiply» = 7) — к умолчанию карты.
+            # Значение вне списка (старый «Multiply» = 7) - к умолчанию карты
             if value and (param not in choices or value in choices[param]):
                 clean[param] = value
         result[map_id] = clean
@@ -352,12 +352,12 @@ def normalize_maps(maps) -> dict:
 
 def detect_maps(vmt_text: str) -> dict:
     """
-    Карты, которые уже стоят в VMT (чужого мода): {map_id: запись}.
+    Карты, которые уже стоят в VMT (чужого мода): {map_id: запись}
 
-    Запись — как у страницы: ``{"mod": True, "texture": путь из VMT, …}`` и
-    значения числовых параметров карты, если VMT их задаёт. Rim light —
+    Запись - как у страницы: ``{"mod": True, "texture": путь из VMT, …}`` и
+    значения числовых параметров карты, если VMT их задаёт. Rim light -
     ``{"enabled": True}`` при ``$rimlight 1``. Читаем деревом (vmt_parse):
-    закомментированная строка картой не считается.
+    закомментированная строка картой не считается
     """
     from src.services import vmt_parse
 

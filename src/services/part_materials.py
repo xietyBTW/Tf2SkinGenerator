@@ -1,23 +1,23 @@
 """
-Часть модели как отдельный материал.
+Часть модели как отдельный материал
 
 Зачем. Эффекты VMT (блеск, свечение, прозрачность, анимация текстуры)
 действуют на материал целиком, а материал у оружия обычно один на всю модель.
 Чтобы светился только экран или блестел только ствол, часть надо сделать
 своим материалом: её треугольники получают в SMD новое имя, и у нового имени
-свой VMT.
+свой VMT
 
 Где это живёт. Разбор на части и покраска об этом не знают: часть остаётся
 частью своего материала, а пока у нового материала нет своей картинки, он
-берёт текстуру исходного вместе с её покраской. Своё у него — VMT, карты
-материала, настройки текстуры и, если человек положит, картинка.
+берёт текстуру исходного вместе с её покраской. Своё у него - VMT, карты
+материала, настройки текстуры и, если человек положит, картинка
 
-Как сборка находит треугольники. Номера треугольников части — номера в OBJ
+Как сборка находит треугольники. Номера треугольников части - номера в OBJ
 превью внутри материала. OBJ пишется из SMD подряд: основной файл, затем
 бодигруппы, и треугольник попадает в него, только если все три вершины
 разобрались (`SmdToObjService`). Здесь тот же обход тех же файлов тем же
 разбором, поэтому номер ведёт ровно к тому треугольнику. Список файлов OBJ
-помнит сам — строкой `# Sources:` в шапке.
+помнит сам - строкой `# Sources:` в шапке
 """
 
 from __future__ import annotations
@@ -32,29 +32,29 @@ from src.shared.logging_config import get_logger
 
 logger = get_logger(__name__)
 
-#: Строка шапки OBJ со списком исходных SMD (имена через «|», по порядку).
+#: Строка шапки OBJ со списком исходных SMD (имена через «|», по порядку)
 SOURCES_PREFIX = '# Sources:'
 
 _RE_TRIANGLES = re.compile(r"\btriangles\b(.*?)\bend\b", re.DOTALL | re.IGNORECASE)
 
 
-# ── Имена ─────────────────────────────────────────────────────────────────── #
+# Имена
 
 def model_name(material: str) -> str:
     """Имя материала, с которым его скомпилирует studiomdl: нижний регистр
-    (Source ищет материалы в нижнем регистре, а VPK — нет) и без точек
+    (Source ищет материалы в нижнем регистре, а VPK - нет) и без точек
     (studiomdl обрезает имя на первой точке). Так же делает и подмена
-    геометрии своей модели (SMDService._sanitize_material_name)."""
+    геометрии своей модели (SMDService._sanitize_material_name)"""
     return str(material or '').strip().lower().replace('.', '_')
 
 
 def next_name(base: str, taken: Iterable[str],
               busy: Callable[[str], bool] = lambda name: False) -> str:
     """Свободное имя нового материала: `<исходный>_part<N>`, по `model_name`
-    (у своей модели материалы бывают и с точками: `Material.001`).
+    (у своей модели материалы бывают и с точками: `Material.001`)
 
-    `busy` — имя занято не моделью: под ним лежит правка VMT прежнего
-    материала (правки хранятся по имени), и новый унаследовал бы её.
+    `busy` - имя занято не моделью: под ним лежит правка VMT прежнего
+    материала (правки хранятся по имени), и новый унаследовал бы её
     """
     used = {model_name(t) for t in taken}
     stem = model_name(base)
@@ -65,12 +65,12 @@ def next_name(base: str, taken: Iterable[str],
 
 
 def variant_name(part: str, base: str, variant: str, row: int) -> str:
-    """Имя части в строке скина, где исходный материал заменён вариантом.
+    """Имя части в строке скина, где исходный материал заменён вариантом
 
-    Хвост варианта переезжает к части: `c_x_blue` → `c_x_part1_blue`,
-    `hat_red`/`hat_blue` → `hat_red_part1_blue`. Так у части выходит
+    Хвост варианта переезжает к части: `c_x_blue` -> `c_x_part1_blue`,
+    `hat_red`/`hat_blue` -> `hat_red_part1_blue`. Так у части выходит
     `<часть>_blue`, а это имя сборка уже знает: карты материала она сама
-    дублирует в `<материал>_blue.vmt`.
+    дублирует в `<материал>_blue.vmt`
     """
     a, b = base.lower(), variant.lower()
     common = os.path.commonprefix([a, b])
@@ -78,10 +78,10 @@ def variant_name(part: str, base: str, variant: str, row: int) -> str:
     return f"{part}_{tail}" if tail else f"{part}_s{row}"
 
 
-# ── OBJ превью → SMD ─────────────────────────────────────────────────────── #
+# OBJ превью -> SMD
 
 def sources_of_obj(obj_path: str) -> List[str]:
-    """Имена SMD, из которых по порядку собран OBJ превью (пусто — не знаем)."""
+    """Имена SMD, из которых по порядку собран OBJ превью (пусто - не знаем)"""
     try:
         with open(obj_path, encoding='utf-8', errors='replace') as f:
             for _ in range(8):
@@ -97,15 +97,15 @@ def sources_of_obj(obj_path: str) -> List[str]:
 def rename_triangles(smd_text: str, material: str, names: Dict[int, str],
                      start: int = 0) -> Tuple[str, int, Counter]:
     """
-    Переименовывает материал у выбранных треугольников одного SMD.
+    Переименовывает материал у выбранных треугольников одного SMD
 
-    `names` — {номер треугольника `material` в OBJ превью: новое имя},
-    `start` — сколько таких треугольников было в предыдущих файлах. Все части
+    `names` - {номер треугольника `material` в OBJ превью: новое имя},
+    `start` - сколько таких треугольников было в предыдущих файлах. Все части
     одного материала идут ОДНИМ проходом: переименованный треугольник уже не
     `material`, и вторая часть, пройдя файл после первой, считала бы номера со
     сдвигом. Обход повторяет `SmdToObjService._parse_triangles_by_mat`:
     непустые строки секции, имя и три вершины подряд, в счёт идёт только
-    треугольник с тремя разобранными вершинами.
+    треугольник с тремя разобранными вершинами
 
     Returns:
         (новый текст, сколько треугольников `material` в файле,
@@ -118,12 +118,12 @@ def rename_triangles(smd_text: str, material: str, names: Dict[int, str],
 def rename_many(smd_text: str, jobs: Dict[str, Tuple[Dict[int, str], int]]
                 ) -> Tuple[str, Counter, Counter]:
     """
-    Переименовывает треугольники нескольких материалов одним проходом.
+    Переименовывает треугольники нескольких материалов одним проходом
 
-    `jobs` — {материал: ({номер его треугольника в OBJ превью: новое имя},
+    `jobs` - {материал: ({номер его треугольника в OBJ превью: новое имя},
     сколько его треугольников было в предыдущих файлах)}. Номер считается
     по ИСХОДНОМУ имени: часть, отданная родному материалу соседа
-    (`existing`), его нумерацию не сдвигает, а по очереди — сдвинула бы.
+    (`existing`), его нумерацию не сдвигает, а по очереди - сдвинула бы
 
     Returns:
         (новый текст, {(материал, новое имя): сколько треугольников},
@@ -155,7 +155,7 @@ def rename_many(smd_text: str, jobs: Dict[str, Tuple[Dict[int, str], int]]
 def _triangles(lines: Sequence[str]):
     """(номер строки имени, имя материала, вершины) каждого треугольника
     секции, который превью кладёт в OBJ: непустые строки, имя и три вершины
-    подряд, все три разобрались (`SmdToObjService._parse_triangles_by_mat`)."""
+    подряд, все три разобрались (`SmdToObjService._parse_triangles_by_mat`)"""
     from src.services.smd_to_obj_service import SmdToObjService
 
     filled = [i for i, ln in enumerate(lines) if ln.strip()]
@@ -167,7 +167,7 @@ def _triangles(lines: Sequence[str]):
 
 
 def material_counts(smd_text: str) -> Counter:
-    """Сколько треугольников каждого материала в SMD (тот же счёт, что у превью)."""
+    """Сколько треугольников каждого материала в SMD (тот же счёт, что у превью)"""
     m = _RE_TRIANGLES.search(smd_text)
     if not m:
         return Counter()
@@ -178,14 +178,14 @@ def material_counts(smd_text: str) -> Counter:
 def fits(spec: dict, total: int, weapon_end: int) -> bool:
     """
     Годятся ли номера треугольников материала части для модели, где у
-    исходного материала `total` треугольников и первые `weapon_end` из них —
-    само оружие, а дальше снаряд в оружии (граната Loch-n-Load).
+    исходного материала `total` треугольников и первые `weapon_end` из них -
+    само оружие, а дальше снаряд в оружии (граната Loch-n-Load)
 
-    Модель та же (`total` совпал) — годятся. Иначе годятся части самого
+    Модель та же (`total` совпал) - годятся. Иначе годятся части самого
     оружия, если оно не изменилось: снаряд идёт в конце, и его смена (своя
-    модель, «скрыт») номеров оружия не двигает. `late` части — сколько
-    треугольников было у оружия при выборе; у выбранных до того, как снаряд
-    появился в кадре, это весь `total`.
+    модель, «скрыт») номеров оружия не двигает. `late` части - сколько
+    треугольников было у оружия при выборе, у выбранных до того, как снаряд
+    появился в кадре, это весь `total`
     """
     was = int(spec.get('total') or 0)
     if not was or was == total:
@@ -199,14 +199,14 @@ def fits(spec: dict, total: int, weapon_end: int) -> bool:
 def specs_for_custom_model(specs: Sequence[dict], reference_smd: str,
                            keep_materials: bool) -> List[dict]:
     """
-    Спеки частей своей модели — в имена собранной модели.
+    Спеки частей своей модели - в имена собранной модели
 
     Превью нумерует треугольники по SMD человека, а сборка к этому шагу уже
-    перенесла их в reference-SMD разобранной модели (подмена геометрии) —
-    тем же порядком, но под другими именами: с «сохранить материалы» — под
-    `model_name` своих, без него — под материалом оригинала. Источник у части
-    один — этот reference-SMD; число треугольников (`total`) сверит, что
-    нумерация совпала, и иначе часть не перенесётся.
+    перенесла их в reference-SMD разобранной модели (подмена геометрии) -
+    тем же порядком, но под другими именами: с «сохранить материалы» - под
+    `model_name` своих, без него - под материалом оригинала. Источник у части
+    один - этот reference-SMD; число треугольников (`total`) сверит, что
+    нумерация совпала, и иначе часть не перенесётся
     """
     if keep_materials:
         base_of = model_name
@@ -217,15 +217,15 @@ def specs_for_custom_model(specs: Sequence[dict], reference_smd: str,
         except OSError:
             counts = Counter()
         model_main = counts.most_common(1)[0][0] if counts else ''
-        base_of = lambda raw: model_main    # noqa: E731 — вся геометрия на одном
+        base_of = lambda raw: model_main    # noqa: E731 - вся геометрия на одном
     source = os.path.basename(reference_smd)
     out = []
     for s in specs:
         if s.get('existing'):
             # Родной материал своей модели: «только форма» сливает их все в
-            # один — отдавать нечему; со своими материалами имя в модели
-            # очищено (Material.001 → material_001), иначе studiomdl
-            # обрежет его по точке и материал станет фиолетовым.
+            # один - отдавать нечему, со своими материалами имя в модели
+            # очищено (Material.001 -> material_001), иначе studiomdl
+            # обрежет его по точке и материал станет фиолетовым
             if not keep_materials:
                 continue
             s = {**s, 'name': model_name(str(s['name']))}
@@ -233,10 +233,10 @@ def specs_for_custom_model(specs: Sequence[dict], reference_smd: str,
     return out
 
 
-# ── Другая модель того же предмета ───────────────────────────────────────── #
+# Другая модель того же предмета
 
 def _uv_triangles(path: str) -> List[Tuple[str, tuple]]:
-    """(имя материала, UV трёх вершин) треугольников SMD в счёте превью."""
+    """(имя материала, UV трёх вершин) треугольников SMD в счёте превью"""
     try:
         with open(path, 'r', encoding='utf-8', errors='replace') as f:
             text = f.read()
@@ -269,7 +269,7 @@ def _finite(tri) -> bool:
 
 
 class _UvGrid:
-    """Треугольники в сетке UV: какие накрывают точку текстуры."""
+    """Треугольники в сетке UV: какие накрывают точку текстуры"""
 
     def __init__(self, tris: Sequence[tuple], cells: int = 64):
         good = [t for t in tris if _finite(t)]
@@ -298,7 +298,7 @@ class _UvGrid:
                 if _covers(point, self.tris[i])]
 
     def nearest(self, point) -> List[int]:
-        """Треугольники с ближайшим к точке центром в UV (все, если поровну)."""
+        """Треугольники с ближайшим к точке центром в UV (все, если поровну)"""
         def dist(t):
             if not _finite(t):
                 return math.inf
@@ -309,14 +309,14 @@ class _UvGrid:
         return [i for i, d in enumerate(dists) if d <= best + 1e-12] if best < math.inf else []
 
 
-#: Часть по текстуре не отличить: UV наложены.
+#: Часть по текстуре не отличить: UV наложены
 _CLASH = object()
 
 
 def _part_of(grid: _UvGrid, source: Sequence[tuple], tri: tuple):
     """
     Решение для треугольника другой модели: имя части, None (остаётся в
-    исходном материале) или _CLASH.
+    исходном материале) или _CLASH
 
     Голосуют четыре точки его UV: центр и точки у вершин. Точка, которую
     накрывают треугольники с разным решением, не голосует: так бывает на
@@ -325,7 +325,7 @@ def _part_of(grid: _UvGrid, source: Sequence[tuple], tri: tuple):
     голосов решает первая проголосовавшая точка, центр раньше всех. Точки
     накрыты, но не проголосовала ни одна: UV наложены, как у зеркальных
     половин, и часть не отличить. Не накрыта ни одна: решает ближайший
-    треугольник, если такой один.
+    треугольник, если такой один
     """
     if not _finite(tri):
         return None
@@ -350,7 +350,7 @@ def _part_of(grid: _UvGrid, source: Sequence[tuple], tri: tuple):
 
 def _body_smds(qc_path: str) -> List[str]:
     """SMD, которые QC собирает в модель: `$body`/`$model` и `studio` групп.
-    Без LOD (`replacemodel`, сборка их всё равно вырезает) и физики."""
+    Без LOD (`replacemodel`, сборка их всё равно вырезает) и физики"""
     try:
         with open(qc_path, 'r', encoding='utf-8', errors='replace') as f:
             text = f.read()
@@ -363,7 +363,7 @@ def _body_smds(qc_path: str) -> List[str]:
 
 def _projectile_files(qc_path: str) -> set:
     """Имена SMD снарядов в оружии из QC (нижний регистр): в OBJ превью их
-    треугольники идут после треугольников самого оружия."""
+    треугольники идут после треугольников самого оружия"""
     from src.services.model_build_service import ModelBuildService
 
     out = set()
@@ -377,19 +377,19 @@ def _projectile_files(qc_path: str) -> set:
 def specs_for_other_model(specs: Sequence[dict], source_folder: str,
                           qc_path: str) -> Tuple[List[dict], List[str]]:
     """
-    Части, выбранные на одной модели предмета, — для другой его модели с той
-    же текстурой (остальные классы мультиклассовой шапки).
+    Части, выбранные на одной модели предмета, - для другой его модели с той
+    же текстурой (остальные классы мультиклассовой шапки)
 
     Номера треугольников не переносятся: сетка у модели класса своя (у шляпы
     Билла скаута и солдата общих треугольников 602 из 668, и порядок другой).
-    Общая у них текстура, а часть — её участок. Поэтому треугольник модели
+    Общая у них текстура, а часть - её участок. Поэтому треугольник модели
     класса уходит в ту часть, чьи треугольники на исходной модели накрывают
     его в UV (_part_of). Если UV наложены (зеркальные половины) и часть по
-    текстуре не отличить, части этого материала не переносятся вовсе.
+    текстуре не отличить, части этого материала не переносятся вовсе
 
-    `source_folder` — папка исходной модели, где части уже стали своими
+    `source_folder` - папка исходной модели, где части уже стали своими
     материалами (apply_to_model). Returns: (спеки для модели `qc_path`,
-    имена частей, которые перенести не вышло).
+    имена частей, которые перенести не вышло)
     """
     folder = os.path.dirname(qc_path)
     smds = [f for f in _body_smds(qc_path) if os.path.isfile(os.path.join(folder, f))]
@@ -403,8 +403,8 @@ def specs_for_other_model(specs: Sequence[dict], source_folder: str,
         # Части, отданные родному материалу: в разобранной исходной модели они
         # носят его имя вместе с его собственными треугольниками, и по UV их
         # уже не отличить. Без них в сетке UV пусто там, где они лежали, и
-        # треугольники класса ушли бы к ближайшему соседу — в чужую часть.
-        # Поэтому у такого исходного не переносится ничего.
+        # треугольники класса ушли бы к ближайшему соседу - в чужую часть.
+        # Поэтому у такого исходного не переносится ничего
         missed += [str(s['name']) for s in groups.pop(base)]
 
     out: List[dict] = []
@@ -447,16 +447,15 @@ def add_part_columns(rows: List[List[str]],
                      parts: Sequence[Tuple[str, str]]
                      ) -> Tuple[List[List[str]], Dict[str, str]]:
     """
-    Добавляет части столбцами в строки `$texturegroup`.
+    Добавляет части столбцами в строки `$texturegroup`
 
-    `parts` — пары (часть, исходный материал). В строке, где исходный
+    `parts` - пары (часть, исходный материал). В строке, где исходный
     материал заменён вариантом (BLU, австралий, стиль), часть получает свой
-    вариант (см. variant_name). Исходного материала в группе нет — часть в
-    неё не добавляется: материал вне группы одинаков во всех скинах, и так
-    было с ним и раньше.
+    вариант (см. variant_name). Исходного материала в группе нет - часть в
+    неё не добавляется: материал вне группы одинаков во всех скинах
 
     Returns:
-        (новые строки, {имя части в строке: материал, чей VMT она берёт}).
+        (новые строки, {имя части в строке: материал, чей VMT она берёт})
     """
     rows = [list(r) for r in rows]
     variants: Dict[str, str] = {}
@@ -480,24 +479,24 @@ def add_part_columns(rows: List[List[str]],
 def apply_to_model(qc_path: str, specs: Sequence[dict],
                    warn: Callable[[str], None] = lambda message: None) -> Dict[str, str]:
     """
-    Делает части своими материалами в разобранной модели перед компиляцией.
+    Делает части своими материалами в разобранной модели перед компиляцией
 
-    Переписывает SMD рядом с QC и `$texturegroup` в самом QC. `specs` —
-    [{name, base, tris, total, sources}] (см. AppSession._part_material_specs).
+    Переписывает SMD рядом с QC и `$texturegroup` в самом QC. `specs` -
+    [{name, base, tris, total, sources}] (см. AppSession._part_material_specs)
 
     Номера треугольников годятся только для той модели, на которой выбирали
     части. Нет какого-то из её SMD или у материала не столько треугольников,
-    сколько было тогда (`total`), — части этого материала не переносятся
+    сколько было тогда (`total`), - части этого материала не переносятся
     вовсе, и `warn` говорит об этом: по чужим номерам они легли бы не на те
-    треугольники.
+    треугольники
 
     Спека с `existing` отдаёт треугольники родному материалу модели: им
-    только меняется имя (в его написании), столбца и VMT у него не будет —
-    они у материала уже есть.
+    только меняется имя (в его написании), столбца и VMT у него не будет -
+    они у материала уже есть
 
     Returns:
-        {имя материала части: материал, чей VMT она берёт} — по нему сборка
-        пишет VMT частей.
+        {имя материала части: материал, чей VMT она берёт} - по нему сборка
+        пишет VMT частей
     """
     folder = os.path.dirname(qc_path)
     groups: Dict[str, List[dict]] = {}
@@ -509,13 +508,13 @@ def apply_to_model(qc_path: str, specs: Sequence[dict],
     # Каждый файл читается один раз и переписывается одним проходом по всем
     # материалам (rename_many): родной материал, получивший части соседа,
     # сам бывает исходным, и посчитанный после чужого переименования он
-    # «не совпал» бы с моделью — его части молча пропадали.
+    # «не совпал» бы с моделью - его части молча пропадали
     originals: Dict[str, str] = {}
     jobs: Dict[str, Dict[str, Tuple[Dict[int, str], int]]] = {}
     chosen: Dict[str, List[dict]] = {}
     for base, group in groups.items():
         # Самый длинный список: выбранные до того, как снаряд в оружии попал в
-        # кадр, помнят OBJ без его SMD, а нумерация у всех одна — снаряд в конце.
+        # кадр, помнят OBJ без его SMD, а нумерация у всех одна - снаряд в конце
         sources = max((s.get('sources') or [] for s in group), key=len)
         paths = [os.path.join(folder, os.path.basename(src)) for src in sources]
         texts: List[Tuple[str, str]] = []
@@ -525,8 +524,8 @@ def apply_to_model(qc_path: str, specs: Sequence[dict],
                     with open(path, 'r', encoding='utf-8', errors='replace') as f:
                         originals[path] = f.read()
                 texts.append((path, originals[path]))
-        # Сколько треугольников у материала и сколько из них — само оружие:
-        # снаряд в оружии (своя модель) мог смениться после выбора (fits).
+        # Сколько треугольников у материала и сколько из них - само оружие:
+        # снаряд в оружии (своя модель) мог смениться после выбора (fits)
         counts = [material_counts(text)[base] for _, text in texts]
         seen = sum(counts)
         weapon = sum(n for (path, _), n in zip(texts, counts)
@@ -535,7 +534,7 @@ def apply_to_model(qc_path: str, specs: Sequence[dict],
         for s in group:
             if s not in good:
                 logger.warning(f"[ЧАСТИ] {base}: SMD {len(texts)}/{len(paths)}, "
-                               f"треугольников {seen} при выборе {s.get('total')} — "
+                               f"треугольников {seen} при выборе {s.get('total')} - "
                                f"часть {s['name']} пропущена")
                 warn(f"Материал части «{str(s['name']).lower()}» не собран: "
                      f"модель не та, на которой выбирали части")
@@ -563,7 +562,7 @@ def apply_to_model(qc_path: str, specs: Sequence[dict],
                     applied.append((name, base))
                 logger.info(f"[ЧАСТИ] {name}: {renamed[(base, name)]} треугольников из {base}")
             else:
-                logger.warning(f"[ЧАСТИ] {name}: треугольники не найдены — часть пропущена")
+                logger.warning(f"[ЧАСТИ] {name}: треугольники не найдены - часть пропущена")
 
     variants: Dict[str, str] = {}
     if not applied:
@@ -581,16 +580,16 @@ def apply_to_model(qc_path: str, specs: Sequence[dict],
 
 
 def _target(spec: dict) -> str:
-    """Имя, под которое уходят треугольники: у материала части — его (они
-    все в нижнем регистре), у родного материала — как он записан в модели."""
+    """Имя, под которое уходят треугольники: у материала части - его (они
+    все в нижнем регистре), у родного материала - как он записан в модели"""
     name = str(spec['name'])
     return name if spec.get('existing') else name.lower()
 
 
-# ── VMT ───────────────────────────────────────────────────────────────────── #
+# VMT
 
 def _spelled(key: str) -> str:
-    """Ключ для записи: разбор хранит его без «$» и в нижнем регистре."""
+    """Ключ для записи: разбор хранит его без «$» и в нижнем регистре"""
     return key if key.startswith('%') else f'${key}'
 
 
@@ -603,7 +602,7 @@ def _drop_key(text: str, key: str) -> str:
 #: Текстуры VMT, которые ложатся по развёртке модели (и ключи, без них
 #: бессмысленные). У своей модели снаряда развёртка своя: карта нормалей
 #: оружия легла бы на неё пятнами. Lightwarp, envmap и маска блеска
-#: killstreak от развёртки не зависят — они остаются.
+#: killstreak от развёртки не зависят - они остаются
 UV_BOUND_KEYS = ('bumpmap', 'bumpframe', 'bumptransform', 'normalmapalphaenvmapmask',
                  'phongexponenttexture', 'envmapmask', 'envmapmaskframe',
                  'envmapmasktransform', 'selfillummask', 'detail', 'detailscale',
@@ -612,7 +611,7 @@ UV_BOUND_KEYS = ('bumpmap', 'bumpframe', 'bumptransform', 'normalmapalphaenvmapm
 
 
 def without_uv_maps(vmt_text: str) -> str:
-    """VMT без текстур, привязанных к развёртке исходной модели (UV_BOUND_KEYS)."""
+    """VMT без текстур, привязанных к развёртке исходной модели (UV_BOUND_KEYS)"""
     from src.services import vmt_parse
 
     present = vmt_parse.parse(vmt_text).root.params
@@ -624,7 +623,7 @@ def without_uv_maps(vmt_text: str) -> str:
 
 
 def _proxies_span(text: str) -> Optional[Tuple[int, int]]:
-    """Начало и конец (включительно с «}») блока Proxies, если он есть."""
+    """Начало и конец (включительно с «}») блока Proxies, если он есть"""
     from src.services.vmt_effects import _PROXIES_RE, _match_brace
     m = _PROXIES_RE.search(text)
     if not m:
@@ -652,21 +651,21 @@ def _basetexture(vmt_text: str) -> str:
 def basetexture_changed(original: str, edited: str) -> bool:
     """Человек сам сменил $basetexture в правке части. Это выбор (белая основа
     под свечение, чужая текстура игры), а не устаревший путь: сборка его не
-    подменяет, как и у главного материала (texture_build.game_source.basetexture_chosen)."""
+    подменяет, как и у главного материала (texture_build.game_source.basetexture_chosen)"""
     chosen = _basetexture(edited)
     return bool(chosen) and chosen != _basetexture(original)
 
 
 def overlay_vmt(base: str, original: str, edited: str) -> str:
     """
-    Переносит на VMT другого скина то, что человек поменял в VMT части.
+    Переносит на VMT другого скина то, что человек поменял в VMT части
 
-    `original` — с чего человек начинал правку (VMT исходного материала),
-    `edited` — что получилось. Изменённые и добавленные параметры ставятся в
+    `original` - с чего человек начинал правку (VMT исходного материала),
+    `edited` - что получилось. Изменённые и добавленные параметры ставятся в
     `base`, удалённые убираются, блок Proxies заменяется целиком, если его
     трогали. $basetexture переносится, только если человек выбрал его сам
-    (basetexture_changed): иначе текстура у каждого скина своя (у синего —
-    синяя, у австралия — золото).
+    (basetexture_changed): иначе текстура у каждого скина своя (у синего -
+    синяя, у австралия - золото)
     """
     from src.services import vmt_parse
     from src.services.vmt_effects import _set_key

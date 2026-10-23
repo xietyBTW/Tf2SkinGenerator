@@ -41,7 +41,7 @@ def setup_logging(
     if console_output and sys.stdout is not None:
         # Консоль Windows живёт в cp1251: стрелки и галочки из сообщений
         # роняли handler трассировкой на каждую запись. Знак вместо символа
-        # дешевле, чем чистить все сообщения.
+        # дешевле, чем чистить все сообщения
         try:
             sys.stdout.reconfigure(errors='replace')
         except (AttributeError, ValueError):
@@ -51,7 +51,7 @@ def setup_logging(
         console_handler.setFormatter(formatter)
         logger.addHandler(console_handler)
     
-    # Файловый handler (если указан) — с ротацией, чтобы лог не рос бесконечно
+    # Файловый handler (если указан) - с ротацией, чтобы лог не рос бесконечно
     if log_file:
         from logging.handlers import RotatingFileHandler
         log_file.parent.mkdir(parents=True, exist_ok=True)
@@ -64,7 +64,7 @@ def setup_logging(
         logger.addHandler(file_handler)
     
     # Кольцо для консоли в окне: те же записи, что уходят в файл, но их можно
-    # показать человеку прямо в приложении (см. src/shared/log_bridge.py).
+    # показать человеку прямо в приложении (см. src/shared/log_bridge.py)
     from src.shared.log_bridge import attach as attach_ring
     attach_ring()
 
@@ -75,12 +75,10 @@ def setup_logging(
 
 def set_debug(enabled: bool) -> None:
     """
-    Включает или гасит уровень DEBUG на ходу.
+    Включает или гасит уровень DEBUG на ходу
 
-    Нужно настройке «Режим отладки»: раньше она управляла только тем, сохранять
-    ли временные папки сборки, а уровень логирования был зашит в main.py как
-    INFO — то есть 147 вызовов logger.debug молчали при любом её положении.
-    Перезапуск для смены уровня не нужен: логгер один и живёт весь сеанс.
+    Нужно настройке «Режим отладки», иначе logger.debug молчал бы при любом её
+    положении. Перезапуск для смены уровня не нужен: логгер один и живёт весь сеанс
     """
     logging.getLogger('tf2_skin_generator').setLevel(
         logging.DEBUG if enabled else logging.INFO)

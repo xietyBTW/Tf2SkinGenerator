@@ -1,14 +1,14 @@
 """
-Каталог анимаций класса: поиск последовательности для оружия и действия.
+Каталог анимаций класса: поиск последовательности для оружия и действия
 
 Имена последовательностей наружу не выводятся (`sg_idle`, `db_idle`, `ss_idle`),
 зато у каждой в QC стоит активность. Какую активность играть, решает тот же
-путь, что в движке, и проверяется именно он — там, где легко ошибиться:
+путь, что в движке, и проверяется именно он - там, где легко ошибиться:
 
   * какую БАЗОВУЮ активность шлёт оружие (кулаки - HITLEFT, ближний бой -
     HITCENTER, стрелковое - PRIMARYATTACK);
   * подмена из items_game - окончательный ответ, запасных наборов нет;
-  * таблица ролей движка (`s_viewmodelacttable`) с её исключениями.
+  * таблица ролей движка (`s_viewmodelacttable`) с её исключениями
 """
 
 import unittest
@@ -18,7 +18,7 @@ from tempfile import TemporaryDirectory
 from src.services import weapon_anim_catalog as cat
 from src.services.weapon_anim_catalog import Action
 
-# Активности взяты из настоящих QC моделей анимаций TF2.
+# Активности взяты из настоящих QC моделей анимаций TF2
 QC = '''
 $modelname "weapons/c_models/c_test_animations.mdl"
 
@@ -130,7 +130,7 @@ class CatalogTests(unittest.TestCase):
     def tearDown(self):
         self._tmp.cleanup()
 
-    # ── Разбор ────────────────────────────────────────────────────────────── #
+    # Разбор
 
     def test_sequence_fields_are_read(self):
         seq = self.catalog.by_name["ss_idle"]
@@ -141,7 +141,7 @@ class CatalogTests(unittest.TestCase):
         self.assertTrue(seq.exists)
 
     def test_sequence_without_activity_is_kept_but_not_indexed(self):
-        """`r_handposes` есть у всех классов и не является действием оружия."""
+        """`r_handposes` есть у всех классов и не является действием оружия"""
         self.assertIn("r_handposes", self.catalog.by_name)
         self.assertEqual(self.catalog.by_name["r_handposes"].activity, "")
         self.assertNotIn("", self.catalog.by_activity)
@@ -154,7 +154,7 @@ class CatalogTests(unittest.TestCase):
             self.assertIsNone(cat.load(empty))
         self.assertIsNone(cat.load(""))
 
-    # ── Поиск: путь движка ────────────────────────────────────────────────── #
+    # Поиск: путь движка
 
     def _find(self, action, slot, **kw):
         found = self.catalog.find(cat.WeaponProfile(slot=slot, **kw), action)
@@ -164,7 +164,7 @@ class CatalogTests(unittest.TestCase):
         self.assertEqual(self._find(Action.IDLE, "primary"), "sg_idle")
 
     def test_numbered_role_is_taken_literally(self):
-        """item2 - самостоятельная роль (Неумолимая сила)."""
+        """item2 - самостоятельная роль (Неумолимая сила)"""
         self.assertEqual(self._find(Action.IDLE, "item2"), "db_idle")
 
     def test_reload_activity_has_no_vm_part(self):
@@ -172,16 +172,16 @@ class CatalogTests(unittest.TestCase):
                          "sg_reload_start")
 
     def test_melee_does_not_borrow_the_all_class_set(self):
-        """Чего у роли нет, того нет: всеклассовый набор - чужое оружие.
+        """Чего у роли нет, того нет: всеклассовый набор - чужое оружие
 
-        Так Кусай-хлеб получал на удар замах сковородой.
+        Так Кусай-хлеб получал на удар замах сковородой
         """
         self.assertIsNone(self._find(Action.IDLE, "melee"))
         self.assertEqual(self._find(Action.IDLE, "melee_allclass"),
                          "melee_allclass_idle")
 
     def test_building_plays_the_base_activity(self):
-        """У роли building строк в таблице нет: саппер шпиона - ACT_VM_IDLE."""
+        """У роли building строк в таблице нет: саппер шпиона - ACT_VM_IDLE"""
         self.assertEqual(self._find(Action.IDLE, "building"), "c_sapper_idle")
 
     def test_engineer_toolbox_comes_from_the_replacement(self):
@@ -190,11 +190,11 @@ class CatalogTests(unittest.TestCase):
                          "box_idle")
 
     def test_sequence_whose_smd_is_gone_is_not_offered(self):
-        """Иначе поза бы «нашлась», а файла под ней не оказалось."""
+        """Иначе поза бы «нашлась», а файла под ней не оказалось"""
         self.assertIsNone(self._find(Action.IDLE, "secondary"))
 
     def test_slot_that_is_not_held_in_hands_resolves_to_nothing(self):
-        """Щиты, ботинки, тело шпиона: базовая ACT_VM_IDLE нашлась бы - саппер."""
+        """Щиты, ботинки, тело шпиона: базовая ACT_VM_IDLE нашлась бы - саппер"""
         for slot in ("force_not_used", "playerskin", ""):
             self.assertIsNone(self._find(Action.IDLE, slot), slot)
 
@@ -202,20 +202,20 @@ class CatalogTests(unittest.TestCase):
         self.assertIsNone(self._find(Action.RELOAD, "item2"))
 
     def test_actions_for_lists_what_the_weapon_can_do(self):
-        """Из этого списка интерфейс потом строит выбор анимации."""
+        """Из этого списка интерфейс потом строит выбор анимации"""
         primary = cat.WeaponProfile(slot="primary", loadout_slot="primary")
         self.assertEqual(set(self.catalog.actions_for(primary)),
                          {Action.IDLE, Action.RELOAD_START, Action.INSPECT_IDLE})
         self.assertEqual(set(self.catalog.actions_for(cat.WeaponProfile(slot="item2"))),
                          {Action.IDLE})
 
-    # ── Осмотр: по слоту снаряжения ───────────────────────────────────────── #
+    # Осмотр: по слоту снаряжения
 
     def test_inspect_follows_the_loadout_slot(self):
-        """Гранатомёт: роль secondary, слот снаряжения primary.
+        """Гранатомёт: роль secondary, слот снаряжения primary
 
         Игра берёт осмотр по слоту СНАРЯЖЕНИЯ (GetInspectActivity), и по роли
-        гранатомёт получал осмотр липучкомёта - модель разваливалась.
+        гранатомёт получал осмотр липучкомёта - модель разваливалась
         """
         self.assertEqual(self._find(Action.INSPECT_IDLE, "secondary",
                                     loadout_slot="primary"),
@@ -226,31 +226,31 @@ class CatalogTests(unittest.TestCase):
                          "sg_idle")
 
     def test_no_inspect_outside_the_games_table(self):
-        """ПДА осматривать нельзя (`CanInspect`)."""
+        """ПДА осматривать нельзя (`CanInspect`)"""
         self.assertIsNone(cat.activity_for(
             cat.WeaponProfile(slot="pda", loadout_slot="pda"), Action.INSPECT_IDLE))
 
-    # ── Подмена активностей из items_game ─────────────────────────────────── #
+    # Подмена активностей из items_game
 
     def test_replacement_wins_over_the_role(self):
-        """У куная роль melee, а играет он набор ITEM2."""
+        """У куная роль melee, а играет он набор ITEM2"""
         kunai = {"ACT_VM_IDLE": "ACT_ITEM2_VM_IDLE"}
         self.assertEqual(self._find(Action.IDLE, "melee", replacement=kunai),
                          "db_idle")   # первая последовательность ACT_ITEM2_VM_IDLE
 
     def test_replacement_that_points_at_nothing_gives_nothing(self):
-        """Подмена - окончательный ответ игры: запасного набора она не ищет."""
+        """Подмена - окончательный ответ игры: запасного набора она не ищет"""
         nowhere = {"ACT_VM_IDLE": "ACT_NOSUCH_VM_IDLE"}
         self.assertIsNone(self._find(Action.IDLE, "primary", replacement=nowhere))
 
     def test_replacement_key_may_carry_the_slot(self):
-        """Осмотр подменяется ключом СО слотом: ACT_MELEE_VM_INSPECT_IDLE."""
+        """Осмотр подменяется ключом СО слотом: ACT_MELEE_VM_INSPECT_IDLE"""
         kunai = {"ACT_MELEE_VM_INSPECT_IDLE": "ACT_ITEM2_VM_INSPECT_IDLE"}
         self.assertEqual(cat.activity_for(
             cat.WeaponProfile(slot="melee", loadout_slot="melee", replacement=kunai),
             Action.INSPECT_IDLE), "ACT_ITEM2_VM_INSPECT_IDLE")
 
-    # ── Удары: какую активность шлёт само оружие ──────────────────────────── #
+    # Удары: какую активность шлёт само оружие
 
     def test_melee_attack_is_hitcenter_and_crit_is_swinghard(self):
         knife = cat.WeaponProfile(slot="melee", loadout_slot="melee")
@@ -260,7 +260,7 @@ class CatalogTests(unittest.TestCase):
         self.assertIsNone(cat.activity_for(knife, Action.ALT_FIRE))
 
     def test_fists_punch_left_and_right(self):
-        """Кусай-хлеб: левый удар, правый, крит - и всё через подмену."""
+        """Кусай-хлеб: левый удар, правый, крит - и всё через подмену"""
         bread = cat.WeaponProfile(
             slot="melee", loadout_slot="melee", item_class="tf_weapon_fists",
             replacement={"ACT_VM_HITLEFT": "ACT_BREADGLOVES_VM_HITLEFT",
@@ -274,7 +274,7 @@ class CatalogTests(unittest.TestCase):
                          "ACT_BREADGLOVES_VM_SWINGHARD")
 
     def test_stock_fists_keep_the_untranslated_hit(self):
-        """HITLEFT в таблице ролей нет - у стоковых кулаков он так и остаётся."""
+        """HITLEFT в таблице ролей нет - у стоковых кулаков он так и остаётся"""
         fists = cat.WeaponProfile(slot="melee", loadout_slot="melee",
                                   item_class="tf_weapon_fists")
         self.assertEqual(cat.activity_for(fists, Action.FIRE), "ACT_VM_HITLEFT")
@@ -286,7 +286,7 @@ class CatalogTests(unittest.TestCase):
         self.assertIsNone(cat.activity_for(gun, Action.CRIT))
 
     def test_buff_banner_translates_itself_to_item1(self):
-        """Горн с ролью melee играет ITEM1, а не лопату."""
+        """Горн с ролью melee играет ITEM1, а не лопату"""
         horn = cat.WeaponProfile(slot="melee", loadout_slot="secondary",
                                  item_class="tf_weapon_buff_item")
         self.assertEqual(cat.activity_for(horn, Action.IDLE), "ACT_ITEM1_VM_IDLE")
@@ -302,13 +302,13 @@ class CatalogTests(unittest.TestCase):
         self.assertEqual(cat.activity_for(katana, Action.IDLE), "ACT_MELEE_VM_IDLE")
 
     def test_spy_watch_uses_the_offhand_set(self):
-        """Часы невидимости - «вторая рука» шпиона."""
+        """Часы невидимости - «вторая рука» шпиона"""
         self.assertEqual(self._find(Action.IDLE, "watch"), "offhand_idle")
 
-    # ── Таблица ролей ─────────────────────────────────────────────────────── #
+    # Таблица ролей
 
     def test_role_table_rows(self):
-        """Строки `s_viewmodelacttable`, где легко ошибиться."""
+        """Строки `s_viewmodelacttable`, где легко ошибиться"""
         rows = [
             ("melee", "ACT_VM_HITCENTER", "ACT_MELEE_VM_HITCENTER"),
             ("item2", "ACT_VM_HITCENTER", "ACT_VM_HITCENTER"),

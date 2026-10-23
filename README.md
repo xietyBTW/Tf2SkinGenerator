@@ -42,9 +42,15 @@ Both versions update from inside the app: **Settings → Check for updates**. Yo
 
 ## First launch
 
-1. The app looks for TF2 through the Steam registry entries and Steam's library list, including libraries on other drives. If it finds the game, it shows the path and asks you to save it. If not, paste the path to the folder that contains `tf` and `bin`, for example `D:\Steam\steamapps\common\Team Fortress 2`.
-2. A short tutorial starts on top of the interface. It walks through one skin from start to finish. You can skip it and replay it later from **Settings → Replay the tutorial**.
-3. The interface language is English by default. Russian is available in **Settings → Application language**.
+A welcome window sets up the essentials in five short steps:
+
+1. **Language and theme.** The theme changes right away; the language reloads the page and the window picks up from the next step.
+2. **Game folder.** The app looks for TF2 through the Steam registry entries and its library list, including other drives. If it can't find it, point it to the folder that contains `tf` and `bin`, for example `D:\Steam\steamapps\common\Team Fortress 2`.
+3. **Where mods go:** the app folder, straight into the game's `tf\custom`, or a folder of your own.
+4. **sv_pure bypass:** `console` or `vgui`, see [Casual servers and sv_pure](#casual-servers-and-sv_pure).
+5. **Tutorial:** a short tour through one skin from start to finish, or start without it. You can take it later from **Settings → Replay the tutorial**.
+
+Every step can be skipped, and all of it can be changed later in **Settings**.
 
 ## A skin in five steps
 

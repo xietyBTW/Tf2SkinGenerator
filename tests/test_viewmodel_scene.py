@@ -1,10 +1,10 @@
 """
-Сцена вида от первого лица: руки и оружие в одном OBJ.
+Сцена вида от первого лица: руки и оружие в одном OBJ
 
 Проверяется склейка: две модели с РАЗНЫМИ скелетами и разными позами попадают
 в один файл, каждая по своей матрице, а материалы остаются разведены по частям
-— по ним панель потом решает, что пользователю можно править (оружие), а что
-показывается как есть (руки).
+- по ним панель потом решает, что пользователю можно править (оружие), а что
+показывается как есть (руки)
 """
 
 import math
@@ -19,7 +19,7 @@ HALF_PI = math.pi / 2
 
 
 def _smd(bones, frame=None, triangles=()) -> str:
-    """SMD из (имя, родитель), позы кадра и треугольников (материал, вершины)."""
+    """SMD из (имя, родитель), позы кадра и треугольников (материал, вершины)"""
     ids = {name: i for i, (name, _p) in enumerate(bones)}
     lines = ["version 1", "nodes"]
     for name, parent in bones:
@@ -57,7 +57,7 @@ class SceneTests(unittest.TestCase):
         self.dir = Path(self._tmp.name)
         self.obj = self.dir / "scene.obj"
 
-        # Руки: кисть в 10 по +Y, точка крепления оружия ещё в 2 дальше.
+        # Руки: кисть в 10 по +Y, точка крепления оружия ещё в 2 дальше
         self.arms = self.dir / "c_test_arms.smd"
         self.arms.write_text(_smd(
             [("root", None), ("bip_hand_R", "root"), ("weapon_bone", "bip_hand_R")],
@@ -68,7 +68,7 @@ class SceneTests(unittest.TestCase):
                              ((0, 11, 0), "bip_hand_R")])],
         ), encoding="utf-8")
 
-        # Та же рука в анимации: корень повёрнут на 90° вокруг Z.
+        # Та же рука в анимации: корень повёрнут на 90° вокруг Z
         self.anim = self.dir / "anim.smd"
         self.anim.write_text(_smd(
             [("root", None), ("bip_hand_R", "root"), ("weapon_bone", "bip_hand_R")],
@@ -77,7 +77,7 @@ class SceneTests(unittest.TestCase):
              "weapon_bone": ((0, 2, 0), (0, 0, 0))},
         ), encoding="utf-8")
 
-        # Оружие: своя кость weapon_bone в начале координат.
+        # Оружие: своя кость weapon_bone в начале координат
         self.weapon = self.dir / "c_test_reference.smd"
         self.weapon.write_text(_smd(
             [("weapon_bone", None)],
@@ -107,11 +107,11 @@ class SceneTests(unittest.TestCase):
         self.assertEqual(sorted(_obj_groups(self.obj)), ["c_test", "test_hands"])
 
     def test_carrier_joins_the_scene_but_not_the_editable_list(self):
-        """Праздничное оружие — гирлянда, надетая на обычную пушку.
+        """Праздничное оружие - гирлянда, надетая на обычную пушку
 
         Пушка в кадре нужна (иначе огоньки висят в пустой руке), но правит
         человек гирлянду: материалы носителя идут отдельным списком и в
-        `weapon_materials` не попадают.
+        `weapon_materials` не попадают
         """
         carrier = self.dir / "c_carrier_reference.smd"
         carrier.write_text(_smd(
@@ -126,12 +126,12 @@ class SceneTests(unittest.TestCase):
         self.assertIsNotNone(scene)
         self.assertEqual(scene.weapon_materials, ["c_test"])
         self.assertEqual(scene.carrier_materials, ["c_carrier"])
-        # В кадре носитель есть — иначе показывать было бы нечего.
+        # В кадре носитель есть - иначе показывать было бы нечего
         self.assertIn("c_carrier", _obj_groups(self.obj))
         self.assertIn("c_carrier", scene.materials)
 
     def test_carrier_bodygroups_come_along(self):
-        """Шланг медигана — отдельный SMD: без него пушка обрублена."""
+        """Шланг медигана - отдельный SMD: без него пушка обрублена"""
         carrier = self.dir / "c_carrier_reference.smd"
         carrier.write_text(_smd(
             [("weapon_bone", None)], {},
@@ -155,44 +155,44 @@ class SceneTests(unittest.TestCase):
         self.assertEqual(scene.weapon_materials, ["c_test"])
 
     def test_scene_without_carrier_is_unchanged(self):
-        """Обычное оружие носителя не знает — список пуст, а не None."""
+        """Обычное оружие носителя не знает - список пуст, а не None"""
         scene = self._build()
         self.assertEqual(scene.carrier_materials, [])
         self.assertEqual(scene.materials,
                          scene.weapon_materials + scene.arms_materials)
 
     def test_materials_are_split_by_part(self):
-        """Панель редактирует оружие; руки показываются, но не правятся."""
+        """Панель редактирует оружие, руки показываются, но не правятся"""
         scene = self._build()
         self.assertEqual(scene.weapon_materials, ["c_test"])
         self.assertEqual(scene.arms_materials, ["test_hands"])
         self.assertEqual(scene.materials, ["c_test", "test_hands"])
 
     def test_weapon_is_placed_into_the_animated_hand(self):
-        """Вершина в начале координат оружия обязана оказаться в weapon_bone руки.
+        """Вершина в начале координат оружия обязана оказаться в weapon_bone руки
 
-        В OBJ оси уже конвертированы (x,y,z)→(x,z,-y), поэтому (-12,0,0)
-        остаётся (-12,0,0) — но проверяем именно значение из файла.
+        В OBJ оси уже конвертированы (x,y,z)->(x,z,-y), поэтому (-12,0,0)
+        остаётся (-12,0,0) - но проверяем именно значение из файла
         """
         self._build()
         self.assertIn((-12.0, 0.0, 0.0), _obj_vertices(self.obj))
 
     def test_arms_follow_the_animation_too(self):
-        """Кисть с (0,10,0) уезжает в (-10,0,0) — руки тоже в позе, не в bind."""
+        """Кисть с (0,10,0) уезжает в (-10,0,0) - руки тоже в позе, не в bind"""
         self._build()
         self.assertIn((-10.0, 0.0, 0.0), _obj_vertices(self.obj))
 
     def test_include_mats_drops_unwanted_meshes(self):
-        """У рук солдата в том же SMD лежит ракета для перезарядки — её убираем."""
+        """У рук солдата в том же SMD лежит ракета для перезарядки - её убираем"""
         scene = self._build(arms_include_mats=set())
         self.assertEqual(scene.arms_materials, [])
         self.assertEqual(scene.weapon_materials, ["c_test"])
 
     def test_item_that_is_worn_not_held_says_so(self):
-        """У ранцев и знамён вида от первого лица нет в самой игре.
+        """У ранцев и знамён вида от первого лица нет в самой игре
 
         Отдельная ошибка, а не общий отказ: «не удалось собрать сцену» соврало
-        бы про причину, и пользователь пошёл бы искать поломку.
+        бы про причину, и пользователь пошёл бы искать поломку
         """
         alien = self.dir / "alien.smd"
         alien.write_text(_smd(
@@ -213,7 +213,7 @@ class SceneTests(unittest.TestCase):
 
 
 class ConvertPartsTests(unittest.TestCase):
-    """Сам конвертер: несколько мешей, каждый со своей матрицей."""
+    """Сам конвертер: несколько мешей, каждый со своей матрицей"""
 
     def setUp(self):
         self._tmp = TemporaryDirectory()
@@ -233,7 +233,7 @@ class ConvertPartsTests(unittest.TestCase):
         return path
 
     def test_parts_keep_their_own_pose(self):
-        """Сдвиг задан только второй части — первая обязана остаться на месте."""
+        """Сдвиг задан только второй части - первая обязана остаться на месте"""
         shift = (1, 0, 0, 0,  0, 1, 0, 100,  0, 0, 1, 0)   # +100 по Y
         ok, mats = SmdToObjService.convert_parts(
             [MeshPart(smd_path=str(self._part_file("a", "mat_a"))),
@@ -244,7 +244,7 @@ class ConvertPartsTests(unittest.TestCase):
         self.assertTrue(ok)
         self.assertEqual(mats, ["mat_a", "mat_b"])
         verts = _obj_vertices(self.obj)
-        # Оси в OBJ: (x,y,z) → (x, z, -y). Сдвиг +100 по Y стал -100 по Z.
+        # Оси в OBJ: (x,y,z) -> (x, z, -y). Сдвиг +100 по Y стал -100 по Z
         self.assertIn((1.0, 0.0, 0.0), verts)
         self.assertIn((1.0, 0.0, -100.0), verts)
 

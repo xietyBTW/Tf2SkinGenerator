@@ -1,8 +1,8 @@
-"""Лёгкий парсер заголовка VTF — только то, что нужно диагностике (размеры).
+"""Лёгкий парсер заголовка VTF - только то, что нужно диагностике (размеры)
 
 Полноценная декодировка не нужна: читаем сигнатуру и width/height из заголовка.
 Формат VTF: сигнатура "VTF\\0" (4 байта), version[2] (2×uint32), headerSize
-(uint32), затем width (uint16) и height (uint16). Всё little-endian.
+(uint32), затем width (uint16) и height (uint16). Всё little-endian
 """
 
 from __future__ import annotations
@@ -13,7 +13,7 @@ from typing import Optional, Tuple
 
 def read_vtf_size(path: str) -> Optional[Tuple[int, int]]:
     """Возвращает (width, height) из заголовка VTF или None, если файл не VTF
-    либо повреждён/слишком короткий."""
+    либо повреждён/слишком короткий"""
     try:
         with open(path, "rb") as f:
             head = f.read(20)
@@ -23,7 +23,7 @@ def read_vtf_size(path: str) -> Optional[Tuple[int, int]]:
 
 
 def parse_vtf_size(head: bytes) -> Optional[Tuple[int, int]]:
-    """Разбирает первые байты VTF-заголовка. Вынесено отдельно для тестов."""
+    """Разбирает первые байты VTF-заголовка. Вынесено отдельно для тестов"""
     if len(head) < 20 or head[:4] != b"VTF\x00":
         return None
     try:

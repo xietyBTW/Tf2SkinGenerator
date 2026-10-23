@@ -1,9 +1,9 @@
 """
-Переключатель состояния модели в превью (бодигруппы).
+Переключатель состояния модели в превью (бодигруппы)
 
-`$bodygroup` — переключатель, который игра дёргает сама: бутылка после крита
-разбитая, у кабера отлетает набалдашник. Превью показывало только нулевой
-вариант; теперь можно посмотреть каждый — только показ, в мод уходят все.
+`$bodygroup` - переключатель, который игра дёргает сама: бутылка после крита
+разбитая, у кабера отлетает набалдашник. В превью можно посмотреть каждый
+вариант - только показ, в мод уходят все
 """
 
 from __future__ import annotations
@@ -65,7 +65,7 @@ class WorkerChoiceTests(unittest.TestCase):
         w = _worker()
         w._models[os.path.dirname(qc)] = _Model(qc)
         extra = w._find_bodygroup_smds(ref)
-        self.assertEqual(self._names(extra), [])          # целая — сам reference
+        self.assertEqual(self._names(extra), [])          # целая - сам reference
         self.assertEqual(w._swap_reference_for_choice(ref, extra), ref)
 
         w = _worker({'broken': 1})
@@ -77,8 +77,8 @@ class WorkerChoiceTests(unittest.TestCase):
         self.assertEqual(extra, [])                       # стала основным мешем
 
     def test_caber_shows_one_head_at_a_time_even_though_both_are_bodygroup_files(self):
-        """По маске *_bodygroup.smd находились ОБА набалдашника — и кабер
-        стоял целым и взорванным разом."""
+        """По маске *_bodygroup.smd находились ОБА набалдашника - и кабер
+        стоял целым и взорванным разом"""
         qc = _decompiled(self.tmp, 'c_caber', CABER_QC,
                          ['c_caber_reference.smd', 'caber_top_bodygroup.smd',
                           'caber_exploded_bodygroup.smd'])
@@ -129,7 +129,7 @@ class SessionSwitchTests(unittest.TestCase):
         self.assertEqual(res['bodygroups'][0]['chosen'], 1)
         kw = self.s.controller.load_game_model.call_args.kwargs
         self.assertEqual(kw['bodygroups'], {'broken': 1})
-        # Назад к основному — выбор снимается, а не хранится нулём.
+        # Назад к основному - выбор снимается, а не хранится нулём
         self.s.set_bodygroup('broken', 0)
         self.assertEqual(self.s._bodygroups, {})
         self.assertIn('error', self.s.set_bodygroup('broken', 5))

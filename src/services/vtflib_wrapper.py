@@ -137,7 +137,7 @@ class VTFLib:
         cls._dll.vlSetFloat.restype = None
         cls._dll.vlSetFloat.argtypes = [c_int, c_float]
 
-        # ── Функции для чтения VTF ──────────────────────────────────────── #
+        # Функции для чтения VTF
         cls._dll.vlImageLoad.restype = vlBool
         cls._dll.vlImageLoad.argtypes = [c_char_p, vlBool]
 
@@ -194,8 +194,8 @@ class VTFLib:
         generate_thumbnail: bool = True,
         frame_count: int = None,
     ) -> None:
-        """frames_rgba8888 — список ИЛИ генератор кадров (тогда нужен frame_count:
-        число кадров требуется до обхода, для vlImageCreate)."""
+        """frames_rgba8888 - список ИЛИ генератор кадров (тогда нужен frame_count:
+        число кадров требуется до обхода, для vlImageCreate)"""
         count = frame_count if frame_count is not None else len(frames_rgba8888)
         with cls._lock:
             cls.initialize()
@@ -229,8 +229,8 @@ class VTFLib:
                     dll.vlImageSetFlags(vlUInt(flags))
 
                 # Буфер приёмника один на все кадры: размер от кадра не зависит,
-                # а vlImageSetData копирует данные внутрь образа (memcpy) —
-                # держать буферы кадров живыми до vlImageSave не нужно.
+                # а vlImageSetData копирует данные внутрь образа (memcpy) -
+                # держать буферы кадров живыми до vlImageSave не нужно
                 dest = None
                 if dest_format != VTFImageFormat.RGBA8888:
                     dest_size = int(dll.vlImageComputeMipmapSize(vlUInt(width), vlUInt(height), vlUInt(1), vlUInt(0), c_int(dest_format)))
@@ -275,12 +275,12 @@ class VTFLib:
     @classmethod
     def create_cubemap_vtf(cls, faces_rgba8888, size: int, output_file: str) -> None:
         """Кубмапа RGBA8888 из шести граней (+X −X +Y −Y +Z −Z), без мипмапов.
-        Нужна своя ровная кубмапа блеска Killstreak (sheen_patterns).
+        Нужна своя ровная кубмапа блеска Killstreak (sheen_patterns)
 
         Седьмая грань - сферическая карта (копия первой): TF2 читает VTF до
         7.4, где у кубмапы всегда 7 граней. Шесть граней с startFrame
         0xFFFF - соглашение одной VTFLib, игра такой файл читает мимо данных
-        и блеск выходит чёрным."""
+        и блеск выходит чёрным"""
         if len(faces_rgba8888) != 6:
             raise ValueError("cubemap needs 6 faces")
         faces_rgba8888 = list(faces_rgba8888) + [faces_rgba8888[0]]
@@ -318,14 +318,14 @@ class VTFLib:
     @classmethod
     def read_vtf_all_frames(cls, vtf_path: str) -> tuple:
         """
-        Загружает VTF и возвращает ВСЕ кадры в формате RGBA8888.
+        Загружает VTF и возвращает ВСЕ кадры в формате RGBA8888
 
         Returns:
             (frames: list[bytes], width: int, height: int)
-            где каждый элемент frames — bytes длиной width*height*4.
+            где каждый элемент frames - bytes длиной width*height*4
 
         Raises:
-            RuntimeError: если загрузка не удалась.
+            RuntimeError: если загрузка не удалась
         """
         with cls._lock:
             cls.initialize()
@@ -378,7 +378,7 @@ class VTFLib:
                             src_ptr, dest, vlUInt(width), vlUInt(height), c_int(src_format)
                         ))
                         if not ok:
-                            # Если один кадр не конвертировался — пропускаем
+                            # Если один кадр не конвертировался - пропускаем
                             break
                     frames.append(bytes(dest))
 
@@ -401,7 +401,7 @@ class VTFLib:
         """
         Загружает VTF файл и возвращает первый кадр в формате RGBA8888.
         `face` - грань кубмапы (у VTF 7.4 и старше седьмая, 6, - сферическая
-        карта отражения).
+        карта отражения)
 
         Returns:
             (rgba_bytes: bytes, width: int, height: int)
@@ -441,7 +441,7 @@ class VTFLib:
                 dest = (vlByte * dest_size)()
 
                 if src_format == VTFImageFormat.RGBA8888:
-                    # Уже в нужном формате — просто копируем
+                    # Уже в нужном формате - просто копируем
                     import ctypes
                     ctypes.memmove(dest, src_ptr, dest_size)
                 else:

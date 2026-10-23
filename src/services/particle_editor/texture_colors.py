@@ -1,11 +1,11 @@
-"""Родные цвета текстуры: снять с эффекта модули тинта."""
+"""Родные цвета текстуры: снять с эффекта модули тинта"""
 
 from typing import Optional
 
 from src.services.particle_editor.pcf_format import Attribute, ValueType
 
 
-#: Модули, красящие частицы (тинт умножается на текстуру).
+#: Модули, красящие частицы (тинт умножается на текстуру)
 _COLOR_MODULE_NAMES = {"color random", "color fade", "color lit per particle"}
 
 
@@ -14,10 +14,10 @@ def use_texture_colors(pcf, system_name: str) -> int:
     Заставляет эффект использовать родные цвета текстур: у системы и всех
     её дочерних удаляются модули тинта (Color Random, Color Fade,
     Color Lit Per Particle, ремапы CP/осцилляция в поле цвета), базовый
-    цвет ставится белым. Тот же приём, что colored-crit в CritPcfService.
+    цвет ставится белым. Тот же приём, что colored-crit в CritPcfService
 
     Returns:
-        Количество удалённых модулей (0 — красящих модулей не было).
+        Количество удалённых модулей (0 - красящих модулей не было)
     """
     root_def = pcf._find_definition(system_name)
     if root_def is None:
@@ -57,7 +57,7 @@ def use_texture_colors(pcf, system_name: str) -> int:
                 if kept:
                     d[group] = kept
                 else:
-                    # Пустому списку srctools не выводит тип — явный массив
+                    # Пустому списку srctools не выводит тип - явный массив
                     d[group] = Attribute.array(
                         d[group].name, ValueType.ELEMENT)
         if "color" in d:
@@ -66,7 +66,7 @@ def use_texture_colors(pcf, system_name: str) -> int:
 
 
 def _is_color_module(mod) -> bool:
-    """True для модулей, задающих/меняющих цвет частиц."""
+    """True для модулей, задающих/меняющих цвет частиц"""
     fn = ""
     if "functionname" in mod:
         try:

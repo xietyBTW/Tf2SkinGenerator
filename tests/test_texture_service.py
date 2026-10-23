@@ -10,7 +10,7 @@ class TestResolveVtfFlagsAndOptions(unittest.TestCase):
         flags, merged = TextureService.resolve_vtf_flags_and_options(
             ["NOMIP", "CLAMPS"], {"srgb": True}
         )
-        # NOMIP → опция nomipmaps, CLAMPS остаётся флагом
+        # NOMIP -> опция nomipmaps, CLAMPS остаётся флагом
         self.assertEqual(flags, ["CLAMPS"])
         self.assertTrue(merged["nomipmaps"])
         self.assertTrue(merged["srgb"])
@@ -44,7 +44,7 @@ class TestResolveVtfFlagsAndOptions(unittest.TestCase):
 
 
 class TestRenderImageToVtf(unittest.TestCase):
-    """Проверяем маршрутизацию рендера (animated / normal / обычный) без внешних инструментов."""
+    """Проверяем маршрутизацию рендера (animated / normal / обычный) без внешних инструментов"""
 
     def _call(self, animated: bool, vtf_options):
         out_dir = Path("out")
@@ -88,19 +88,21 @@ class TestRenderImageToVtf(unittest.TestCase):
         )
         self.assertTrue(is_normal)
         self.assertEqual(m_vtf.call_count, 2)
-        # Нормаль — своим форматом и с флагом NORMAL, как у нормалей Valve.
-        _png, _out, fmt, flags, _opts = m_vtf.call_args_list[1].args
-        self.assertEqual((fmt, flags), ("DXT5", ["NORMAL"]))
+        # Нормаль - своим форматом и с флагом NORMAL, как у нормалей Valve.
+        # База и нормаль жмутся одновременно: порядок вызовов любой
+        normal = [c.args for c in m_vtf.call_args_list if c.args[0].endswith("_normal.png")]
+        self.assertEqual([(a[2], a[3]) for a in normal], [("DXT5", ["NORMAL"])])
 
     def test_normal_map_keeps_quality_on_dxt1_base(self):
-        """База в DXT1 — нормаль всё равно DXT5: иначе блоки и нет альфы."""
+        """База в DXT1 - нормаль всё равно DXT5: иначе блоки и нет альфы"""
         m_vtf = mock.MagicMock()
         with mock.patch.object(TextureService, "is_animated_image", return_value=False),              mock.patch.object(TextureService, "process_image"),              mock.patch.object(TextureService, "create_vtf", m_vtf),              mock.patch.object(TextureService, "write_normal_png"):
             TextureService.render_image_to_vtf(
                 "img.png", vtf_output_path=Path("out"), out_vtf_path=Path("out/tex.vtf"),
                 temp_png_path=Path("out/tex.png"), normal_base="tex", size=(512, 512),
                 format_type="DXT1", flags=[], vtf_options={"normal": True})
-        self.assertEqual(m_vtf.call_args_list[1].args[2], "DXT5")
+        normal = [c.args for c in m_vtf.call_args_list if c.args[0].endswith("_normal.png")]
+        self.assertEqual([a[2] for a in normal], ["DXT5"])
 
 
 if __name__ == "__main__":
@@ -108,7 +110,7 @@ if __name__ == "__main__":
 
 
 def test_normal_map_matches_source_axes():
-    """Выпуклость (светлый центр) в осях Source X+ Y- Z+: слева и сверху < 128."""
+    """Выпуклость (светлый центр) в осях Source X+ Y- Z+: слева и сверху < 128"""
     import numpy as np
     from src.services import normal_map
     yy, xx = np.mgrid[0:64, 0:64]
@@ -121,7 +123,7 @@ def test_normal_map_matches_source_axes():
 
 
 def test_normal_map_over_stock_keeps_stock_alpha_and_relief():
-    """Поверх родной нормали: её альфа (маска блеска) цела, её наклон виден."""
+    """Поверх родной нормали: её альфа (маска блеска) цела, её наклон виден"""
     import numpy as np
     from src.services import normal_map
     flat = np.full((32, 32, 3), 128, np.uint8)
@@ -142,7 +144,7 @@ def test_normal_strength_and_invert():
     ramp = np.dstack([np.tile(np.linspace(0, 255, 64, dtype=np.float32), (64, 1)).astype(np.uint8)] * 3)
     weak = normal_map.from_image(ramp, 0.5)[32, 32, 0]
     strong = normal_map.from_image(ramp, 2.0)[32, 32, 0]
-    assert strong < weak < 0                         # светлеет вправо — склон влево
+    assert strong < weak < 0                         # светлеет вправо - склон влево
     assert normal_map.from_image(ramp, 1.0, invert=True)[32, 32, 0] > 0
     assert normal_map.from_image(ramp, 0.0)[32, 32, 2] == 1.0
 
@@ -157,7 +159,7 @@ def test_normal_settings_from_build_options():
 
 
 def test_normal_strength_does_not_depend_on_resolution():
-    """Сборка 512 и превью 1024 одной картинки — рельеф одной силы."""
+    """Сборка 512 и превью 1024 одной картинки - рельеф одной силы"""
     import numpy as np
     from PIL import Image
     from src.services import normal_map

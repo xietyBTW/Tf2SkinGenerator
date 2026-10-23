@@ -1,17 +1,17 @@
 """
-Воркер для извлечения текстуры шапки из TF2 VPK.
+Воркер для извлечения текстуры шапки из TF2 VPK
 
 Использует ту же цепочку что и 3D Preview:
-  QC → VMT → $baseTexture → VTF
+  QC -> VMT -> $baseTexture -> VTF
 
 Порядок:
   1. Ищем декомпилированный QC в кэше (если пользователь уже смотрел шапку в 3D).
-  2. Если кэша нет — извлекаем MDL из VPK и декомпилируем через Crowbar.
-  3. Парсим QC → $cdmaterials.
-  4. Парсим SMD → имена материалов.
+  2. Если кэша нет - извлекаем MDL из VPK и декомпилируем через Crowbar.
+  3. Парсим QC -> $cdmaterials.
+  4. Парсим SMD -> имена материалов.
   5. Ищем VMT в обоих VPK (misc + textures).
-  6. Читаем $baseTexture из VMT → ищем VTF в обоих VPK.
-  7. Сохраняем VTF, при необходимости конвертируем в PNG/TGA/JPG.
+  6. Читаем $baseTexture из VMT -> ищем VTF в обоих VPK.
+  7. Сохраняем VTF, при необходимости конвертируем в PNG/TGA/JPG
 """
 
 from __future__ import annotations
@@ -32,8 +32,8 @@ logger = get_logger(__name__)
 
 
 class HatTextureExtractWorker(BaseWorker):
-    # Многоточечный emit finished внутри _extract → не шаблонный work(),
-    # наследуем BaseWorker только ради безопасного stop().
+    # Многоточечный emit finished внутри _extract -> не шаблонный work(),
+    # наследуем BaseWorker только ради безопасного stop()
     finished = Signal(bool, str)   # (success, message)
     progress = Signal(int, str)    # (pct, status)
     error    = Signal(str)
@@ -54,7 +54,7 @@ class HatTextureExtractWorker(BaseWorker):
         self._fmt      = export_format.upper()
         self._lang     = language
 
-    # ── Точка входа ──────────────────────────────────────────────────────── #
+    # Точка входа
 
     def run(self) -> None:
         try:
@@ -64,7 +64,7 @@ class HatTextureExtractWorker(BaseWorker):
             self.error.emit(str(exc))
             self.finished.emit(False, str(exc))
 
-    # ── Основная логика ───────────────────────────────────────────────────── #
+    # Основная логика
 
     def _extract(self) -> None:
         from src.services.tf2_paths import TF2Paths
@@ -73,7 +73,7 @@ class HatTextureExtractWorker(BaseWorker):
         _, misc_vpk, _ = TF2Paths.resolve(self._tf2_root)
         textures_vpk   = TF2Paths.resolve_textures_vpk(self._tf2_root)
 
-        # ── 1. Ищем декомпилированный QC ─────────────────────────────────── #
+        # 1. Ищем декомпилированный QC
         self.progress.emit(15, "Looking for cached decompile...")
         decomp_dir = self._get_decomp_dir(misc_vpk)
         if not decomp_dir:
@@ -83,7 +83,7 @@ class HatTextureExtractWorker(BaseWorker):
         if self.isInterruptionRequested():
             return
 
-        # ── 2. Разбираем QC (один раз, общим разбором) ─────────────────────── #
+        # 2. Разбираем QC (один раз, общим разбором)
         self.progress.emit(35, "Parsing QC file...")
         from src.services import qc_skin_parser
         model = qc_skin_parser.load_model(decomp_dir)
@@ -99,7 +99,7 @@ class HatTextureExtractWorker(BaseWorker):
 
         logger.info(f"[hat-tex] cdmaterials={cdmaterials}, skin0={skin0_textures}")
 
-        # ── 3. Имена материалов из SMD или из $texturegroup ──────────────── #
+        # 3. Имена материалов из SMD или из $texturegroup
         mat_names = self._get_mat_names(decomp_dir, skin0_textures)
         if not mat_names:
             self.finished.emit(False, "No material names found in SMD/QC")
@@ -107,15 +107,15 @@ class HatTextureExtractWorker(BaseWorker):
 
         logger.info(f"[hat-tex] mat_names={mat_names}")
 
-        # ── 4-5. QC → VMT → $baseTexture → VTF через кэширующий reader ────── #
+        # 4-5. QC -> VMT -> $baseTexture -> VTF через кэширующий reader
         # misc первым (VMT обычно там), textures вторым (VTF). GameVpkReader
         # открывает каждый VPK один раз и переиспользует ту же цепочку поиска,
-        # что и 3D Preview.
+        # что и 3D Preview
         self.progress.emit(45, "Opening VPK archives...")
         os.makedirs(self._export, exist_ok=True)
 
         extracted: list[str] = []
-        seen_basetex: set = set()   # избегаем дублей если несколько mat → одна VTF
+        seen_basetex: set = set()   # избегаем дублей если несколько mat -> одна VTF
         painted = False             # у текстуры есть маска командной окраски
         total = max(len(mat_names), 1)
 
@@ -124,7 +124,7 @@ class HatTextureExtractWorker(BaseWorker):
                 self.finished.emit(False, "Could not open any VPK file")
                 return
 
-            # Цепочка VMT → $basetexture → VTF — общая (MaterialResolver);
+            # Цепочка VMT -> $basetexture -> VTF - общая (MaterialResolver);
             # краску НЕ впечатываем: экспорт отдаёт исходный файл игры
             materials = MaterialResolver(reader, self._export, apply_tint=False)
 
@@ -167,7 +167,7 @@ class HatTextureExtractWorker(BaseWorker):
         if painted:
             # Файл отдаём сырым: в игре краску накладывает сам движок, и
             # впечатывать её значило бы получить двойную окраску. Но тёмные
-            # пятна маски выглядят как испорченная текстура — поясняем.
+            # пятна маски выглядят как испорченная текстура - поясняем
             from src.data.translations import TRANSLATIONS
             t = TRANSLATIONS.get(self._lang, TRANSLATIONS["en"])
             note = t.get("hat_tex_paint_mask_note")
@@ -175,12 +175,12 @@ class HatTextureExtractWorker(BaseWorker):
                 msg = f"{msg}\n\n{note}"
         self.finished.emit(True, msg)
 
-    # ── Вспомогательные методы ────────────────────────────────────────────── #
+    # Вспомогательные методы
 
     def _get_decomp_dir(self, misc_vpk: str) -> Optional[str]:
         """
         Возвращает путь к папке с декомпилированной шапкой.
-        Сначала ищет в кэше, затем декомпилирует через ExtractModelService.
+        Сначала ищет в кэше, затем декомпилирует через ExtractModelService
         """
         from src.services import decompile_cache
         cached = decompile_cache.get_cached_decompile(
@@ -223,12 +223,12 @@ class HatTextureExtractWorker(BaseWorker):
     def _get_mat_names(self, decomp_dir: str, skin0_textures: list) -> list:
         """
         Возвращает имена материалов.
-        Приоритет: $texturegroup из QC → имена материалов из SMD.
+        Приоритет: $texturegroup из QC -> имена материалов из SMD
         """
         if skin0_textures:
             return list(skin0_textures)
 
-        # Парсим SMD — ищем имена материалов из секции triangles
+        # Парсим SMD - ищем имена материалов из секции triangles
         smd_files = sorted(glob.glob(os.path.join(decomp_dir, "*.smd")))
         # Предпочитаем reference SMD (не "idle", не "_anims")
         ref_smds = [s for s in smd_files if
@@ -258,7 +258,7 @@ class HatTextureExtractWorker(BaseWorker):
         return seen
 
     def _save_vtf(self, vtf_data: bytes, basetexture: str) -> Optional[str]:
-        """Сохраняет VTF-байты в export_folder. Конвертирует если нужно."""
+        """Сохраняет VTF-байты в export_folder. Конвертирует если нужно"""
         stem = Path(basetexture).stem
         vtf_path = os.path.join(self._export, f"{stem}.vtf")
         try:

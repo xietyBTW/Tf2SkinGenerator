@@ -1,18 +1,18 @@
 /*
- * Одно окно на три вопроса: ввести текст, выбрать из списка, подтвердить.
+ * Одно окно на три вопроса: ввести текст, выбрать из списка, подтвердить
  *
  * Модуль ничего не знает о том, кто спрашивает: возвращает значение или null,
  * если отказались. Разметка лежит в index.html (#ask) - окно одно на всё
  * приложение, второго такого не заводить.
  */
 
-// ── Диалог ───────────────────────────────────────────────────────────────
+// Диалог
 // Три вида в одном окне: спросить текст, выбрать из списка, подтвердить.
-// Возвращает значение или null, если отменили.
+// Возвращает значение или null, если отменили
 
 const askEl = document.getElementById('ask');
 
-//: С какой длины списку нужен поиск.
+//: С какой длины списку нужен поиск
 const SEARCH_FROM = 8;
 
 export function ask({ title, text = '', value = null, list = null, multi = false,
@@ -34,18 +34,18 @@ export function ask({ title, text = '', value = null, list = null, multi = false
   input.value = value ?? '';
   listEl.hidden = !list;
   listEl.innerHTML = '';
-  // Поиск - только когда список не охватить взглядом.
+  // Поиск - только когда список не охватить взглядом
   search.hidden = !(list && list.length > SEARCH_FROM);
   search.value = '';
   askEl.querySelector('.ask__ok').textContent = ok;
   // Галка-приписка к ответу: с ней окно отдаёт {value, checked}, без неё -
-  // просто значение, как и раньше.
+  // просто значение
   checkBox.hidden = !check;
   checkInput.checked = false;
   checkBox.querySelector('span').textContent = check || '';
 
   return new Promise((resolve) => {
-    // Один выбор - значение; множественный - набор отмеченного.
+    // Один выбор - значение, множественный - набор отмеченного
     const marks = new Set(multi ? chosen : []);
     let picked = null;
     let done = false;
@@ -53,7 +53,7 @@ export function ask({ title, text = '', value = null, list = null, multi = false
     // Событие close тут ненадёжно: отправка формы method="dialog" закрывает
     // окно, но события не шлёт - цепочка из двух вопросов подряд на этом
     // молча обрывалась. Поэтому ответ отдаём из обработчиков кнопок, а
-    // close/cancel держим только для Esc.
+    // close/cancel держим только для Esc
     const settle = (result) => {
       if (done) return;
       done = true;
@@ -75,7 +75,7 @@ export function ask({ title, text = '', value = null, list = null, multi = false
     };
     const onCancel = () => settle(null);
     // Фильтр по подстроке имени. Отмеченное при множественном выборе не
-    // теряется: прячутся кнопки, а не набор.
+    // теряется: прячутся кнопки, а не набор
     const onSearch = () => {
       const q = search.value.trim().toLowerCase();
       for (const b of listEl.querySelectorAll('.ask__item')) {
@@ -92,7 +92,7 @@ export function ask({ title, text = '', value = null, list = null, multi = false
       }
     };
     // Enter в поиске - это не «отправить форму» (окно закрылось бы без
-    // ответа), а выбрать первое из найденного.
+    // ответа), а выбрать первое из найденного
     const onSearchKey = (e) => {
       if (e.key !== 'Enter') return;
       e.preventDefault();
@@ -100,15 +100,15 @@ export function ask({ title, text = '', value = null, list = null, multi = false
       if (first) first.dispatchEvent(new MouseEvent(multi ? 'click' : 'dblclick'));
     };
     // Один выбор из списка: пока ничего не выбрано, отвечать нечем - кнопка
-    // выключена, иначе «Ответить» без выбора выглядел бы как ответ.
+    // выключена, иначе «Ответить» без выбора выглядел бы как ответ
     okBtn.disabled = Boolean(list && !multi);
 
     if (list) {
       let lastGroup = null;
       for (const item of list) {
         // Заголовок группы - когда список длинный и разнородный (модели:
-        // игроки, косметика, оружие). Сам не выбирается; при поиске
-        // прячется вместе с пунктами.
+        // игроки, косметика, оружие). Сам не выбирается, при поиске
+        // прячется вместе с пунктами
         if (item.group && item.group !== lastGroup) {
           const h = document.createElement('p');
           h.className = 'label ask__group';
@@ -121,7 +121,7 @@ export function ask({ title, text = '', value = null, list = null, multi = false
         b.className = 'ask__item';
         b.textContent = item.label ?? item;
         // Пояснение - видимой строкой под подписью, а не всплывающим title:
-        // до всплывашки человек не дотягивается, и выбор делался вслепую.
+        // до всплывашки человек не дотягивается, и выбор делался вслепую
         if (item.hint) {
           const hint = document.createElement('span');
           hint.className = 'ask__hint';
@@ -131,7 +131,7 @@ export function ask({ title, text = '', value = null, list = null, multi = false
         const value = item.value ?? item;
         if (multi && marks.has(value)) b.classList.add('is-active');
         // Рекомендуемый ответ отмечен сразу: «Собрать» доступна без лишнего
-        // щелчка, а выбор виден.
+        // щелчка, а выбор виден
         if (!multi && item.selected) {
           b.classList.add('is-active');
           picked = value;
@@ -140,7 +140,7 @@ export function ask({ title, text = '', value = null, list = null, multi = false
         b.addEventListener('click', () => {
           if (multi) {
             // Отмеченных может быть сколько угодно: подсветку с других не
-            // снимаем, иначе список вёл бы себя как выбор одного.
+            // снимаем, иначе список вёл бы себя как выбор одного
             if (marks.has(value)) marks.delete(value);
             else marks.add(value);
             b.classList.toggle('is-active', marks.has(value));
@@ -154,7 +154,7 @@ export function ask({ title, text = '', value = null, list = null, multi = false
         });
         // Двойной клик - выбрать и закрыть: список длинный, тянуться к
         // кнопке ради каждого выбора незачем. При множественном выборе он
-        // означал бы «отметил и передумал», поэтому там его нет.
+        // означал бы «отметил и передумал», поэтому там его нет
         if (!multi) {
           b.addEventListener('dblclick', () => {
             picked = value;

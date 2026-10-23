@@ -1,1 +1,1 @@
-"""Соавторы документа PCF. Собирает их фасад particle_editor_service."""
+"""Соавторы документа PCF. Собирает их фасад particle_editor_service"""

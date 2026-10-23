@@ -1,10 +1,10 @@
 """
-Краски игры: банки из items_game.txt с цветом и именем из локализации.
+Краски игры: банки из items_game.txt с цветом и именем из локализации
 
 Список нужен превью шапки: две трети косметики красится по альфа-маске
 текстуры (см. services/vmt_tint), и что именно закрасится у своей текстуры,
 автор иначе видит только в игре. Игра хранит краски предметами-инструментами
-(`paint_can`) с атрибутами `set item tint RGB` и, у командных, `… RGB 2`.
+(`paint_can`) с атрибутами `set item tint RGB` и, у командных, `… RGB 2`
 """
 
 import re
@@ -23,9 +23,9 @@ def _rgb(value: str) -> Tuple[int, int, int]:
 
 def parse(items_game, loc: Dict[str, str]) -> List[dict]:
     """
-    Краски: [{key, name, red, blu}], цвета — (r, g, b); у обычной краски
-    red == blu. Порядок — как в файле (порядок выпуска). `items_game` —
-    текст файла или готовый разбор (ItemsGame.load).
+    Краски: [{key, name, red, blu}], цвета - (r, g, b), у обычной краски
+    red == blu. Порядок - как в файле (порядок выпуска). `items_game` -
+    текст файла или готовый разбор (ItemsGame.load)
     """
     game = (items_game if isinstance(items_game, kv.ItemsGame)
             else kv.ItemsGame.parse(items_game))

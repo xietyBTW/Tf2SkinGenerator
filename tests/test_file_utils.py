@@ -66,9 +66,9 @@ class FileUtilsTests(unittest.TestCase):
             os.utime(stale_dir, (old_time, old_time))
             os.utime(stale_file, (old_time, old_time))
 
-            fresh_dir = base / "tf2sg_3d_new"       # наш, но свежий — не трогаем
+            fresh_dir = base / "tf2sg_3d_new"       # наш, но свежий - не трогаем
             fresh_dir.mkdir()
-            foreign = base / "other_app_dir"        # чужой префикс — не трогаем
+            foreign = base / "other_app_dir"        # чужой префикс - не трогаем
             foreign.mkdir()
             os.utime(foreign, (old_time, old_time))
 
@@ -88,7 +88,7 @@ class FileUtilsTests(unittest.TestCase):
     def test_get_temp_file_path_system_dir(self):
         path = get_temp_file_path(prefix="tf2sg_test_", suffix=".tmp")
         try:
-            # mkstemp создаёт файл — он должен существовать (нет race window)
+            # mkstemp создаёт файл - он должен существовать (нет race window)
             self.assertTrue(path.exists())
         finally:
             safe_remove(path)

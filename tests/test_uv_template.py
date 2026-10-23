@@ -1,4 +1,4 @@
-"""Тесты генерации UV-шаблона по запросу (без полной сборки)."""
+"""Тесты генерации UV-шаблона по запросу (без полной сборки)"""
 
 import os
 import tempfile
@@ -67,7 +67,7 @@ class GenerateUVTemplateTests(unittest.TestCase):
 
     def test_each_material_gets_its_own_layout(self):
         """Развёртки материалов лежат в одних координатах: на общей картинке
-        они накладываются друг на друга, и рисовать по ней нельзя."""
+        они накладываются друг на друга, и рисовать по ней нельзя"""
         with open(os.path.join(self.decompile, "c_test_reference.smd"),
                   "w", encoding="utf-8") as f:
             f.write(_SMD_TWO_MATERIALS)
@@ -90,13 +90,13 @@ class GenerateUVTemplateTests(unittest.TestCase):
         self.assertEqual(files, [])
 
     def test_full_mdl_path_weapon_key_sanitized(self):
-        # weapon_key как полный mdl-путь (персонажи/шапки) → имя файла из basename.
+        # weapon_key как полный mdl-путь (персонажи/шапки) -> имя файла из basename
         self._write_smd("hat_reference.smd")
         ok, result, _files = ExtractModelService.generate_uv_template(
             self.decompile, "models/player/items/hat.mdl", (64, 64), self.export
         )
         # SMD ищется по weapon_key; для произвольного mdl-пути reference не
-        # совпадёт по имени — это ок, проверяем лишь отсутствие падения.
+        # совпадёт по имени - это ок, проверяем лишь отсутствие падения
         self.assertIn(ok, (True, False))
 
 

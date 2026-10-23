@@ -1,4 +1,4 @@
-"""Запись документа наружу: сжатый PCF и VPK-мод с текстурами."""
+"""Запись документа наружу: сжатый PCF и VPK-мод с текстурами"""
 
 import io
 import tempfile
@@ -11,11 +11,11 @@ from src.shared.logging_config import get_logger
 logger = get_logger(__name__)
 
 #: Атрибуты со значениями по умолчанию Source: при экспорте вырезаются
-#: (lossless — игра/превью подставляют те же дефолты). Присутствуют почти на
+#: (lossless - игра/превью подставляют те же дефолты). Присутствуют почти на
 #: каждом операторе/рендерере, поэтому дают килобайты экономии. Это нужно,
 #: чтобы модифицированный PCF влез в слот VPK: casual-bypass не грузит PCF
 #: больше оригинала (та же причина, по которой у casual-pre-loader есть
-#: pcf_compress). Значения — как в constants.py casual-pre-loader.
+#: pcf_compress). Значения - как в constants.py casual-pre-loader
 _PCF_DEFAULT_ATTRS = {
     "operator start fadein": 0.0,
     "operator end fadein": 0.0,
@@ -35,7 +35,7 @@ _PCF_DEFAULT_ATTRS = {
 
 
 def pcf_vpk_path(pcf) -> str:
-    """Путь PCF внутри VPK-мода (particles/<имя файла>)."""
+    """Путь PCF внутри VPK-мода (particles/<имя файла>)"""
     src = pcf.source_path or "custom.pcf"
     if src.startswith("vpk:"):
         return src[4:]
@@ -44,7 +44,7 @@ def pcf_vpk_path(pcf) -> str:
 
 def active_custom_files(pcf) -> Dict[str, bytes]:
     """Оверрайд-файлы без «сирот»: перезаписи текстур материалов, которые
-    больше не используются ни одной системой, в VPK не попадают."""
+    больше не используются ни одной системой, в VPK не попадают"""
     used_mats = set()
     for el in pcf._all_definition_elements():
         if "material" in el:
@@ -63,14 +63,14 @@ def active_custom_files(pcf) -> Dict[str, bytes]:
 
 def export_vpk(pcf, dest_path: str, language: str = "en") -> str:
     """
-    Собирает VPK-мод: правленый PCF + кастомные материалы.
+    Собирает VPK-мод: правленый PCF + кастомные материалы
 
     Args:
         dest_path: полный путь к итоговому .vpk
         language:  язык сообщений об ошибках упаковки
 
     Returns:
-        Путь к созданному VPK.
+        Путь к созданному VPK
     """
     if pcf.root is None:
         raise RuntimeError("PCF не загружен")
@@ -97,7 +97,7 @@ def export_vpk(pcf, dest_path: str, language: str = "en") -> str:
         )
         # Текстурная часть отдельным VPK без PCF: casual-pre-loader
         # относит мод с любым .pcf к партикл-пакам и материалы из него
-        # не устанавливает — аддоном он увидит только чистый vpk.
+        # не устанавливает - аддоном он увидит только чистый vpk
         if materials:
             texroot = tmp_root / "texroot"
             for rel, data in materials.items():
@@ -119,14 +119,14 @@ def export_vpk(pcf, dest_path: str, language: str = "en") -> str:
 def serialize_pcf(pcf) -> bytes:
     """
     Сериализует дерево в бинарный PCF, вырезав default-атрибуты (сжатие
-    как у casual-pre-loader — чтобы файл влез в слот VPK для казуала).
+    как у casual-pre-loader - чтобы файл влез в слот VPK для казуала)
 
     Работает на КОПИИ дерева (re-parse собственных байтов): рабочее дерево
-    не мутируется, обзор свойств в UI сохраняет все строки.
+    не мутируется, обзор свойств в UI сохраняет все строки
 
     unicode="silent" ОБЯЗАТЕЛЬНО: "format" пишет в заголовок
-    "unicode_binary", который парсер DMX игры не знает — TF2 молча
-    отбрасывает весь PCF и эффекты пропадают.
+    "unicode_binary", который парсер DMX игры не знает - TF2 молча
+    отбрасывает весь PCF и эффекты пропадают
     """
     enc_ver, fmt_name, fmt_ver = pcf._encoding
 
@@ -146,7 +146,7 @@ def serialize_pcf(pcf) -> bytes:
 
 def strip_default_attrs(root) -> int:
     """Удаляет из всех элементов дерева атрибуты со значением-дефолтом.
-    Lossless: игра и превью подставляют те же дефолты. Возвращает счётчик."""
+    Lossless: игра и превью подставляют те же дефолты. Возвращает счётчик"""
     removed, seen, stack = 0, set(), [root]
     while stack:
         el = stack.pop()
@@ -186,15 +186,15 @@ def strip_default_attrs(root) -> int:
 
 
 def serialized_size(pcf) -> int:
-    """Размер экспортируемого (сжатого) PCF в байтах."""
+    """Размер экспортируемого (сжатого) PCF в байтах"""
     return len(serialize_pcf(pcf))
 
 
 def casual_size_overflow(pcf) -> Optional[int]:
     """
     На сколько байт сжатый PCF превышает исходный (потолок казуала).
-    <= 0 — влезает; > 0 — в казуале не загрузится (бай-пасс не берёт PCF
-    больше оригинального слота VPK). None — потолок неизвестен.
+    <= 0 - влезает; > 0 - в казуале не загрузится (бай-пасс не берёт PCF
+    больше оригинального слота VPK). None - потолок неизвестен
     """
     ceiling = pcf._loaded_size
     if not ceiling:
@@ -203,7 +203,7 @@ def casual_size_overflow(pcf) -> Optional[int]:
 
 
 def save(pcf, dest_path: str) -> None:
-    """Сохраняет текущее дерево в бинарный (сжатый) PCF."""
+    """Сохраняет текущее дерево в бинарный (сжатый) PCF"""
     if pcf.root is None:
         raise RuntimeError("PCF не загружен")
     Path(dest_path).write_bytes(serialize_pcf(pcf))

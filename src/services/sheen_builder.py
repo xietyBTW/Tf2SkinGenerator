@@ -1,21 +1,21 @@
 """
-Конструктор узора блеска Killstreak: узор из слоёв → кадры маски.
+Конструктор узора блеска Killstreak: узор из слоёв -> кадры маски
 
-Как маска ложится на оружие (калибровка в игре 2026-10-13, Scattergun):
-плоская проекция сбоку, насквозь модели. X маски — вдоль оружия, Y — сверху
+Как маска ложится на оружие (калибровка в игре, Scattergun):
+плоская проекция сбоку, насквозь модели. X маски - вдоль оружия, Y - сверху
 вниз, вся маска растянута на габариты модели. Поэтому слои считаются в
-«пространстве оружия»: x от 0 до A (A = длина / высота), y от 0 до 1 — тогда
+«пространстве оружия»: x от 0 до A (A = длина / высота), y от 0 до 1 - тогда
 искры на оружии круглые, а наклон полос такой, как в превью. Квадратная
-маска потом сжимается по X в A раз, а игра растягивает её обратно.
+маска потом сжимается по X в A раз, а игра растягивает её обратно
 
-Время узора — доля прохода t от 0 до 1; сколько это секунд, решает число
+Время узора - доля прохода t от 0 до 1; сколько это секунд, решает число
 кадров (длина прохода в эффекте), кадры крутит прокси игры со скоростью 25 в
-секунду. Кадр 0 игра не рисует — он пустой.
+секунду. Кадр 0 игра не рисует - он пустой
 
-Свои узоры живут в work/sheen_patterns/<id>.json (картинки слоёв — рядом,
+Свои узоры живут в work/sheen_patterns/<id>.json (картинки слоёв - рядом,
 в images/). В VMT стоит `tf2sg/sheen/<id>_a<A·10>_<кадров>`, файл маски
 по этому имени строит сборка (sheen_patterns.materialize): правка узора
-доходит до всех оружий с ним при следующей сборке.
+доходит до всех оружий с ним при следующей сборке
 """
 
 from __future__ import annotations
@@ -36,19 +36,19 @@ from src.shared.logging_config import get_logger
 logger = get_logger(__name__)
 
 SIZE = 128                    # высота маски по умолчанию
-#: Качество - высота маски; ширина по пропорции оружия (mask_shape).
+#: Качество - высота маски, ширина по пропорции оружия (mask_shape)
 QUALITY = {"low": 64, "medium": 128, "high": 256}
 PEAK = 230                    # как у готовых узоров (стоковая маска до 216)
 MAX_LAYERS = 8
 DEFAULT_ASPECT = 3.0          # пропорция большинства стволов
-#: Углы: 0° — вдоль оружия к дулу (→), 90° — вниз (↓), как на плитке превью.
+#: Углы: 0° - вдоль оружия к дулу (->), 90° - вниз (↓), как на плитке превью
 _OLD_DIRS = {"right": 0, "down": 90, "left": 180, "up": 270}
 
 #: Типы слоёв и их поля. Это же отдаётся странице: поля формы строятся отсюда.
 #: (ключ, вид, умолчание, мин, макс, шаг, подписи ru/en)
 DEFAULT_STOPS = [[0.0, "#ff4d4d"], [0.5, "#ffc93c"], [1.0, "#3fd8ff"]]
 MAX_STOPS = 8
-#: «image» - цвета самой картинки, есть только у слоя-картинки.
+#: «image» - цвета самой картинки, есть только у слоя-картинки
 _COMMON = [
     ("fill", "choice", "solid", ("solid", "space", "time", "image"), None, None, ("Заливка", "Fill")),
     ("color", "color", "#ffffff", None, None, None, ("Цвет слоя", "Layer color")),
@@ -135,7 +135,7 @@ CHOICE_LABELS = {
 }
 
 
-#: Поля-счётчики: целые.
+#: Поля-счётчики: целые
 _WHOLE = ("count", "pulses", "repeat")
 
 
@@ -147,7 +147,7 @@ def _finite(value) -> bool:
 
 
 def _clean_stops(value) -> list:
-    """Точки градиента [[позиция 0…1, #rrggbb]], от 2 до MAX_STOPS, по порядку."""
+    """Точки градиента [[позиция 0…1, #rrggbb]], от 2 до MAX_STOPS, по порядку"""
     out = []
     for item in value if isinstance(value, list) else []:
         try:
@@ -161,18 +161,18 @@ def _clean_stops(value) -> list:
 
 
 def _gradient(stops: list, x: np.ndarray) -> np.ndarray:
-    """Цвет градиента 0…1 в точках x (любой формы) → (..., 3)."""
+    """Цвет градиента 0…1 в точках x (любой формы) -> (..., 3)"""
     pos = [st[0] for st in stops]
     cols = np.array([_rgb(st[1]) for st in stops])
     return np.stack([np.interp(x, pos, cols[:, c]) for c in range(3)], axis=-1).astype(np.float32)
 
 
 def _rgb(hexc: str) -> np.ndarray:
-    """#rrggbb → (3,) float32 0…1."""
+    """#rrggbb -> (3,) float32 0…1"""
     return np.array([int(hexc[i:i + 2], 16) / 255 for i in (1, 3, 5)], np.float32)
 
 
-# ── Узор: проверка ───────────────────────────────────────────────────────── #
+# Узор: проверка
 
 def _defaults(kind: str) -> dict:
     out = {"type": kind, "on": True, "start": 0.0, "end": 0.9}
@@ -187,7 +187,7 @@ def new_layer(kind: str) -> dict:
 
 def clean_spec(spec) -> dict:  # noqa: C901
     """Узор из присланного: известные типы, поля в пределах, не больше
-    MAX_LAYERS слоёв. Мусор не роняет сборку — берутся умолчания."""
+    MAX_LAYERS слоёв. Мусор не роняет сборку - берутся умолчания"""
     layers = []
     for raw in (spec or {}).get("layers", []) if isinstance(spec, dict) else []:
         if not isinstance(raw, dict) or raw.get("type") not in LAYER_TYPES:
@@ -241,12 +241,12 @@ def clean_spec(spec) -> dict:  # noqa: C901
     return {"layers": layers, "quality": quality if quality in QUALITY else "medium"}
 
 
-# ── Отрисовка ────────────────────────────────────────────────────────────── #
+# Отрисовка
 
 def _noise(w: int, h: int, cells_y: float, cells_x: float, seed: int) -> np.ndarray:
     """Плавный шум 0…1 размером h×w: cells_y клеток по высоте, cells_x по
     ширине (в пространстве оружия клетки квадратные), бесшовный по обеим
-    осям — дымку можно сдвигать под любым углом."""
+    осям - дымку можно сдвигать под любым углом"""
     rng = np.random.default_rng(seed)
     cy = max(2, int(round(cells_y)))
     cx = max(2, int(round(cells_x)))
@@ -271,9 +271,9 @@ def _fbm(w: int, h: int, cells: float, cells_x: float, seed: int) -> np.ndarray:
 
 
 def _band(q: np.ndarray, center, width: float, soft: float) -> np.ndarray:
-    """Полоса шириной `width` вокруг center: мягкость 1 — треугольник,
-    ближе к 0 — резкий край. clip((1 - |q-c| / (w/2)) / soft) на месте,
-    без промежуточных массивов: это самый частый расчёт кадра."""
+    """Полоса шириной `width` вокруг center: мягкость 1 - треугольник,
+    ближе к 0 - резкий край. clip((1 - |q-c| / (w/2)) / soft) на месте,
+    без промежуточных массивов: это самый частый расчёт кадра"""
     soft = max(soft, 0.05)
     out = q - center
     np.abs(out, out=out)
@@ -284,11 +284,11 @@ def _band(q: np.ndarray, center, width: float, soft: float) -> np.ndarray:
 
 def resolve_image(value: str) -> Optional[Path]:
     """Файл картинки слоя, всегда абсолютным путём: в библиотеке узор
-    хранит её как images/<файл>, страница присылает полный путь.
+    хранит её как images/<файл>, страница присылает полный путь
 
     Абсолютным - обязательно: в приложении папка работ задана относительно
     (data_dir() = "."), и относительный путь, отданный странице, при
-    следующем превью искался уже внутри библиотеки - картинка пропадала."""
+    следующем превью искался уже внутри библиотеки - картинка пропадала"""
     if not value:
         return None
     p = Path(value)
@@ -300,7 +300,7 @@ def resolve_image(value: str) -> Optional[Path]:
 
 
 #: Картинка слоя хранится не крупнее ~1 Мп: маска не бывает больше
-#: 1024×256, и такой запас покрывает любую пропорцию картинки до 16:1.
+#: 1024×256, и такой запас покрывает любую пропорцию картинки до 16:1
 _SOURCE_PIXELS = 1 << 20
 
 
@@ -308,7 +308,7 @@ _SOURCE_PIXELS = 1 << 20
 def _source(path: str, _mtime_ns: int, _size: int):
     """Картинка слоя RGBA, уже уменьшенная. Кэш по пути, времени и размеру
     файла: без него каждая правка узора заново декодировала все картинки
-    (8000×8000 PNG - 2.5 с, восемь слоёв - больше 10 с на одно превью)."""
+    (8000×8000 PNG - 2.5 с, восемь слоёв - больше 10 с на одно превью)"""
     from PIL import Image, ImageOps
 
     def fit(width: int, height: int) -> tuple:
@@ -325,8 +325,8 @@ def _source(path: str, _mtime_ns: int, _size: int):
 def _picture(layer: dict, h: int, w: int, aspect: float) -> Optional[tuple]:
     """Картинка слоя в маске: (покрытие h×w, цвет 3×h×w), всё 0…1 и цвет уже
     умножен на покрытие. «Целиком» - с пропорцией картинки на оружии,
-    «растянуть» - на весь бок; потом размер, поворот (по часовой, как на
-    плитке превью) и положение центра."""
+    «растянуть» - на весь бок, потом размер, поворот (по часовой, как на
+    плитке превью) и положение центра"""
     from PIL import Image
 
     path = resolve_image(layer.get("image", ""))
@@ -334,8 +334,8 @@ def _picture(layer: dict, h: int, w: int, aspect: float) -> Optional[tuple]:
         return None
     st = path.stat()
     src = _source(str(path), st.st_mtime_ns, st.st_size)
-    # Холст в пропорции оружия; потом он приводится к маске - на оружии
-    # игра растянет её обратно в пропорцию.
+    # Холст в пропорции оружия, потом он приводится к маске - на оружии
+    # игра растянет её обратно в пропорцию
     cw, ch = max(1, int(round(h * aspect))), h
     if layer.get("fit") == "stretch":
         bw, bh = cw, ch
@@ -346,12 +346,12 @@ def _picture(layer: dict, h: int, w: int, aspect: float) -> Optional[tuple]:
     size = (max(1, int(bw * zoom)), max(1, int(bh * zoom)))
     pic = src.resize(size, Image.LANCZOS)
     # Поворот - на холсте в пропорции оружия: точки там квадратные на его
-    # боку, и картинка не перекашивается.
+    # боку, и картинка не перекашивается
     rot = float(layer.get("rot", 0) or 0)
     if rot:
         pic = pic.rotate(-rot, Image.BICUBIC, expand=True)
     canvas = Image.new("RGBA", (cw, ch), (0, 0, 0, 0))
-    # floor, как раньше (cw - w) // 2: по центру узоры до этих настроек те же.
+    # floor, как у (cw - w) // 2: узоры старых работ по центру не сдвигаются
     canvas.paste(pic, (math.floor(float(layer.get("pos_x", 0.5)) * cw - pic.width / 2),
                        math.floor(float(layer.get("pos_y", 0.5)) * ch - pic.height / 2)))
     arr = np.asarray(canvas.resize((w, h), Image.LANCZOS), np.float32) / 255
@@ -363,9 +363,9 @@ def _picture(layer: dict, h: int, w: int, aspect: float) -> Optional[tuple]:
 
 
 def mask_shape(aspect: float, quality: str = "medium") -> tuple:
-    """(высота, ширина) маски. Высота — от качества, ширина — степень двойки
+    """(высота, ширина) маски. Высота - от качества, ширина - степень двойки
     по пропорции оружия: игра растягивает маску на бок оружия, и квадратная
-    маска 128×128 давала на стволе 3:1 всего ~43 точки на высоту по длине."""
+    маска 128×128 давала на стволе 3:1 всего ~43 точки на высоту по длине"""
     h = QUALITY.get(quality, QUALITY["medium"])
     w = 2 ** int(round(math.log2(max(4.0, h * max(0.5, aspect)))))
     return h, int(min(1024, max(16, w)))
@@ -373,27 +373,27 @@ def mask_shape(aspect: float, quality: str = "medium") -> tuple:
 
 class _Layer:
     """Слой, готовый к отрисовке: всё, что не зависит от кадра, считается
-    один раз. Маска h×w; x — вдоль оружия 0…A, y — по высоте 0…1."""
+    один раз. Маска h×w; x - вдоль оружия 0…A, y - по высоте 0…1"""
 
     def __init__(self, spec: dict, h: int, w: int, aspect: float):
         self.s = spec
         self.h, self.w = h, w
         self.aspect = aspect
         self.pic = self.pic_rgb = None             # картинка: яркость и свой цвет
-        # float32: на маске 256×1024 вдвое меньше памяти и заметно быстрее.
+        # float32: на маске 256×1024 вдвое меньше памяти и заметно быстрее
         v, u = np.mgrid[0:h, 0:w].astype(np.float32)
         self.x = (u + 0.5) / w * np.float32(aspect)  # пространство оружия
         self.y = (v + 0.5) / h
         if spec.get("fill") == "space":
             self.gfield = self._along(float(spec["gangle"]))[0]
         if "angle" in spec:
-            # Направление слоя за проход не меняется — проекции один раз,
-            # а не на каждый кадр (на 256×1024 это половина всего расчёта).
+            # Направление слоя за проход не меняется - проекции один раз,
+            # а не на каждый кадр (на 256×1024 это половина всего расчёта)
             q, r, span = self._along(float(spec["angle"]))
             self.motion = (q * span, r, span)
         kind = spec["type"]
         if kind == "stripe":
-            # Наклон за проход не меняется, волна - только фазой.
+            # Наклон за проход не меняется, волна - только фазой
             q, across, _span = self.motion
             self.tilted = q + np.float32(math.tan(math.radians(spec["tilt"]))) * (across - 0.5)
             self.wave_at = np.float32(2 * np.pi * spec["waves"]) * across
@@ -408,11 +408,11 @@ class _Layer:
             self.birth = rng.random(n) * max(0.0, 1 - life)
             self.stamp = self._stamp()
         elif kind == "clouds":
-            # Шум шире маски вдвое — есть куда плыть; бесшовный. Клетки
-            # квадратные на оружии: по длине их в A раз больше.
+            # Шум шире маски вдвое - есть куда плыть, бесшовный. Клетки
+            # квадратные на оружии: по длине их в A раз больше
             cells = 12.0 / float(spec["scale"])
             cloud = _fbm(w * 2, h, cells, cells * aspect * 2, int(spec["seed"]))
-            # Сетка шума видна ступеньками — сглаживаем один раз.
+            # Сетка шума видна ступеньками - сглаживаем один раз
             from PIL import Image, ImageFilter
             img = Image.fromarray((cloud * 255).astype(np.uint8)).filter(
                 ImageFilter.GaussianBlur(h / 48))
@@ -426,12 +426,12 @@ class _Layer:
             if pic is not None:
                 cover, rgb = pic
                 if spec.get("fill") == "image":
-                    # Яркость - покрытие, цвет - сама картинка (без покрытия).
+                    # Яркость - покрытие, цвет - сама картинка (без покрытия)
                     self.pic = cover
                     self.pic_rgb = np.divide(rgb, cover, out=np.zeros_like(rgb), where=cover > 1e-4)
                 else:
                     self.pic = 0.299 * rgb[0] + 0.587 * rgb[1] + 0.114 * rgb[2]   # как Pillow «L»
-        # Цвет, не зависящий от кадра, - один раз; «во времени» - по кадрам.
+        # Цвет, не зависящий от кадра, - один раз, «во времени» - по кадрам
         fill = spec.get("fill", "solid")
         if fill == "time":
             self.fixed = None
@@ -445,15 +445,15 @@ class _Layer:
         self.bounce = spec.get("bounce") == "back"
 
     def colour(self, s: float) -> np.ndarray:
-        """Цвет слоя каналом вперёд: (3, 1, 1) или (3, h, w). «По оружию» —
-        градиент под углом `gangle`, «во времени» — по доле s отрезка слоя."""
+        """Цвет слоя каналом вперёд: (3, 1, 1) или (3, h, w). «По оружию» -
+        градиент под углом `gangle`, «во времени» - по доле s отрезка слоя"""
         if self.fixed is None:
             return _gradient(self.s["stops"], np.array(s)).reshape(3, 1, 1)
         return self.fixed
 
     def phase(self, s: float) -> float:
         """Доля движения слоя: за отрезок оно идёт `repeat` раз, «туда и
-        обратно» - каждый второй раз назад."""
+        обратно» - каждый второй раз назад"""
         if self.repeat <= 1:
             return s
         x = s * self.repeat
@@ -464,7 +464,7 @@ class _Layer:
     def _along(self, angle: float) -> tuple:
         """Координата вдоль направления под углом (0…1 от края до края
         оружия) и поперёк него (0…1). Угол в пространстве оружия: на
-        плитке и на боку оружия 45° — это правда диагональ."""
+        плитке и на боку оружия 45° - это правда диагональ"""
         a = math.radians(angle)
         c, s = math.cos(a), math.sin(a)
         dx, dy = self.x - self.aspect / 2, self.y - 0.5
@@ -476,7 +476,7 @@ class _Layer:
 
     def _moving(self, p: float) -> tuple:
         """(координата вдоль движения в высотах оружия, положение фронта,
-        поперечная 0…1) для угла слоя."""
+        поперечная 0…1) для угла слоя"""
         q, r, span = self.motion
         margin = 0.6
         front = -margin + (span + 2 * margin) * p
@@ -487,7 +487,7 @@ class _Layer:
 
     def frame(self, s: float) -> np.ndarray:
         """Яркость слоя 0…1 (h×w) в доле s его отрезка времени: плавность
-        входа и выхода - по всему отрезку, движение - по `phase`."""
+        входа и выхода - по всему отрезку, движение - по `phase`"""
         sp = self.s
         fade = float(sp["fade"])
         fade_env = max(0.0, 1.0 if fade <= 0 else min(1.0, s / fade, (1 - s) / fade))
@@ -501,7 +501,7 @@ class _Layer:
             beat = beat ** (1 + 6 * float(sp["sharp"]))
             return self.grain * np.float32(beat * env)
         if kind == "sparkle":
-            # Искры гаснут сами — плавность слоя только приглушает край.
+            # Искры гаснут сами - плавность слоя только приглушает край
             return self._sparkles(s) * np.float32(min(1.0, fade_env * 3) * float(sp["power"]))
         if kind == "clouds":
             a = math.radians(float(sp["angle"]))
@@ -525,7 +525,7 @@ class _Layer:
         return self.blank()
 
     def _stripes(self, s: float) -> np.ndarray:
-        """Полосы в доле s движения, яркость 0…1."""
+        """Полосы в доле s движения, яркость 0…1"""
         sp = self.s
         _q, front, _r = self._moving(s)
         q = self.tilted
@@ -534,7 +534,7 @@ class _Layer:
         width, soft = float(sp["width"]), max(float(sp["soft"]), 0.05)
         # Полоса j стоит в front - j·spacing. Точку задевают только полосы
         # ближе width/2: от near-(k-1) до near+k, где near - ближайшая
-        # впереди. Считаем их, а не все (до 12) на всю маску.
+        # впереди. Считаем их, а не все (до 12) на всю маску
         n = int(sp["count"])
         d = max(float(sp["spacing"]), 1e-3)
         k = max(1, int(math.ceil(width / 2 / d)))
@@ -550,7 +550,7 @@ class _Layer:
         first = near.astype(np.intp) + 1            # её номер в таблице яркости
         lo, hi = int(first.min()) - 1, int(first.max()) - 1
         # Яркость полосы j - таблицей: по краям нули (j < 0 и j ≥ n), так
-        # и без where и pow на всю маску.
+        # и без where и pow на всю маску
         weight = np.zeros(n + 2, np.float32)
         weight[1:-1] = trail ** np.arange(n)
         slope = np.float32(-d / (width / 2 * soft))
@@ -558,7 +558,7 @@ class _Layer:
         for off in range(1 - k, k + 1):
             if hi + off < 0 or lo + off >= n:
                 continue
-            # Расстояние до полосы near+off - |off - frac| шагов.
+            # Расстояние до полосы near+off - |off - frac| шагов
             band = frac - np.float32(off)
             np.abs(band, out=band)
             band *= slope
@@ -569,8 +569,8 @@ class _Layer:
         return out
 
     def _stamp(self) -> np.ndarray:
-        """Одна искра в пикселях маски: точка и лучи креста — круглая на
-        оружии при любой пропорции маски."""
+        """Одна искра в пикселях маски: точка и лучи креста - круглая на
+        оружии при любой пропорции маски"""
         sp = self.s
         r = float(sp["size"]) / 2                      # в высотах оружия
         star = float(sp["star"])
@@ -609,7 +609,7 @@ class _Layer:
 
 
 class Cancelled(Exception):
-    """Расчёт кадров прерван: узор уже поменялся, результат не нужен."""
+    """Расчёт кадров прерван: узор уже поменялся, результат не нужен"""
 
 
 def iter_frames(spec: dict, count: int, aspect: float = DEFAULT_ASPECT,
@@ -617,17 +617,17 @@ def iter_frames(spec: dict, count: int, aspect: float = DEFAULT_ASPECT,
                 cancelled: Optional[Callable[[], bool]] = None,
                 palette: str = "warm") -> Iterator[np.ndarray]:
     """Кадры маски RGBA uint8 (h×w по `mask_shape`) по одному: кадр 0
-    пустой. `quality` — вместо качества узора (превью шаблонов считается
+    пустой. `quality` - вместо качества узора (превью шаблонов считается
     мельче). `cancelled()` спрашивается перед каждым кадром - True
-    прерывает расчёт исключением Cancelled.
+    прерывает расчёт исключением Cancelled
 
     Слои накладываются снизу списка вверх (как слои в редакторах картинок):
     «светлее» - по каждому каналу ярчайший, «сложить» - сумма, «маска» -
     всё, что под слоем, видно только сквозь него, «вырезать» - наоборот.
-    Для «светлее» и «сложить» порядок не важен.
+    Для «светлее» и «сложить» порядок не важен
 
     `palette` - гамма узора (sheen_palette): в холодной красный канал несёт
-    форму слоёв, а не цвет - иначе чёрный слой исчез бы из маски."""
+    форму слоёв, а не цвет - иначе чёрный слой исчез бы из маски"""
     spec = clean_spec(spec)
     aspect = min(12.0, max(0.5, float(aspect or DEFAULT_ASPECT)))
     h, w = mask_shape(aspect, quality or spec["quality"])
@@ -636,7 +636,7 @@ def iter_frames(spec: dict, count: int, aspect: float = DEFAULT_ASPECT,
     blank[..., 3] = 255
     yield blank
     # Каналом вперёд (3, h, w): у (h, w, 3) внутренний цикл numpy шёл бы
-    # по трём числам, и каждая операция кадра была втрое-вчетверо дольше.
+    # по трём числам, и каждая операция кадра была втрое-вчетверо дольше
     acc = np.empty((3, h, w), np.float32)
     cold = palette == "cold"
     cov = np.empty((h, w), np.float32)          # форма слоёв без цвета
@@ -680,18 +680,18 @@ def iter_frames(spec: dict, count: int, aspect: float = DEFAULT_ASPECT,
 
 def render(spec: dict, count: int, aspect: float = DEFAULT_ASPECT,
            quality: Optional[str] = None, palette: str = "warm") -> List[np.ndarray]:
-    """Все кадры маски списком (`iter_frames`) - для записи VTF."""
+    """Все кадры маски списком (`iter_frames`) - для записи VTF"""
     return list(iter_frames(spec, count, aspect, quality, palette=palette))
 
 
 def mod_bytes(count: int, aspect: float, quality: str) -> int:
-    """Сколько маска весит в моде: DXT1 — полбайта на точку, кадров count."""
+    """Сколько маска весит в моде: DXT1 - полбайта на точку, кадров count"""
     h, w = mask_shape(aspect, quality)
     return count * h * w // 2
 
 
 def _sheet_layout(count: int, aspect: float, quality: str) -> dict:
-    """Раскладка листа кадров: ширина листа до 4096 точек."""
+    """Раскладка листа кадров: ширина листа до 4096 точек"""
     h, w = mask_shape(min(12.0, max(0.5, float(aspect or DEFAULT_ASPECT))), quality)
     return {"frames": count, "cols": max(1, 4096 // w), "cell_w": w, "cell_h": h,
             "bytes": mod_bytes(count, aspect, quality)}
@@ -700,9 +700,9 @@ def _sheet_layout(count: int, aspect: float, quality: str) -> dict:
 def preview_sheet(spec: dict, count: int, aspect: float, out_png: Path,
                   cancelled: Optional[Callable[[], bool]] = None,
                   palette: str = "warm") -> dict:
-    """Кадры одной картинкой-сеткой для превью страницы — те же, что уйдут
+    """Кадры одной картинкой-сеткой для превью страницы - те же, что уйдут
     в мод, в том же качестве. Кадры пишутся в лист сразу, списком не
-    копятся: на высоком качестве и 8 с прохода это 200 МБ лишней памяти."""
+    копятся: на высоком качестве и 8 с прохода это 200 МБ лишней памяти"""
     from PIL import Image
 
     layout = _sheet_layout(count, aspect, clean_spec(spec)["quality"])
@@ -715,7 +715,7 @@ def preview_sheet(spec: dict, count: int, aspect: float, out_png: Path,
     out_png = Path(out_png)
     out_png.parent.mkdir(parents=True, exist_ok=True)
     # Через временный файл: недописанный лист не должен попасть в кэш превью.
-    # Сжатие быстрое - файл читается тут же (2 с → 0.3 с).
+    # Сжатие быстрое - файл читается тут же (2 с -> 0.3 с)
     part = out_png.with_name(f"{out_png.stem}.{secrets.token_hex(4)}.part")
     Image.fromarray(sheet).save(part, format="PNG", compress_level=1)
     part.replace(out_png)
@@ -723,10 +723,10 @@ def preview_sheet(spec: dict, count: int, aspect: float, out_png: Path,
 
 
 #: Сколько последних листов превью держать: Ctrl+Z в конструкторе
-#: возвращает к ним без расчёта.
+#: возвращает к ним без расчёта
 PREVIEW_KEEP = 10
 #: Версия отрисовки в ключе кэша превью: папка во временных файлах
-#: переживает обновление приложения. Менять при правке математики кадров.
+#: переживает обновление приложения. Менять при правке математики кадров
 _RENDER_VERSION = 3
 
 
@@ -735,9 +735,9 @@ def preview(spec: dict, count: int, aspect: float, folder: Path,
             gamut_spec: Optional[dict] = None) -> dict:
     """Лист кадров для страницы (`preview_sheet`) с кэшем в `folder`: тот же
     узор с теми же файлами картинок - тот же лист, без расчёта. Лист - сама
-    маска в гамме узора; страница показывает её так, как смешает игра, по
+    маска в гамме узора, страница показывает её так, как смешает игра, по
     `palette`, а слои из `lost` в игре не видны (sheen_palette). Гамму
-    решает весь узор (`gamut_spec`), даже когда в превью один слой «соло»."""
+    решает весь узор (`gamut_spec`), даже когда в превью один слой «соло»"""
     import os
     from src.services import sheen_palette
 
@@ -762,7 +762,7 @@ def preview(spec: dict, count: int, aspect: float, folder: Path,
         except OSError:                         # соседний запрос как раз удалил
             pass
     res = {**preview_sheet(spec, count, aspect, out, cancelled, gamut["palette"]), **gamut}
-    # Чистят и параллельные запросы: файл может пропасть между glob и stat.
+    # Чистят и параллельные запросы: файл может пропасть между glob и stat
     def age(p: Path) -> float:
         try:
             return p.stat().st_mtime
@@ -774,7 +774,7 @@ def preview(spec: dict, count: int, aspect: float, folder: Path,
 
 
 def thumbnail(spec: dict, aspect: float, out_png: Path) -> str:
-    """Один кадр узора (самый яркий из прохода) — карточка шаблона."""
+    """Один кадр узора (самый яркий из прохода) - карточка шаблона"""
     from PIL import Image
 
     best = max(iter_frames(spec, 31, aspect, "low"), key=lambda f: int(f[..., :3].sum()))
@@ -785,12 +785,12 @@ def thumbnail(spec: dict, aspect: float, out_png: Path) -> str:
 
 
 def library_dir() -> Path:
-    """work/sheen_patterns — рядом с работами (у dev-сервера своя папка)."""
+    """work/sheen_patterns - рядом с работами (у dev-сервера своя папка)"""
     from src.services import work_store
     return (Path(work_store.WORK_DIR) / "sheen_patterns").resolve()
 
 
-# ── Готовые стартовые узоры (как готовые узоры эффекта) ─────────────────── #
+# Готовые стартовые узоры (как готовые узоры эффекта)
 
 def _l(kind: str, **kw) -> dict:
     layer = new_layer(kind)

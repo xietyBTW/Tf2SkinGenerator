@@ -1,23 +1,23 @@
 """
-Собирает таблицу «система частиц → чем она вызывается» (src/data/particle_sources_table.py).
+Собирает таблицу «система частиц -> чем она вызывается» (src/data/particle_sources_table.py)
 
 Игра нигде не хранит такой таблицы: эффект называют по имени скрипты оружия
 (вспышка, взрыв, трассер), код игры (пламя огнемёта, луч медигана, турель,
 крит) и items_game (необычные эффекты). Здесь всё это сводится в один словарь
-раз на версию игры — приложению достаётся готовый модуль, без дешифровки
-и без исходников движка в рантайме.
+раз на версию игры - приложению достаётся готовый модуль, без дешифровки
+и без исходников движка в рантайме
 
 Запуск (нужны игра и исходники TF2 из Source SDK 2013):
     python scripts/particle_sources_build.py D:/GitHub/ParticleOracle/sdk/src/game
 
 Источники по убыванию точности:
 1. `scripts/tf_weapon_*.ctx` (ICE, см. vice.py): MuzzleFlashParticleEffect,
-   ExplosionEffect/PlayerEffect/WaterEffect, TracerEffect → предмет назван
+   ExplosionEffect/PlayerEffect/WaterEffect, TracerEffect -> предмет назван
    точно, вместе с токеном локализации.
-2. Строковые литералы в коде игры: имя файла говорит, чьё это —
+2. Строковые литералы в коде игры: имя файла говорит, чьё это -
    tf_weapon_flamethrower.cpp, tf_obj_sentrygun.cpp, merasmus.cpp.
 3. Дерево PCF: дочерние системы необычного эффекта наследуют его.
-4. Имя файла PCF — последняя догадка (taunt_fx, bullet_tracers).
+4. Имя файла PCF - последняя догадка (taunt_fx, bullet_tracers)
 """
 
 from __future__ import annotations
@@ -36,7 +36,7 @@ import vice  # noqa: E402
 
 OUT = ROOT / 'src' / 'data' / 'particle_sources_table.py'
 
-#: Снаряд в коде → скрипт оружия, которое его пускает.
+#: Снаряд в коде -> скрипт оружия, которое его пускает
 PROJECTILES = {
     'flare': 'flaregun', 'rocket': 'rocketlauncher',
     'energy_ball': 'particle_cannon', 'energy_ring': 'raygun',
@@ -46,8 +46,8 @@ PROJECTILES = {
     'ball_ornament': 'bat_giftwrap',
 }
 
-#: Файл кода → (вид, метка). Первое совпадение по имени файла побеждает;
-#: `c_` (клиентская половина) отбрасывается заранее.
+#: Файл кода -> (вид, метка). Первое совпадение по имени файла побеждает;
+#: `c_` (клиентская половина) отбрасывается заранее
 FILE_RULES = [
     (r'^obj_sentrygun|^tf_obj_sentrygun', 'building', 'sentry'),
     (r'^obj_teleporter|^tf_obj_teleporter', 'building', 'teleporter'),
@@ -70,8 +70,8 @@ FILE_RULES = [
      r'|^tf_weapon|^tf_weaponbase|^basecombatweapon', 'game', ''),
 ]
 
-#: Файл PCF → (вид, метка), когда больше ничего не сказало. По вхождению,
-#: первое совпадение побеждает. Метка у оружия — стебель его скрипта.
+#: Файл PCF -> (вид, метка), когда больше ничего не сказало. По вхождению,
+#: первое совпадение побеждает. Метка у оружия - стебель его скрипта
 PCF_KINDS = [
     ('taunt', 'taunt', ''), ('rps', 'taunt', ''),
     ('drg_cowmangler', 'weapon', 'particle_cannon'), ('drg_bison', 'weapon', 'raygun'),
@@ -105,7 +105,7 @@ PCF_KINDS = [
 
 
 def weapon_stem(file_stem: str, scripts: Set[str]) -> str:
-    """Скрипт оружия по имени файла кода. Пусто — общий для оружия."""
+    """Скрипт оружия по имени файла кода. Пусто - общий для оружия"""
     stem = re.sub(r'^c_', '', file_stem)
     m = re.match(r'^tf_weapon_(.+)$', stem)
     if m:
@@ -117,7 +117,7 @@ def weapon_stem(file_stem: str, scripts: Set[str]) -> str:
 
 
 def classify_file(file_name: str, scripts: Set[str]):
-    """(вид, метка) по имени файла кода; None — файл не про эффекты (HUD)."""
+    """(вид, метка) по имени файла кода; None - файл не про эффекты (HUD)"""
     stem = re.sub(r'\.(cpp|h)$', '', file_name)
     bare = re.sub(r'^c_', '', stem)
     weapon = weapon_stem(stem, scripts)
@@ -146,9 +146,9 @@ def main(sdk_game: str) -> None:
     root = paths['root']
     paks = vps.open_vpks([paths['misc_vpk']])
 
-    # 1. Скрипты оружия.
-    scripts: Dict[str, str] = {}          # stem → текст
-    printnames: Dict[str, str] = {}       # stem → токен локализации
+    # 1. Скрипты оружия
+    scripts: Dict[str, str] = {}          # stem -> текст
+    printnames: Dict[str, str] = {}       # stem -> токен локализации
     for name in sorted(n for n in paks[0]
                        if n.startswith('scripts/tf_weapon_') and n.endswith('.ctx')):
         stem = name[len('scripts/tf_weapon_'):-4]
@@ -158,16 +158,16 @@ def main(sdk_game: str) -> None:
         if m:
             printnames[stem] = m.group(1)
     print(f'скриптов оружия: {len(scripts)}')
-    # Метка без скрипта — ошибка таблиц выше, а не данных игры.
+    # Метка без скрипта - ошибка таблиц выше, а не данных игры
     for stem in set(PROJECTILES.values()) | {l for _, k, l in PCF_KINDS
                                              if l and k == 'weapon'}:
         if stem not in scripts:
             print(f'  внимание: скрипта tf_weapon_{stem}.ctx нет')
 
-    # 2. Все системы и дерево каждого файла.
+    # 2. Все системы и дерево каждого файла
     sources: Dict[str, Set[str]] = {}
     files: Dict[str, str] = {}
-    parents: Dict[str, str] = {}          # система → корень дерева
+    parents: Dict[str, str] = {}          # система -> корень дерева
     for pcf in ParticleEditorService.list_game_pcfs(root):
         svc = ParticleEditorService()
         try:
@@ -189,7 +189,7 @@ def main(sdk_game: str) -> None:
     def add(name: str, token: str) -> None:
         sources.setdefault(name, set()).add(token)
 
-    # Скрипты: точные имена и трассеры с командным хвостом.
+    # Скрипты: точные имена и трассеры с командным хвостом
     for stem, text in scripts.items():
         for key, value in re.findall(r'"([A-Za-z]+Effect)"\s+"([^"]+)"', text):
             low = value.lower()
@@ -200,7 +200,7 @@ def main(sdk_game: str) -> None:
                     if sl.startswith(low + '_'):
                         add(orig, f'weapon:{stem}')
 
-    # 3. Код игры.
+    # 3. Код игры
     literal_files: Dict[str, Set[str]] = {}
     for folder, _, names in os.walk(sdk_game):
         for fn in names:
@@ -220,8 +220,8 @@ def main(sdk_game: str) -> None:
             targets = [lower[low]]
         elif '%' in lit:
             # Шаблон вроде `teleporter_%s_%s_level%d`: голова до первого
-            # подставляемого поля, но только длинная и со словом целиком —
-            # `player_%d` иначе накрывал бы всё, что начинается с player.
+            # подставляемого поля, но только длинная и со словом целиком -
+            # `player_%d` иначе накрывал бы всё, что начинается с player
             head = low.split('%')[0]
             if len(head) >= 8 and head.endswith('_'):
                 targets = [orig for sl, orig in lower.items() if sl.startswith(head)]
@@ -234,7 +234,7 @@ def main(sdk_game: str) -> None:
                 code_hits += 1
     print(f'ссылок из кода: {code_hits}')
 
-    # 4. Необычные эффекты: корень и все его потомки.
+    # 4. Необычные эффекты: корень и все его потомки
     from src.data.hats_parser import parse_localization
     text = open(get_items_game_path(root), encoding='utf-8', errors='replace').read()
     unusual = {fx['system']: fx for fx in
@@ -244,8 +244,8 @@ def main(sdk_game: str) -> None:
         if top in unusual or name in unusual:
             add(name, f'unusual:{top if top in unusual else name}')
 
-    # 5. Файл PCF — всем: у `flamethrower` из кода только «правила игры»
-    # (там его зовут по имени класса), а файл говорит «огнемёт».
+    # 5. Файл PCF - всем: у `flamethrower` из кода только «правила игры»
+    # (там его зовут по имени класса), а файл говорит «огнемёт»
     for name, pcf in files.items():
         base = pcf.rsplit('/', 1)[-1]
         for word, kind, label in PCF_KINDS:
@@ -258,12 +258,12 @@ def main(sdk_game: str) -> None:
 
     lines = [
         '"""',
-        'Чем вызывается каждая система частиц игры — собрано скриптом',
+        'Чем вызывается каждая система частиц игры - собрано скриптом',
         'scripts/particle_sources_build.py. Не править руками: перегенерировать.',
         '',
-        'Токен источника: `вид:метка`. Виды — в src/data/particle_sources.py;',
-        'метка у оружия — стебель скрипта (`flamethrower`), у постройки — её',
-        'слово (`sentry`), у необычного эффекта — имя корневой системы.',
+        'Токен источника: `вид:метка`. Виды - в src/data/particle_sources.py;',
+        'метка у оружия - стебель скрипта (`flamethrower`), у постройки - её',
+        'слово (`sentry`), у необычного эффекта - имя корневой системы.',
         '"""',
         '',
         'from __future__ import annotations',

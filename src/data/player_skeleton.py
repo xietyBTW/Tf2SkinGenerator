@@ -1,9 +1,9 @@
 """
 Канонический скелет игрока: мировые матрицы его костей в осях
 движка (Z вверх). Собрано scripts/player_skeleton_build.py из
-soldier_morphs_low.smd; руками не править.
+soldier_morphs_low.smd; руками не править
 
-Матрица — 12 чисел (три строки по четыре), как в smd_pose.
+Матрица - 12 чисел (три строки по четыре), как в smd_pose
 """
 
 from typing import Dict, Tuple

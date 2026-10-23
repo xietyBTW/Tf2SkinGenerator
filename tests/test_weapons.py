@@ -24,7 +24,7 @@ class WeaponKeyFromModeTests(unittest.TestCase):
 
 class GetWeaponTypeKeyTests(unittest.TestCase):
     def test_roundtrip_all_types_en_and_ru(self):
-        # Имя → ключ должно вернуть исходный ключ для обоих языков
+        # Имя -> ключ должно вернуть исходный ключ для обоих языков
         for key in WEAPON_TYPES:
             for lang in ("en", "ru"):
                 name = get_weapon_type_name(key, lang)

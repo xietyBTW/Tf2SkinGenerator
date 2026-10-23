@@ -1,5 +1,5 @@
 /*
- * Меню инструментов над кадром.
+ * Меню инструментов над кадром
  *
  * Набор пунктов зависит от раздела (`applyToolsMenu` в каталоге): у эффекта
  * свои, у предмета свои. Здесь только то, что пункты делают.
@@ -8,36 +8,36 @@
 import * as api from './api.js';
 import { ask } from './ask.js';
 import { chooseFile } from './util.js';
-import { say } from './stage.js';
+import { say, sayInfo, sayError } from './stage.js';
 import { loadPcf, pSystem } from './particles/index.js';
 import { floating, panel, closeCat } from './layout.js';
 
 // Инструменты: пока подключён экспорт UV-шаблона - он нужен, чтобы глазами
-// сверить, куда какой кусок текстуры садится на модель.
+// сверить, куда какой кусок текстуры садится на модель
 document.getElementById('tools').addEventListener('click', async (e) => {
   const item = e.target.closest('.menu__item');
   if (!item) return;
 
   if (item.dataset.tool === 'folder') {
     const res = await api.exportFolder();
-    if (res.error) say(res.error);
+    if (res.error) sayError(res.error);
     return;
   }
   if (item.dataset.tool === 'open') {
     // Файл с диска кладём во временную папку и грузим оттуда: Python берёт
-    // путь, а страница пути к выбранному файлу не знает и знать не должна.
+    // путь, а страница пути к выбранному файлу не знает и знать не должна
     const file = await chooseFile('.pcf');
     if (!file) return;
     say(`Загрузка ${file.name}…`);
     try {
       await loadPcf(await api.upload(file), file.name);
     } catch (err) {
-      say(`Не удалось открыть: ${err.message}`);
+      sayError(`Не удалось открыть: ${err.message}`);
     }
     return;
   }
   if (item.dataset.tool === 'save') {
-    // Имя без папки: относительный путь Python кладёт в папку экспорта.
+    // Имя без папки: относительный путь Python кладёт в папку экспорта
     const path = await ask({ title: 'Куда сохранить PCF',
                              value: (pSystem || 'effect') + '.pcf' });
     if (!path) return;
@@ -56,23 +56,23 @@ document.getElementById('tools').addEventListener('click', async (e) => {
   if (item.dataset.tool === 'uv') {
     say('Построение UV-шаблона…');
     const res = await api.exportUv(1024);
-    if (res.error) say(res.error);
+    if (res.error) sayError(res.error);
     return;
   }
 
   // Извлечение модели двухшаговое: сначала Python готовит файлы во временной
-  // папке, потом человек выбирает, что сохранить (событие extract_files).
+  // папке, потом человек выбирает, что сохранить (событие extract_files)
   if (item.dataset.tool === 'model') {
     say('Извлечение модели…');
     const res = await api.extractModel();
-    if (res.error) say(res.error);
+    if (res.error) sayError(res.error);
     return;
   }
 
   if (item.dataset.tool === 'texture') {
     const res = await api.extractTexture();
-    if (res.error) { say(res.error); return; }
-    // У тела персонажа текстур два десятка - какие брать, решает человек.
+    if (res.error) { sayError(res.error); return; }
+    // У тела персонажа текстур два десятка - какие брать, решает человек
     if (res.need_textures) {
       const picked = await ask({
         title: 'Какие текстуры извлечь',
@@ -81,7 +81,7 @@ document.getElementById('tools').addEventListener('click', async (e) => {
       });
       if (!picked || !picked.length) return;
       const again = await api.extractTexture(picked);
-      if (again.error) say(again.error);
+      if (again.error) sayError(again.error);
       return;
     }
     say('Извлечение текстуры…');
@@ -92,14 +92,14 @@ document.getElementById('tools').addEventListener('click', async (e) => {
 });
 
 /**
- * Объединение собранных модов в один VPK.
+ * Объединение собранных модов в один VPK
  *
  * Моды, трогающие одно оружие, друг друга затирают - про такие Python
  * предупреждает до запуска и ждёт подтверждения.
  */
 export async function mergeMods() {
   const files = await api.exportVpks();
-  if (!files.length) { say('В папке экспорта нет собранных модов'); return; }
+  if (!files.length) { sayInfo('В папке экспорта нет собранных модов'); return; }
 
   const picked = await ask({ title: 'Какие моды объединить', list: files,
                              multi: true, ok: 'Далее' });
@@ -120,11 +120,11 @@ export async function mergeMods() {
     if (!go) return;
     res = await api.mergeVpk(picked, name, true);
   }
-  if (res.error) say(res.error);
+  if (res.error) sayError(res.error);
   else say('Объединение…');
 }
 
-// ── Меню инструментов ───────────────────────────────────────────────────
+// Меню инструментов
 export const tools = document.getElementById('tools');
 document.getElementById('opentools').addEventListener('click', (e) => {
   e.stopPropagation();

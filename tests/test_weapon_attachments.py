@@ -1,13 +1,13 @@
 """
-Праздничные «пушки» из списка — на самом деле навесная гирлянда.
+Праздничные «пушки» из списка - на самом деле навесная гирлянда
 
 items_game объявляет их через "attached_models": игра рисует базовое оружие,
 а сверху вешает отдельную модель. У c_minigun_xmas в модели ровно два
-материала, и оба — лампочки. Перекраска такой записи меняет украшение, а не
-ствол, и об этом надо сказать вслух: иначе выглядит так, будто мод не работает.
+материала, и оба - лампочки. Перекраска такой записи меняет украшение, а не
+ствол, и об этом надо сказать вслух: иначе выглядит так, будто мод не работает
 
 Формат блоков взят из настоящего items_game.txt (12 таких записей в списке
-приложения: c_minigun_xmas, c_scattergun_xmas, c_knife_xmas и др.).
+приложения: c_minigun_xmas, c_scattergun_xmas, c_knife_xmas и др.)
 """
 
 import unittest
@@ -72,7 +72,7 @@ class AttachmentOnlyModelsTests(unittest.TestCase):
         WMI._MEM_ATTACHED.pop(self.root, None)
         # Кэш индекса лежит по ОТНОСИТЕЛЬНОМУ пути cache/weapon_paths_cache.json:
         # без подмены тест затирает настоящий кэш пользователя своими двумя
-        # записями, и приложение потом читает их как индекс игры.
+        # записями, и приложение потом читает их как индекс игры
         self._cache_patch = patch.object(WMI, "_CACHE_FILE", root / "cache.json")
         self._cache_patch.start()
 
@@ -89,7 +89,7 @@ class AttachmentOnlyModelsTests(unittest.TestCase):
         self.assertNotIn("c_minigun", WMI.attachment_only_models(self.root))
 
     def test_model_used_as_both_is_not_an_attachment(self):
-        """Если модель где-то объявлена как model_player — это оружие."""
+        """Если модель где-то объявлена как model_player - это оружие"""
         self.assertNotIn("c_bow", WMI.attachment_only_models(self.root))
 
     def test_missing_items_game_is_not_an_error(self):

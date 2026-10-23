@@ -29,21 +29,21 @@ class SkyboxesDataTests(unittest.TestCase):
             self.assertIn("en", labels, face)
 
     def test_service_keys_do_not_collide_with_faces(self):
-        # Служебные ключи карточек не должны совпадать с гранями/именами небес.
+        # Служебные ключи карточек не должны совпадать с гранями/именами небес
         self.assertNotIn(SKY_PANO_KEY, SKY_FACES)
         self.assertNotIn(SKY_ALL_MAPS_KEY, STOCK_SKY_NAMES)
 
     def test_preview_default_is_stock(self):
-        # На SKY_PREVIEW_DEFAULT держится превью пункта «Все карты».
+        # На SKY_PREVIEW_DEFAULT держится превью пункта «Все карты»
         self.assertIn(SKY_PREVIEW_DEFAULT, STOCK_SKY_NAMES)
 
 
 class StockFaceNamesTests(unittest.TestCase):
-    """Как в игре зовутся текстуры стоковых небес.
+    """Как в игре зовутся текстуры стоковых небес
 
     Пока грань искали одним именем `<небо><грань>`, у любого стокового неба
     находились только верх и низ: боковые грани у всех четыре, а текстура одна
-    и зовётся `side`.
+    и зовётся `side`
     """
 
     def test_side_faces_fall_back_to_the_shared_texture(self):
@@ -52,7 +52,7 @@ class StockFaceNamesTests(unittest.TestCase):
             self.assertIn('sky_dustbowl_01side', stems, face)
             self.assertIn('sky_dustbowl_01_side', stems, face)
             # Своё имя грани идёт первым: у неба с настоящими шестью
-            # текстурами общая `side` не должна их перебивать.
+            # текстурами общая `side` не должна их перебивать
             self.assertEqual(stems[0], f'sky_dustbowl_01{face}')
 
     def test_top_and_bottom_have_no_side_fallback(self):
@@ -68,7 +68,7 @@ class StockFaceNamesTests(unittest.TestCase):
 
 class EnumerateSkyNamesTests(unittest.TestCase):
     def setUp(self):
-        # Кэш enumerate_sky_names живёт на модуле — изолируем тесты.
+        # Кэш enumerate_sky_names живёт на модуле - изолируем тесты
         import src.services.skybox_service as m
         m._sky_names_cache.clear()
 
@@ -91,11 +91,11 @@ class EnumerateSkyNamesTests(unittest.TestCase):
         self.assertEqual(names, sorted(STOCK_SKY_NAMES))
 
     def test_result_is_cached_per_root(self):
-        """Второй вызов не должен снова разбирать индексы VPK.
+        """Второй вызов не должен снова разбирать индексы VPK
 
         Сравниваем с числом открытий на ПЕРВОМ вызове, а не с единицей:
-        небеса лежат в нескольких VPK (tf/ и hl2/), и сколько их — дело
-        TF2Paths.skybox_vpks, а не этого теста.
+        небеса лежат в нескольких VPK (tf/ и hl2/), и сколько их - дело
+        TF2Paths.skybox_vpks, а не этого теста
         """
         from unittest.mock import patch
         pak = ["materials/skybox/sky_extra_01up.vmt"]
@@ -109,11 +109,11 @@ class EnumerateSkyNamesTests(unittest.TestCase):
         self.assertEqual(opener.call_count, first)
 
     def test_hl2_skies_are_scanned_too(self):
-        """Небеса Half-Life 2 — законная часть игры: TF2 монтирует её контент.
+        """Небеса Half-Life 2 - законная часть игры: TF2 монтирует её контент
 
         Карты ставят в worldspawn `sky_day01_01`, `sky_borealis01` и прочие, а
         в tf2_*.vpk их нет вовсе. Пока скан читал одну tf2_misc_dir.vpk, из 47
-        небес установленной игры приложение показывало 22.
+        небес установленной игры приложение показывало 22
         """
         from unittest.mock import patch
 
@@ -145,12 +145,12 @@ class EnumerateSkyNamesTests(unittest.TestCase):
     def test_scan_parses_names_and_skips_hdr(self):
         pak = iter([
             "materials/skybox/sky_upwardup.vmt",
-            "materials/skybox/sky_upwarddn.vmt",           # не up-грань — мимо
-            "materials/skybox/sky_upward_hdrup.vmt",       # HDR-вариант — мимо
+            "materials/skybox/sky_upwarddn.vmt",           # не up-грань - мимо
+            "materials/skybox/sky_upward_hdrup.vmt",       # HDR-вариант - мимо
             "materials/skybox/sky_newmap_01up.vmt",
-            "materials/skybox/nested/sky_xup.vmt",         # вложенная папка — мимо
-            "materials/other/sky_fakeup.vmt",              # не skybox — мимо
-            "materials/skybox/up.vmt",                     # пустое имя — мимо
+            "materials/skybox/nested/sky_xup.vmt",         # вложенная папка - мимо
+            "materials/other/sky_fakeup.vmt",              # не skybox - мимо
+            "materials/skybox/up.vmt",                     # пустое имя - мимо
         ])
         self.assertEqual(
             SkyboxService._scan_sky_names(pak),

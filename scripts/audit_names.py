@@ -1,23 +1,23 @@
 """
-Аудит названий предметов: сверка каталога с самой игрой.
+Аудит названий предметов: сверка каталога с самой игрой
 
 Названия в `src/data/weapons.py` набивались руками, и часть из них разъехалась
-с ключами — сдвиг на одну строку внутри слота (у c_holymackerel оказалось имя
-соседа, у c_bonk_bat — следующего за ним). Глазами такое не ловится: список
-длинный, а имена правдоподобные.
+с ключами - сдвиг на одну строку внутри слота (у c_holymackerel оказалось имя
+соседа, у c_bonk_bat - следующего за ним). Глазами такое не ловится: список
+длинный, а имена правдоподобные
 
-Источник истины — установленная игра:
-  • tf/scripts/items/items_game.txt — какой предмет какой моделью рисуется
+Источник истины - установленная игра:
+  • tf/scripts/items/items_game.txt - какой предмет какой моделью рисуется
     (с наследованием prefab, иначе стоковое оружие не опознаётся);
-  • tf/resource/tf_russian.txt и tf_english.txt — как игра называет предмет.
+  • tf/resource/tf_russian.txt и tf_english.txt - как игра называет предмет
 
 Запуск:
   python scripts/audit_names.py                 # путь к игре из настроек
   python scripts/audit_names.py "D:/.../Team Fortress 2"
   python scripts/audit_names.py --json fixes.json   # выгрузить расхождения
 
-Ничего не меняет: печатает расхождения. Правки вносятся руками — данные
-локализации у Valve иногда меняются, и слепая замена не всегда желательна.
+Ничего не меняет: печатает расхождения. Правки вносятся руками - данные
+локализации у Valve иногда меняются, и слепая замена не всегда желательна
 """
 import json
 import os
@@ -29,10 +29,10 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from src.data.weapons import TF2_WEAPONS, WEAPON_SLOT_TYPES, get_weapon_name
 
-#: Токен KeyValues: строка (с экранированием), скобка или комментарий.
+#: Токен KeyValues: строка (с экранированием), скобка или комментарий
 _TOKEN = re.compile(r'"((?:[^"\\]|\\.)*)"|(\{)|(\})|(//[^\n]*)')
-#: Строка локализации. Кавычки внутри значения экранированы — обрывать разбор
-#: по первой нельзя, иначе «Плитка "Далокош"» превращается в «Плитка \».
+#: Строка локализации. Кавычки внутри значения экранированы - обрывать разбор
+#: по первой нельзя, иначе «Плитка "Далокош"» превращается в «Плитка \»
 _LOC_LINE = re.compile(r'^\s*"((?:[^"\\]|\\.)+)"\s+"((?:[^"\\]|\\.)*)"', re.M)
 
 
@@ -41,7 +41,7 @@ def _unescape(text: str) -> str:
 
 
 def parse_keyvalues(text: str) -> dict:
-    """KeyValues → вложенные словари; повторные ключи собираются в список."""
+    """KeyValues -> вложенные словари, повторные ключи собираются в список"""
     stack, pending = [{}], None
 
     def put(container: dict, key: str, value) -> None:
@@ -73,7 +73,7 @@ def parse_keyvalues(text: str) -> dict:
 
 
 def read_localization(tf2_root: Path, language: str) -> dict:
-    """{токен: строка} из tf_<язык>.txt (файл в UTF-16)."""
+    """{токен: строка} из tf_<язык>.txt (файл в UTF-16)"""
     name = "russian" if language == "ru" else "english"
     path = tf2_root / "tf" / "resource" / f"tf_{name}.txt"
     for encoding in ("utf-16", "utf-8-sig", "utf-8"):
@@ -88,7 +88,7 @@ def read_localization(tf2_root: Path, language: str) -> dict:
 
 
 def models_to_tokens(tf2_root: Path) -> dict:
-    """{стебель модели: токен item_name}. Первый предмет с моделью выигрывает."""
+    """{стебель модели: токен item_name}. Первый предмет с моделью выигрывает"""
     items_path = tf2_root / "tf" / "scripts" / "items" / "items_game.txt"
     if not items_path.exists():
         return {}
@@ -98,7 +98,7 @@ def models_to_tokens(tf2_root: Path) -> dict:
     prefabs = root.get("prefabs") or {}
 
     def field(block, name, depth=0):
-        """Значение поля с учётом наследования prefab (стоковое оружие)."""
+        """Значение поля с учётом наследования prefab (стоковое оружие)"""
         if depth > 6 or not isinstance(block, dict):
             return None
         if name in block:
@@ -130,14 +130,14 @@ def models_to_tokens(tf2_root: Path) -> dict:
 
 
 def audit(tf2_root: Path) -> dict:
-    """Расхождения по языкам плюс список неопознанных ключей."""
+    """Расхождения по языкам плюс список неопознанных ключей"""
     tokens = models_to_tokens(tf2_root)
     loc = {lang: read_localization(tf2_root, lang) for lang in ("ru", "en")}
     result = {"ru": [], "en": [], "unknown": [], "ok": 0, "models": len(tokens)}
 
     # Часть ключей по модели не опознаётся: у праздничных вариантов и часов
-    # своя раскладка моделей. Их находим по английскому названию — оно у нас
-    # совпадает с игрой, и обратный поиск однозначен.
+    # своя раскладка моделей. Их находим по английскому названию - оно у нас
+    # совпадает с игрой, и обратный поиск однозначен
     by_english = {}
     for token, value in loc["en"].items():
         by_english.setdefault(value.strip().lower(), set()).add(token)

@@ -1,5 +1,5 @@
 """
-War Paint на оружии, для которого в игре War Paint нет.
+War Paint на оружии, для которого в игре War Paint нет
 
 Рецепту War Paint от пушки нужны четыре картинки в её развёртке: альбедо
 («голый металл» под краской), маска групп (какой узор на какую деталь), маска
@@ -7,23 +7,23 @@ War Paint на оружии, для которого в игре War Paint не�
 Paint их рисовал художник Valve (`p_<пушка>_albedo/_groups/_wearblend/_ao`).
 Здесь они строятся из самой модели:
 
-* группы — части модели (куски геометрии, как их видит человек, с разрезами
+* группы - части модели (куски геометрии, как их видит человек, с разрезами
   из редактора частей), раздаются по слоям узора от крупной к мелкой;
-* износ — расстояние до края детали на развёртке: края стираются первыми,
+* износ - расстояние до края детали на развёртке: края стираются первыми,
   как у настоящих масок Valve;
-* AO — мягкое затенение по локальному контрасту текстуры (альбедо и так
+* AO - мягкое затенение по локальному контрасту текстуры (альбедо и так
   несёт запечённый свет, сильный AO затемнил бы её второй раз);
-* альбедо — игровая текстура пушки: под стёртой краской видна она.
+* альбедо - игровая текстура пушки: под стёртой краской видна она
 
-Результат — словарь «виртуальных» текстур для загрузчика компоновщика и
-значения переменных рецепта, которые на них указывают.
+Результат - словарь «виртуальных» текстур для загрузчика компоновщика и
+значения переменных рецепта, которые на них указывают
 
 Украшенное оружие коллекций (Current Event, Night Owl…) шаблона не имеет:
 его рецепт нарисован под маски одной пушки, пути к ним и номера её групп
 записаны в самом рецепте. Такой рецепт переносится иначе (``recipe_looks``):
-его «виды» — что получает деталь в зависимости от группы — раздаются по
+его «виды» - что получает деталь в зависимости от группы - раздаются по
 деталям модели в тех долях, что на пушке-оригинале, а маски оригинала
-подменяются масками модели (``swap_weapon_textures``).
+подменяются масками модели (``swap_weapon_textures``)
 """
 
 from __future__ import annotations
@@ -39,20 +39,20 @@ from src.shared.logging_config import get_logger
 
 logger = get_logger(__name__)
 
-#: Имена виртуальных текстур (их отдаёт загрузчик, в VPK таких нет).
+#: Имена виртуальных текстур (их отдаёт загрузчик, в VPK таких нет)
 GEN = '__generated__/'
 
 
 @dataclass
 class GenericInputs:
-    textures: Dict[str, np.ndarray]      # имя → RGBA uint8
+    textures: Dict[str, np.ndarray]      # имя -> RGBA uint8
     forced: Dict[str, str]               # переменные рецепта
-    #: Ключ детали → слой узора.
+    #: Ключ детали -> слой узора
     assignment: Dict[str, int]
 
 
 def _rasterize(polys_by_value: Sequence[Tuple[int, List]], size: int) -> np.ndarray:
-    """Треугольники развёртки → карта значений (0 — вне развёртки)."""
+    """Треугольники развёртки -> карта значений (0 - вне развёртки)"""
     from PIL import Image, ImageDraw
 
     img = Image.new('L', (size, size), 0)
@@ -62,14 +62,14 @@ def _rasterize(polys_by_value: Sequence[Tuple[int, List]], size: int) -> np.ndar
             # Текстура повторяется, и развёртку кладут и в соседнюю плитку (у
             # линзы Базарной безделушки u от 1 до 2): её место на холсте то же,
             # что в плитке 0..1. Треугольник через край плитки рисуется и с
-            # другой стороны — лишнее за холстом PIL обрежет сам.
+            # другой стороны - лишнее за холстом PIL обрежет сам
             cu = math.floor(sum(u for u, _ in tri) / 3)
             cv = math.floor(sum(v for _, v in tri) / 3)
             tri = [(u - cu, v - cv) for u, v in tri]
             us, vs = [u for u, _ in tri], [v for _, v in tri]
             for du in {0, -1 if max(us) > 1 else 0, 1 if min(us) < 0 else 0}:
                 for dv in {0, -1 if max(vs) > 1 else 0, 1 if min(vs) < 0 else 0}:
-                    # v вверх у SMD/OBJ; строка картинки — сверху вниз.
+                    # v вверх у SMD/OBJ; строка картинки - сверху вниз
                     pts = [((u + du) * size, (1.0 - (v + dv)) * size) for u, v in tri]
                     draw.polygon(pts, fill=int(value), outline=int(value))
     return np.asarray(img)
@@ -78,13 +78,13 @@ def _rasterize(polys_by_value: Sequence[Tuple[int, List]], size: int) -> np.ndar
 def assign_layers(areas: Sequence[float], layers: Sequence[int], over_albedo: bool,
                   layout_seed: int = 0) -> List[int]:
     """
-    Слой узора для каждой части (части — от крупной к мелкой).
+    Слой узора для каждой части (части - от крупной к мелкой)
 
-    Крупнейшая часть получает первый слой — это «корпус», на нём главный узор.
+    Крупнейшая часть получает первый слой - это «корпус», на нём главный узор.
     Остальные идут по кругу по прочим слоям, так что крупные детали получают
-    разные узоры. ``layout_seed`` перемешивает круг — кнопка «Перемешать
+    разные узоры. ``layout_seed`` перемешивает круг - кнопка «Перемешать
     детали». Слой 0 значит «основа»: у обычного шаблона это первый слой (он и
-    так лежит везде, где нет другого), у «поверх альбедо» — сама текстура.
+    так лежит везде, где нет другого), у «поверх альбедо» - сама текстура
     """
     if not areas:
         return []
@@ -97,27 +97,27 @@ def assign_layers(areas: Sequence[float], layers: Sequence[int], over_albedo: bo
     cycle = rest + ([base] if not over_albedo else [])
     out = [rest[0] if over_albedo else base]
     # «Поверх альбедо»: корпус уже взял rest[0], круг идёт дальше с rest[1],
-    # иначе две крупнейшие детали получили бы один узор.
+    # иначе две крупнейшие детали получили бы один узор
     shift = 0 if over_albedo else 1
     for i in range(1, len(areas)):
         out.append(cycle[(i - shift) % len(cycle)])
     if layout_seed:
-        # Корпус тоже может уйти в другой слой — иначе «перемешать» меняло бы
-        # только мелочь, а главное пятно оставалось бы прежним.
+        # Корпус тоже может уйти в другой слой - иначе «перемешать» меняло бы
+        # только мелочь, а главное пятно оставалось бы прежним
         first = rng.choice(list(layers))
         out[0] = first
     return [0 if (not over_albedo and x == base) else x for x in out]
 
 
 def _edge_wear(labels: np.ndarray, size: int) -> np.ndarray:
-    """Маска износа: 0 на краях деталей и вне развёртки, 1 в глубине детали.
+    """Маска износа: 0 на краях деталей и вне развёртки, 1 в глубине детали
 
     Расстояние до края считается последовательным «сжатием» маски: полоса
-    износа узкая (~2 % стороны), и дальше неё считать незачем. Без scipy —
-    в приложении его нет, а ради одной функции он весит десятки мегабайт.
+    износа узкая (~2 % стороны), и дальше неё считать незачем. Без scipy -
+    в приложении его нет, а ради одной функции он весит десятки мегабайт
     """
     inside = labels > 0
-    # Край детали — и граница между разными деталями, не только с пустотой.
+    # Край детали - и граница между разными деталями, не только с пустотой
     edges = np.zeros_like(inside)
     edges[:, 1:] |= labels[:, 1:] != labels[:, :-1]
     edges[1:, :] |= labels[1:, :] != labels[:-1, :]
@@ -140,7 +140,7 @@ def _edge_wear(labels: np.ndarray, size: int) -> np.ndarray:
 
 
 def _soft_ao(base: np.ndarray, size: int) -> np.ndarray:
-    """Мягкое затенение щелей по локальному контрасту яркости текстуры."""
+    """Мягкое затенение щелей по локальному контрасту яркости текстуры"""
     from PIL import Image, ImageFilter
 
     lum = base[..., :3].astype(np.float32).mean(axis=2)
@@ -156,10 +156,10 @@ def build_inputs(parts_model, obj_material: str, base_rgba: np.ndarray, size: in
                  layout_seed: int = 0,
                  assign: Optional[Dict[str, int]] = None) -> Optional[GenericInputs]:
     """
-    Входы рецепта для модели без War Paint. None — у модели нет развёртки.
+    Входы рецепта для модели без War Paint. None - у модели нет развёртки
 
-    ``parts_model`` — разбор mesh_parts_service, ``obj_material`` — материал
-    в OBJ, на который ложится War Paint; ``base_rgba`` — его игровая текстура.
+    ``parts_model`` - разбор mesh_parts_service, ``obj_material`` - материал
+    в OBJ, на который ложится War Paint; ``base_rgba`` - его игровая текстура
     """
     units = units_for(parts_model, obj_material, len(layers))
     if not units or not layers:
@@ -169,7 +169,7 @@ def build_inputs(parts_model, obj_material: str, base_rgba: np.ndarray, size: in
     forced = {'weapon_albedo': GEN + 'albedo', 'weapon_groups': GEN + 'groups',
               'weapon_wearblend': GEN + 'wearblend', 'weapon_ao': GEN + 'ao'}
     # Выбор групп: слой N берёт группу N (значение N·16 в маске). Остальные
-    # девять ячеек обнуляются — у пушки-донора там её собственные номера.
+    # девять ячеек обнуляются - у пушки-донора там её собственные номера
     for layer in layers:
         for k in range(1, 11):
             forced[f'texture_layer_{layer}_select_{k}'] = str(layer * 16) if k == 1 else '0'
@@ -179,7 +179,7 @@ def build_inputs(parts_model, obj_material: str, base_rgba: np.ndarray, size: in
 
 def _textures(units: Sequence['Unit'], values: Sequence[int], base_rgba: np.ndarray,
               size: int) -> Dict[str, np.ndarray]:
-    """Альбедо, группы, износ и AO по деталям: деталь i — значение values[i] в маске групп."""
+    """Альбедо, группы, износ и AO по деталям: деталь i - значение values[i] в маске групп"""
     from PIL import Image
 
     groups = np.zeros((size, size, 4), np.uint8)
@@ -194,15 +194,15 @@ def _textures(units: Sequence['Unit'], values: Sequence[int], base_rgba: np.ndar
             GEN + 'wearblend': gray(wear), GEN + 'ao': gray(ao)}
 
 
-# ── Украшенное оружие: ручной рецепт одной пушки на любой модели ───────── #
+# Украшенное оружие: ручной рецепт одной пушки на любой модели
 
 @dataclass
 class Looks:
     """
-    Виды ручного рецепта: что получает деталь, смотря по номеру её группы.
+    Виды ручного рецепта: что получает деталь, смотря по номеру её группы
 
-    Вид — набор узлов select, которые группу выбирают; вид 0 — «ни один»
-    (узор под всеми выборами; группу 0 рецепт не выбирает никогда).
+    Вид - набор узлов select, которые группу выбирают, вид 0 - «ни один»
+    (узор под всеми выборами, группу 0 рецепт не выбирает никогда)
     """
     groups: str              # маска групп пушки-оригинала в рецепте
     values: List[int]        # значение маски у вида (номер группы · 16)
@@ -226,15 +226,15 @@ def _group(value) -> int:
 
 def recipe_looks(recipe: dict, loader) -> Looks:
     """
-    Виды рецепта и их доли на пушке-оригинале (по её маске групп; без маски —
+    Виды рецепта и их доли на пушке-оригинале (по её маске групп, без маски -
     поровну). Номера групп у разных select бывают одними и теми же (у Coffin
-    Nail узор и цвет выбирают одну группу) — это один вид.
+    Nail узор и цвет выбирают одну группу) - это один вид
     """
     nodes = _selects(recipe, [])
     wanted = [{_group(v) for v in n.get('select') or []} - {0} for n in nodes]
     by_look: Dict[frozenset, List[int]] = {}
-    # Групп 17: 248 и 255 в маске и в select — это round(·/16) = 16 (у ножа
-    # такая пятая часть, у Stabbed to Hell на ней трещины).
+    # Групп 17: 248 и 255 в маске и в select - это round(·/16) = 16 (у ножа
+    # такая пятая часть, у Stabbed to Hell на ней трещины)
     for gid in range(17):
         look = frozenset(i for i, ids in enumerate(wanted) if gid in ids)
         by_look.setdefault(look, []).append(gid)
@@ -244,13 +244,13 @@ def recipe_looks(recipe: dict, loader) -> Looks:
     mask = loader(groups, raw=True) if groups else None
     counts = (np.bincount(np.round(mask[..., 0] / 16.0).astype(np.int64).ravel(), minlength=17)
               if mask is not None else None)
-    # Группа 0 у масок Valve — фон вне развёртки: в доли не входит.
+    # Группа 0 у масок Valve - фон вне развёртки: в доли не входит
     areas = ([float(sum(counts[g] for g in ids if g)) for ids in gids]
              if counts is not None else [])
     total = sum(areas)
     shares = ([a / total for a in areas] if total
               else [1.0 / len(gids)] * len(gids))
-    # Группе 16 — 255: 256 в восьмибитную маску не влезет.
+    # Группе 16 - 255: 256 в восьмибитную маску не влезет
     return Looks(groups=groups, values=[min(ids[0] * 16, 255) for ids in gids],
                  shares=shares)
 
@@ -258,10 +258,10 @@ def recipe_looks(recipe: dict, loader) -> Looks:
 def assign_shares(areas: Sequence[float], shares: Sequence[float],
                   layout_seed: int = 0) -> List[int]:
     """
-    Вид каждой детали (детали — от крупной к мелкой) так, чтобы площади видов
+    Вид каждой детали (детали - от крупной к мелкой) так, чтобы площади видов
     шли в тех же долях, что на пушке-оригинале: деталь достаётся виду, которому
     сейчас больше всех недостаёт. ``layout_seed`` выбирает вид случайно, с
-    весом по недостаче.
+    весом по недостаче
     """
     total = sum(areas) or 1.0
     got = [0.0] * len(shares)
@@ -281,7 +281,7 @@ def assign_shares(areas: Sequence[float], shares: Sequence[float],
 def looks_inputs(parts_model, obj_material: str, base_rgba: np.ndarray, size: int,
                  looks: Looks, layout_seed: int = 0,
                  assign: Optional[Dict[str, int]] = None) -> Optional[GenericInputs]:
-    """Входы ручного рецепта на модели: маска групп — значения видов. None — нет развёртки."""
+    """Входы ручного рецепта на модели: маска групп - значения видов. None - нет развёртки"""
     units = units_for(parts_model, obj_material, len(looks.values))
     if not units:
         return None
@@ -295,18 +295,18 @@ def looks_inputs(parts_model, obj_material: str, base_rgba: np.ndarray, size: in
 def swap_weapon_textures(recipe: dict) -> dict:
     """
     Ручной рецепт на чужой модели: маски пушки-оригинала заменяются масками
-    модели. Её текстура и альбедо (``p_<пушка>_albedo``, у Old Country —
-    сама ``c_revolver``) — альбедо модели; группы, износ (у Gun Mettle бывает
-    свой: ``p_smg_wearblend_gunmettle``) и затенение — её же. Рисунок под
-    развёртку оригинала снимается.
+    модели. Её текстура и альбедо (``p_<пушка>_albedo``, у Old Country -
+    сама ``c_revolver``) - альбедо модели, группы, износ (у Gun Mettle бывает
+    свой: ``p_smg_wearblend_gunmettle``) и затенение - её же. Рисунок под
+    развёртку оригинала снимается
     """
     from src.data.paintkit_defs import weapon_drawn
 
     def swap(path: str) -> str:
         low = (path or '').replace('\\', '/').lower()
         weapon = low.startswith('models/weapons/')
-        # Картинка под развёртку оригинала (у Killer Bee — поверх узора
-        # умножением) на чужой модели легла бы куда попало: белое — без неё.
+        # Картинка под развёртку оригинала (у Killer Bee - поверх узора
+        # умножением) на чужой модели легла бы куда попало: белое - без неё
         if weapon_drawn(low):
             return 'patterns/blank_white'
         if '_wearblend' in low:
@@ -334,21 +334,21 @@ def _uv_area(tris) -> float:
 
 @dataclass
 class Unit:
-    """Деталь, которой раскладка War Paint даёт слой."""
-    key: str                  # 'p3' — часть модели, 'i17' — остров, 'g2' — группа Valve
+    """Деталь, которой раскладка War Paint даёт слой"""
+    key: str                  # 'p3' - часть модели, 'i17' - остров, 'g2' - группа Valve
     area: float               # доля развёртки
-    uv: list                  # UV-треугольники — маска для раскладки
-    tris: List[int]           # номера треугольников материала — для клика во вьювере
+    uv: list                  # UV-треугольники - маска для раскладки
+    tris: List[int]           # номера треугольников материала - для клика во вьювере
 
 
 def units_for(parts_model, material: str, n_layers: int) -> List[Unit]:
     """
-    Детали, по которым раздаются слои узора, от крупной к мелкой.
+    Детали, по которым раздаются слои узора, от крупной к мелкой
 
-    Обычно это части модели (ствол, приклад) — так их видит человек. Но у
-    цельной модели (бита — одна деталь) слой один на всё, и War Paint вышел бы
+    Обычно это части модели (ствол, приклад) - так их видит человек. Но у
+    цельной модели (бита - одна деталь) слой один на всё, и War Paint вышел бы
     одним узором. Тогда берём острова развёртки: их больше, и на них у
-    художников TF2 обычно и лежат разные узоры.
+    художников TF2 обычно и лежат разные узоры
     """
     parts = [p for p in parts_model.parts_of(material) if p.paintable]
     units = [Unit(f'p{p.index}', p.uv_area, parts_model.polygons(material, p.index),
@@ -374,11 +374,11 @@ def units_for(parts_model, material: str, n_layers: int) -> List[Unit]:
 
 def valve_units(parts_model, material: str, groups_rgba: np.ndarray) -> List[Unit]:
     """
-    Детали пушки со своими War Paint — группы маски Valve (`p_<пушка>_groups`).
+    Детали пушки со своими War Paint - группы маски Valve (`p_<пушка>_groups`)
 
     Группа треугольника берётся по центру его развёртки. Группа 0 в раскладку
-    не входит: выбрать её рецепт не может (нуль в select — «пусто»), она всегда
-    под основой.
+    не входит: выбрать её рецепт не может (нуль в select - «пусто»), она всегда
+    под основой
     """
     uv = (parts_model.uv or {}).get(material) or []
     h, w = groups_rgba.shape[:2]
@@ -401,14 +401,14 @@ def valve_units(parts_model, material: str, groups_rgba: np.ndarray) -> List[Uni
 
 def layout_for(units: Sequence[Unit], layers: Sequence[int], over_albedo: bool,
                layout_seed: int = 0, assign: Optional[Dict[str, int]] = None) -> List[int]:
-    """Слой каждой детали: ручной выбор человека поверх автоматической раскладки."""
+    """Слой каждой детали: ручной выбор человека поверх автоматической раскладки"""
     auto = assign_layers([u.area for u in units], layers, over_albedo, layout_seed)
     return _manual(units, auto, set(layers) | {0}, assign)
 
 
 def _manual(units: Sequence[Unit], auto: Sequence[int], allowed: set,
             assign: Optional[Dict[str, int]]) -> List[int]:
-    """Ручной выбор человека поверх автомата; слой, которого нет, не в счёт."""
+    """Ручной выбор человека поверх автомата, слой, которого нет, не в счёт"""
     out = []
     for unit, default in zip(units, auto):
         chosen = (assign or {}).get(unit.key)

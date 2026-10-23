@@ -10,8 +10,8 @@ from src.shared.logging_config import setup_logging
 from src.shared.constants import DirectoryPaths
 from src.shared import paths
 
-# Лог — к данным человека, а не в папку установки: обновление её заменяет, а
-# лог нужен как раз чтобы разобрать, что сломалось в прошлой версии.
+# Лог - к данным человека, а не в папку установки: обновление её заменяет, а
+# лог нужен как раз чтобы разобрать, что сломалось в прошлой версии
 _log_dir = paths.ensure_data_dir()
 _log_file = _log_dir / "tf2sg.log"
 
@@ -22,7 +22,7 @@ logger = setup_logging(
 )
 
 # Нативные падения (access violation в распаковке VPK, в драйвере WebView2)
-# не оставляют Python-трейсбека — faulthandler допишет стек прямо в лог
+# не оставляют Python-трейсбека - faulthandler допишет стек прямо в лог
 try:
     import faulthandler
     _fault_log = open(_log_dir / "tf2sg_crash.log", "a", buffering=1)
@@ -33,11 +33,11 @@ except Exception:  # диагностика не должна мешать за�
 
 def _cleanup_stale_temp() -> None:
     """
-    Удаляет старые папки build_* из папки временных файлов при старте.
+    Удаляет старые папки build_* из папки временных файлов при старте
 
     Эти папки остаются после прерванных или упавших сборок.
     Активная сборка создаёт папку только во время работы, поэтому
-    при старте все build_* можно безопасно удалять.
+    при старте все build_* можно безопасно удалять
     """
     import shutil
     temp_dir = Path(DirectoryPaths.BASE_TEMP_DIR)
@@ -57,8 +57,8 @@ def _cleanup_stale_temp() -> None:
     # Черновики воркеров в системном %TEMP% (сцены вида от первого лица,
     # превью SMD, импорт мешей...). Функция была, но её никто не звал: за
     # месяцы набегали тысячи папок на гигабайты. Приложение одно (мьютекс),
-    # так что всё старше старта — от прошлых запусков; в фоне, потому что
-    # папок бывает больше десяти тысяч.
+    # так что всё старше старта - от прошлых запусков, в фоне, потому что
+    # папок бывает больше десяти тысяч
     import threading
     from src.shared.file_utils import cleanup_stale_temp_artifacts
 
@@ -76,23 +76,21 @@ def main():
     try:
         # Мьютекс держим до конца процесса: по нему установщик понимает, что
         # приложение запущено (AppMutex в installer/*.iss), и не пытается
-        # заменить занятые файлы. Он же не даёт запустить второй экземпляр —
-        # два процесса поверх одних config/ и work/ затирали бы друг друга.
+        # заменить занятые файлы. Он же не даёт запустить второй экземпляр -
+        # два процесса поверх одних config/ и work/ затирали бы друг друга
         from src.shared.single_instance import acquire_single_instance
         if not acquire_single_instance():
-            logger.info("Приложение уже запущено — выходим")
+            logger.info("Приложение уже запущено - выходим")
             return
 
         # Данные прежних версий лежали рядом с .exe. Переносим один раз, до
-        # первого обращения к config/ и work/.
+        # первого обращения к config/ и work/
         paths.migrate_legacy_data()
 
         DirectoryPaths.ensure_exists()
         _cleanup_stale_temp()
 
-        # Интерфейс — веб-страница в окне WebView2 (см. frontend/app.py).
-        # Qt здесь больше не участвует: воркеры (src/services) живут на своих
-        # сигналах, а страница ходит в тот же src/app/api.py.
+        # Интерфейс - веб-страница в окне WebView2 (см. frontend/app.py)
         from frontend.app import main as run_ui
 
         logger.info("Приложение успешно запущено")

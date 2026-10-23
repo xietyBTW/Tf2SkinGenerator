@@ -1,7 +1,7 @@
 """
-Сборка анимированной сцены вьюмодели (src/services/viewmodel_animation.py).
+Сборка анимированной сцены вьюмодели (src/services/viewmodel_animation.py)
 
-Проверяется то, из чего складывается картинка в руке, а не арифметика поз —
+Проверяется то, из чего складывается картинка в руке, а не арифметика поз -
 её держит test_viewmodel_pose:
 
   * пушка-НОСИТЕЛЬ под праздничной гирляндой: в `c_medigun_xmas` лежат одни
@@ -10,9 +10,9 @@
   * бодигруппы: правая рука пиро и инженера объявлена отдельной, и без неё в
     сцене оставалась одна левая;
   * белый список материалов рук: у солдата в модели рук лежит РАКЕТА, и вне
-    перезарядки её быть не должно.
+    перезарядки её быть не должно
 
-Скелеты синтетические: поворот на 90° вокруг Z даёт числа, считаемые в уме.
+Скелеты синтетические: поворот на 90° вокруг Z даёт числа, считаемые в уме
 """
 
 import math
@@ -26,7 +26,7 @@ HALF_PI = math.pi / 2
 
 
 def _smd(bones, frame=None, triangles=()) -> str:
-    """SMD из (имя, родитель), позы кадра и треугольников (материал, вершины)."""
+    """SMD из (имя, родитель), позы кадра и треугольников (материал, вершины)"""
     ids = {name: i for i, (name, _p) in enumerate(bones)}
     lines = ["version 1", "nodes"]
     for name, parent in bones:
@@ -95,7 +95,7 @@ class BuildSceneTests(unittest.TestCase):
     def _part(self, scene, kind):
         return next(p for p in scene["parts"] if p["kind"] == kind)
 
-    # ── Пушка-носитель ────────────────────────────────────────────────────── #
+    # Пушка-носитель
 
     def _carrier(self) -> Path:
         path = self.dir / "c_base_reference.smd"
@@ -105,10 +105,10 @@ class BuildSceneTests(unittest.TestCase):
         return path
 
     def test_carrier_is_shown_but_stays_uneditable(self):
-        """Праздничное оружие — гирлянда, а не пушка.
+        """Праздничное оружие - гирлянда, а не пушка
 
         В `c_medigun_xmas` лежат одни огоньки: показывать их в пустой руке
-        неправильно, а перекрашивать медиган под ними пользователь не просил.
+        неправильно, а перекрашивать медиган под ними пользователь не просил
         """
         scene = self._build(weapon_carrier_smd=str(self._carrier()))
         weapon = self._part(scene, "weapon")
@@ -116,10 +116,10 @@ class BuildSceneTests(unittest.TestCase):
         self.assertEqual(scene["weaponMaterials"], ["xms_lights"])
 
     def test_carrier_geometry_is_appended_after_the_item(self):
-        """Группы носителя должны указывать на СВОИ вершины.
+        """Группы носителя должны указывать на СВОИ вершины
 
         Смещение старта легко потерять, и тогда материал носителя красил бы
-        треугольники гирлянды.
+        треугольники гирлянды
         """
         plain = self._build()
         scene = self._build(weapon_carrier_smd=str(self._carrier()))
@@ -130,14 +130,14 @@ class BuildSceneTests(unittest.TestCase):
         self.assertEqual([g["material"] for g in weapon["groups"]],
                          ["xms_lights", "c_base"])
         self.assertEqual(weapon["groups"][1]["start"], item_verts)
-        # Веса и индексы наращены вместе с вершинами, иначе меш развалится.
+        # Веса и индексы наращены вместе с вершинами, иначе меш развалится
         self.assertEqual(len(weapon["skinIndex"]),
                          len(weapon["positions"]) // 3 * 4)
 
     def test_item_that_is_worn_not_held_says_so(self):
-        """Ранцы, знамёна и ботинки к руке не крепятся вовсе.
+        """Ранцы, знамёна и ботинки к руке не крепятся вовсе
 
-        Отличать это от поломки сборки надо: сообщение пользователю разное.
+        Отличать это от поломки сборки надо: сообщение пользователю разное
         """
         worn = self.dir / "c_batt_buffpack_reference.smd"
         worn.write_text(_smd(
@@ -152,20 +152,20 @@ class BuildSceneTests(unittest.TestCase):
             )
 
     def test_carrier_that_does_not_load_is_skipped_quietly(self):
-        """Носителя может не оказаться — это не повод остаться без сцены."""
+        """Носителя может не оказаться - это не повод остаться без сцены"""
         scene = self._build(weapon_carrier_smd=str(self.dir / "нет.smd"))
         self.assertEqual(self._part(scene, "weapon")["materials"], ["xms_lights"])
 
-    # ── Веса вершин ───────────────────────────────────────────────────────── #
+    # Веса вершин
 
     def test_weights_across_several_merged_bones_survive(self):
-        """Вершина, поделённая между костями руки, должна остаться поделённой.
+        """Вершина, поделённая между костями руки, должна остаться поделённой
 
         У Мутировавшего молока в руку садятся девять костей, и 8902 вершины из
         15906 принадлежат им долями: банка, молоко и монстр внутри связаны
         мягко. Пока анимация вела каждую вершину ОДНОЙ костью (первой в списке,
-        весом 1), меш рвало по швам, а молоко уезжало из стекла — при том, что
-        геометрия запекалась по ВСЕМ весам.
+        весом 1), меш рвало по швам, а молоко уезжало из стекла - при том, что
+        геометрия запекалась по ВСЕМ весам
         """
         weapon = self._part(self._two_grip_scene("2 0 0.75 1 0.25"), "weapon")
 
@@ -173,26 +173,26 @@ class BuildSceneTests(unittest.TestCase):
         self.assertNotEqual(weapon["skinIndex"][0], weapon["skinIndex"][1])
 
     def test_weights_of_bones_with_one_driver_add_up(self):
-        """Курок и корпус едут за одной костью руки — их доли складываются.
+        """Курок и корпус едут за одной костью руки - их доли складываются
 
         Иначе вторая запись затирала бы первую, и вершина уезжала бы с частью
         своего веса. У обычного оружия это единственный случай: в руку садится
-        одна кость, и все доли сходятся на ней.
+        одна кость, и все доли сходятся на ней
         """
         weapon = self._part(self._two_grip_scene("2 0 0.6 0 0.4"), "weapon")
 
         self.assertEqual(weapon["skinWeight"][:4], [1.0, 0.0, 0.0, 0.0])
 
     def _two_grip_scene(self, links):
-        """Сцена, где в руку садятся ДВЕ кости: `weapon_bone` и `weapon_bone_L`.
+        """Сцена, где в руку садятся ДВЕ кости: `weapon_bone` и `weapon_bone_L`
 
         Так устроены медиганы (левая рука на своём корне) и Мутировавшее молоко
-        (банка, молоко и монстр на своих). Обе кости — корни собственной
-        иерархии, поэтому обе считаются хватом.
+        (банка, молоко и монстр на своих). Обе кости - корни собственной
+        иерархии, поэтому обе считаются хватом
 
-        `links` — хвост строки вершины SMD: сколько костей и с какими долями.
+        `links` - хвост строки вершины SMD: сколько костей и с какими долями.
         Помощник `_smd` кладёт по одной кости на вершину, а проверяется здесь
-        именно доля, поэтому меш оружия пишется построчно.
+        именно доля, поэтому меш оружия пишется построчно
         """
         bones = [("root", None), ("bip_hand_R", "root"),
                  ("weapon_bone", "bip_hand_R"), ("weapon_bone_L", "root")]
@@ -219,12 +219,12 @@ class BuildSceneTests(unittest.TestCase):
         return viewmodel_animation.build_scene(
             arms_ref_smd=str(arms), weapon_ref_smd=str(weapon), anim_smd=str(anim))
 
-    # ── Бодигруппы и белый список ─────────────────────────────────────────── #
+    # Бодигруппы и белый список
 
     def test_arms_bodygroups_are_added(self):
-        """Правая рука пиро и инженера — отдельная бодигруппа.
+        """Правая рука пиро и инженера - отдельная бодигруппа
 
-        Без неё в сцене оставалась одна левая.
+        Без неё в сцене оставалась одна левая
         """
         right = self.dir / "c_righthand_bodygroup.smd"
         right.write_text(_smd(
@@ -236,7 +236,7 @@ class BuildSceneTests(unittest.TestCase):
         self.assertIn("test_handR", self._part(scene, "arms")["materials"])
 
     def test_arms_whitelist_hides_the_prop(self):
-        """У солдата в модели РУК лежит ракета — в покое её быть не должно."""
+        """У солдата в модели РУК лежит ракета - в покое её быть не должно"""
         full = self._build()
         self.assertIn("w_rocket01", self._part(full, "arms")["materials"])
 
@@ -244,7 +244,7 @@ class BuildSceneTests(unittest.TestCase):
         self.assertEqual(self._part(trimmed, "arms")["materials"], ["test_hands"])
 
     def test_weapon_bodygroups_share_the_weapon_skeleton(self):
-        """Откидные части оружия едут теми же костями, что и основной меш."""
+        """Откидные части оружия едут теми же костями, что и основной меш"""
         extra = self.dir / "c_test_scope.smd"
         extra.write_text(_smd(
             [("weapon_bone", None)], {}, [_tri("c_test_scope", "weapon_bone")],
@@ -253,7 +253,7 @@ class BuildSceneTests(unittest.TestCase):
         scene = self._build(weapon_extra_smds=[str(extra)])
         weapon = self._part(scene, "weapon")
         self.assertEqual(weapon["materials"], ["xms_lights", "c_test_scope"])
-        # Бодигруппа своя часть предмета, а не носитель — её тоже красят.
+        # Бодигруппа своя часть предмета, а не носитель - её тоже красят
         self.assertEqual(scene["weaponMaterials"], ["xms_lights", "c_test_scope"])
 
 
@@ -262,11 +262,11 @@ if __name__ == "__main__":
 
 
 class LayerTests(BuildSceneTests):
-    """Разностный слой поверх кадров: вздрагивание горящего игрока.
+    """Разностный слой поверх кадров: вздрагивание горящего игрока
 
-    В SMD у такого слоя нули вместо поз — это добавка, а не поза. Складывается
+    В SMD у такого слоя нули вместо поз - это добавка, а не поза. Складывается
     он в местных осях кости, а КОРЕНЬ пропускается: там лежит не движение, а
-    поправка осей, и вместе с базой она кладёт персонажа набок.
+    поправка осей, и вместе с базой она кладёт персонажа набок
     """
 
     def _layer(self, frame):
@@ -287,7 +287,7 @@ class LayerTests(BuildSceneTests):
         self.assertEqual(now["positions"][1] - was["positions"][1], 3)
 
     def test_root_of_the_layer_is_ignored(self):
-        """У вздрагивания солдата в корне ровно -90 градусов — оси, не поза."""
+        """У вздрагивания солдата в корне ровно -90 градусов - оси, не поза"""
         clip = self._build(anim_layer_smd=self._layer(
             {"root": ((0, 0, 0), (0, 0, -HALF_PI))}))["clip"]
         plain = self._build()["clip"]
@@ -300,7 +300,7 @@ class LayerTests(BuildSceneTests):
 
 
 class CutTests(BuildSceneTests):
-    """Обрыв движения: замороженная смерть застывает посреди падения."""
+    """Обрыв движения: замороженная смерть застывает посреди падения"""
 
     def _times(self, **kwargs):
         scene = viewmodel_animation.build_scene(
@@ -309,7 +309,7 @@ class CutTests(BuildSceneTests):
         return scene["clip"]["times"]
 
     def _long_anim(self, frames=10):
-        """Анимация на несколько кадров: поза одна, важны их номера."""
+        """Анимация на несколько кадров: поза одна, важны их номера"""
         lines = ["version 1", "nodes",
                  '0 "root" -1', '1 "bip_hand_R" 0', '2 "weapon_bone" 1',
                  "end", "skeleton"]
@@ -329,17 +329,17 @@ class CutTests(BuildSceneTests):
         self.assertEqual(len(cut), 6)          # 0.0…0.5 включительно
 
     def test_cut_never_leaves_a_single_frame(self):
-        """Из одного кадра дорожки не выйдет, и «замереть сразу» — не то."""
+        """Из одного кадра дорожки не выйдет, и «замереть сразу» - не то"""
         self.assertGreaterEqual(
             len(self._times(anim_smd=self._long_anim(), fps=10.0,
                             clip_cut=0.0001)), 2)
 
 
 class OwnViewmodelTests(BuildSceneTests):
-    """Предмет со СВОЕЙ моделью вида: часы шпиона.
+    """Предмет со СВОЕЙ моделью вида: часы шпиона
 
-    В `v_watch_*.mdl` уже лежат и руки, и часы, и свои последовательности —
-    сажать в руку нечего, и отдельной части с оружием в сцене нет.
+    В `v_watch_*.mdl` уже лежат и руки, и часы, и свои последовательности -
+    сажать в руку нечего, и отдельной части с оружием в сцене нет
     """
 
     def test_scene_without_a_weapon_part_is_built(self):
@@ -353,6 +353,6 @@ class OwnViewmodelTests(BuildSceneTests):
         self.assertTrue(scene["clip"]["times"])
 
     def test_editable_list_wins_over_the_weapon_materials(self):
-        """У модели вида руки и предмет вперемешку — красят только предмет."""
+        """У модели вида руки и предмет вперемешку - красят только предмет"""
         scene = self._build(editable_mats=["xms_lights"])
         self.assertEqual(scene["weaponMaterials"], ["xms_lights"])

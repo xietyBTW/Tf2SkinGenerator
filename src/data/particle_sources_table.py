@@ -1,15 +1,15 @@
 """
-Чем вызывается каждая система частиц игры — собрано скриптом
-scripts/particle_sources_build.py. Не править руками: перегенерировать.
+Чем вызывается каждая система частиц игры - собрано скриптом
+scripts/particle_sources_build.py. Не править руками: перегенерировать
 
-Токен источника: `вид:метка`. Виды — в src/data/particle_sources.py;
-метка у оружия — стебель скрипта (`flamethrower`), у постройки — её
-слово (`sentry`), у необычного эффекта — имя корневой системы.
+Токен источника: `вид:метка`. Виды - в src/data/particle_sources.py;
+метка у оружия - стебель скрипта (`flamethrower`), у постройки - её
+слово (`sentry`), у необычного эффекта - имя корневой системы
 """
 
 from __future__ import annotations
 
-#: Стебель скрипта оружия → токен локализации его названия.
+#: Стебель скрипта оружия -> токен локализации его названия
 WEAPON_NAMES = {
     'bat': '#TF_Weapon_Bat',
     'bat_fish': '#TF_Weapon_Fish',
@@ -91,7 +91,7 @@ WEAPON_NAMES = {
     'wrench': '#TF_Weapon_Wrench',
 }
 
-#: Система → источники.
+#: Система -> источники
 SOURCES = {
     '': ('halloween:', 'unusual:unusual_phantomcrown_green_parent'),
     '3rd_attack_glow': ('weapon:flamethrower',),

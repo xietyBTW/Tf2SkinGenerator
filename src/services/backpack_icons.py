@@ -1,14 +1,14 @@
 """
-Иконки предметов из рюкзака (materials/backpack/…) прямо из игрового VPK.
+Иконки предметов из рюкзака (materials/backpack/…) прямо из игрового VPK
 
 Ничего не скачивается и не распаковывается: `vpk` читает одну запись по имени,
 VTF декодируется в PNG в памяти, результат кладётся в cache/icons. Это те самые
-картинки, которые игрок видит в рюкзаке, — 128x128 с прозрачным фоном.
+картинки, которые игрок видит в рюкзаке, - 128x128 с прозрачным фоном
 
 Сопоставление сделано по имени файла, а не по items_game.txt: в 8385 иконках
 backpack имена уникальны (ни одного совпадения на два разных пути), поэтому
-индекс «имя → путь в VPK» решает задачу без разбора 30-мегабайтного файла.
-Покрытие оружия — 213 из 224; недостающие иконки просто не показываются.
+индекс «имя -> путь в VPK» решает задачу без разбора 30-мегабайтного файла.
+Покрытие оружия - 213 из 224; недостающие иконки просто не показываются
 """
 
 from __future__ import annotations
@@ -22,20 +22,24 @@ from src.shared.paths import data_dir
 
 logger = get_logger(__name__)
 
-#: Готовые PNG между запусками. Декодирование VTF стоит ~12 мс на иконку —
-#: на второй запуск это заметная разница при трёхстах карточках на экране.
+#: Готовые PNG между запусками. Декодирование VTF стоит ~12 мс на иконку -
+#: на второй запуск это заметная разница при трёхстах карточках на экране
 _CACHE_DIR = data_dir() / "cache" / "icons"
 
+#: Потолок стороны для произвольной текстуры (`material_png`): карточка
+#: каталога не больше 150 пикселей. Значение то же, что в `model_icons`
+_MAX_SIDE = 256
+
 _index: Optional[Dict[str, str]] = None
-#: Иконки каталога приходят пачкой параллельно — индекс строит один.
+#: Иконки каталога приходят пачкой параллельно - индекс строит один
 _index_lock = threading.Lock()
 
 
 def _build_index(textures_vpk: str) -> Dict[str, str]:
-    """Индекс «имя файла → путь внутри VPK» по всем иконкам рюкзака.
+    """Индекс «имя файла -> путь внутри VPK» по всем иконкам рюкзака
 
     Версии `_large` (512x512) пропускаем: карточка каталога не больше 150
-    пикселей, а весят они в шестнадцать раз больше.
+    пикселей, а весят они в шестнадцать раз больше
     """
     from src.services.vpk_cache import open_vpk_cached
 
@@ -55,28 +59,31 @@ def _build_index(textures_vpk: str) -> Dict[str, str]:
 
 def vpk_path_for(key: str, textures_vpk: str) -> Optional[str]:
     """
-    Путь иконки внутри VPK для ключа предмета, либо None.
+    Путь иконки внутри VPK для ключа предмета, либо None
 
     Ключом может быть:
       * путь image_inventory из items_game (``backpack/player/items/…``);
       * ключ оружия (``c_scattergun``);
-      * путь к модели шапки (``models/player/items/…/hat.mdl``).
+      * путь к модели шапки (``models/player/items/…/hat.mdl``)
 
-    Для стоковых оружий иконка объявлена под мировой моделью (`c_minigun` →
-    `w_minigun`), поэтому после прямого совпадения пробуем `w_`-вариант.
+    Для стоковых оружий иконка объявлена под мировой моделью (`c_minigun` ->
+    `w_minigun`), поэтому после прямого совпадения пробуем `w_`-вариант
     """
     global _index
     if not key:
         return None
+    key = key.replace("\\", "/").strip().lower()
+    if key.startswith("backpack/"):
+        # Явный путь из items_game - он уже точный, индекс не нужен. Проверка
+        # ДО построения индекса: у шапок (их почти две тысячи) ключ всегда
+        # такой, и первая же иконка каталога ждала разбора 130 тысяч путей
+        # архива, хотя PNG давно лежал в кэше
+        return f"materials/{key}.vtf"
+
     if _index is None:
         with _index_lock:
             if _index is None:
                 _index = _build_index(textures_vpk)
-
-    key = key.replace("\\", "/").strip().lower()
-    if key.startswith("backpack/"):
-        # Явный путь из items_game — он уже точный, индекс не нужен.
-        return f"materials/{key}.vtf"
 
     name = key.rsplit("/", 1)[-1].removesuffix(".mdl")
     for candidate in (name, "w_" + name[2:] if name.startswith("c_") else None,
@@ -87,22 +94,24 @@ def vpk_path_for(key: str, textures_vpk: str) -> Optional[str]:
 
 
 def material_png(rel: str, textures_vpk: str) -> Optional[bytes]:
-    """PNG любой игровой картинки по пути внутри `materials/`, без расширения.
+    """PNG любой игровой картинки по пути внутри `materials/`, без расширения
 
     Нужна не рюкзаку, а каталогу звуков: у реплики нет предмета, зато есть
     класс, а у класса есть портрет (`vgui/class_portraits/scout`). Индекс
-    рюкзака сюда не годится — он собран только по `materials/backpack/`.
+    рюкзака сюда не годится - он собран только по `materials/backpack/`
     """
     rel = (rel or '').replace(chr(92), '/').strip().strip('/').lower()
     if not rel or '..' in rel.split('/'):
         return None
     path = f"materials/{rel}.vtf"
-    cached = _CACHE_DIR / (rel.replace('/', '_') + '.png')
-    return _decode(path, cached, textures_vpk)
+    # `.s256` в имени: размер входит в ключ кэша, файлы в полный размер
+    # текстуры (руки класса - 2048 px) не подхватятся
+    cached = _CACHE_DIR / (rel.replace('/', '_') + f'.s{_MAX_SIDE}.png')
+    return _decode(path, cached, textures_vpk, max_side=_MAX_SIDE)
 
 
 def png_bytes(key: str, textures_vpk: str) -> Optional[bytes]:
-    """PNG иконки предмета, либо None если её в игре нет."""
+    """PNG иконки предмета, либо None если её в игре нет"""
     path = vpk_path_for(key, textures_vpk)
     if not path:
         return None
@@ -111,8 +120,13 @@ def png_bytes(key: str, textures_vpk: str) -> Optional[bytes]:
     return _decode(path, cached, textures_vpk)
 
 
-def _decode(path: str, cached: Path, textures_vpk: str) -> Optional[bytes]:
-    """VTF из игрового архива в PNG, с оглядкой на уже разобранное."""
+def _decode(path: str, cached: Path, textures_vpk: str,
+            max_side: int = 0) -> Optional[bytes]:
+    """VTF из игрового архива в PNG, с оглядкой на уже разобранное
+
+    `max_side` - потолок стороны: иконки рюкзака и так 128 px, а произвольная
+    игровая текстура бывает в 2048
+    """
     if cached.exists():
         return cached.read_bytes()
 
@@ -133,4 +147,20 @@ def _decode(path: str, cached: Path, textures_vpk: str) -> Optional[bytes]:
     _CACHE_DIR.mkdir(parents=True, exist_ok=True)
     if vtf_bytes_to_png(data, str(cached)) is None:
         return None
+    if max_side:
+        _shrink(cached, max_side)
     return cached.read_bytes()
+
+
+def _shrink(png: Path, max_side: int) -> None:
+    """Ужимает PNG на месте, альфу не трогает. Ошибка не фатальна"""
+    from PIL import Image
+
+    try:
+        with Image.open(png) as im:
+            if max(im.size) <= max_side:
+                return
+            im.thumbnail((max_side, max_side))
+            im.save(png)
+    except Exception as exc:                          # noqa: BLE001
+        logger.debug(f"[icons] не ужать {png.name}: {exc}")

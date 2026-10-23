@@ -1,7 +1,6 @@
-"""Мод из VPK: рельеф и карты материала доходят до VMT мода.
+"""Мод из VPK: рельеф и карты материала доходят до VMT мода
 
-Раньше build_custom_mod выкидывал галку Normal Map и не знал про карты —
-в мод шла только заменённая текстура.
+Не только заменённая текстура: галка Normal Map и карты тоже доходят
 """
 import tempfile
 import unittest
@@ -80,7 +79,7 @@ class ApplyMaterialExtrasTests(unittest.TestCase):
         edited = '"VertexLitGeneric"\n{\n\t"$basetexture" "models/w/m9"\n\t"$phong" "1"\n}\n'
         with mock.patch.object(EditedVMTService, 'EDITED_VMT_DIR', str(self.temp / 'edits')):
             EditedVMTService.save_edited_vmt(EditedVMTService.mod_key('D:/mods/a.vpk', 'm9'), edited)
-            # Правка того же материала игры и другого мода - не про этот мод.
+            # Правка того же материала игры и другого мода - не про этот мод
             EditedVMTService.save_edited_vmt('m9_blue', edited)
             EditedVMTService.save_edited_vmt(EditedVMTService.mod_key('D:/mods/b.vpk', 'm9_blue'), edited)
             CustomVPKService._apply_vmt_edits('D:/mods/a.vpk', self.textures)

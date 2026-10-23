@@ -1,10 +1,10 @@
 """
-Праздничная версия оружия: гирлянда поверх модели, её правки и сборка.
+Праздничная версия оружия: гирлянда поверх модели, её правки и сборка
 
-Гирлянда — отдельная модель, которую игра рисует костями оружия. У одной
+Гирлянда - отдельная модель, которую игра рисует костями оружия. У одной
 модели их бывает две: праздничная (`attached_models` праздничного предмета)
-и фестивайзер (`attached_models_festive`). Формат блоков — из настоящего
-items_game.txt.
+и фестивайзер (`attached_models_festive`). Формат блоков - из настоящего
+items_game.txt
 """
 
 import unittest
@@ -119,7 +119,7 @@ class DecorIndexTests(unittest.TestCase):
         (scripts / "items_game.txt").write_text(ITEMS_GAME, encoding="utf-8")
         self.root = str(root)
         VA._MEM.pop(self.root, None)
-        # Настоящий кэш пользователя тест трогать не должен.
+        # Настоящий кэш пользователя тест трогать не должен
         self._cache = patch.object(VA, "_CACHE_FILE", root / "cache.json")
         self._cache.start()
 
@@ -129,7 +129,7 @@ class DecorIndexTests(unittest.TestCase):
         self._tmp.cleanup()
 
     def test_both_kinds_are_collected_from_different_items(self):
-        # Праздничную даёт один предмет, фестивайзер — префаб другого.
+        # Праздничную даёт один предмет, фестивайзер - префаб другого
         self.assertEqual(VA.decor_models("c_scattergun", self.root), {
             "xmas": "models/weapons/c_models/c_scattergun/c_scattergun_xmas.mdl",
             "festivizer": "models/weapons/c_models/c_scattergun/c_scattergun_festivizer.mdl",
@@ -140,15 +140,15 @@ class DecorIndexTests(unittest.TestCase):
                          "models/weapons/c_models/c_medigun/c_medigun_festivizer.mdl")
 
     def test_not_every_attached_model_is_a_garland(self):
-        # Запальник огнемёта тоже висит в attached_models.
+        # Запальник огнемёта тоже висит в attached_models
         self.assertEqual(VA.decor_models("c_flamethrower", self.root), {})
 
     def test_whole_festive_model_gets_no_garland(self):
-        # Свой скелет с огоньками внутри: гирлянда базы легла бы не туда.
+        # Свой скелет с огоньками внутри: гирлянда базы легла бы не туда
         self.assertEqual(VA.decor_models("c_ambassador_xmas", self.root), {})
 
     def test_garland_itself_offers_nothing(self):
-        # anim_info отдал бы данные базы — decor_models ищет только точно.
+        # anim_info отдал бы данные базы - decor_models ищет только точно
         self.assertEqual(VA.decor_models("c_scattergun_xmas", self.root), {})
         self.assertEqual(VA.anim_info("c_scattergun_xmas", self.root).carried_on,
                          "c_scattergun")
@@ -185,7 +185,7 @@ GARLAND_VMT = '''"VertexlitGeneric"
 
 class FramerateTests(unittest.TestCase):
     def test_base_texture_proxy_wins_over_the_first_one(self):
-        # Первым идёт прокси огня: его 30 кадров мигали бы лампочками.
+        # Первым идёт прокси огня: его 30 кадров мигали бы лампочками
         self.assertEqual(vmt_parse.animated_framerate(GARLAND_VMT), 1.0)
 
     def test_proxies_inside_quality_branch_are_found(self):
@@ -220,7 +220,7 @@ class FirstPersonPrefixTests(unittest.TestCase):
 
 
 class DecorStateTests(unittest.TestCase):
-    """Карточки гирлянды в состоянии текстур: нейтральны, без стилей, мимо сборки оружия."""
+    """Карточки гирлянды в состоянии текстур: нейтральны, без стилей, мимо сборки оружия"""
 
     CARD = "deco:festivizer/festive_lights_red"
 
@@ -255,7 +255,7 @@ class DecorStateTests(unittest.TestCase):
         # У огоньков фестивайзера синие кадры свои: правка на RED пишется
         # только в RED, но синие без своей правки берут её - иначе в руках за
         # BLU огоньки оставались игровыми (проверено в игре). Своя синяя -
-        # своя.
+        # своя
         t = self.s.textures
         red_png, blu_png = self.png, str(Path(self._tmp.name) / "b.png")
         Path(blu_png).write_bytes(b"y")
@@ -353,7 +353,7 @@ end
 
 
 class DecorBendTests(unittest.TestCase):
-    """Изгиб гирлянды: лампочки целиком, провод гнётся, порядок как у разбора."""
+    """Изгиб гирлянды: лампочки целиком, провод гнётся, порядок как у разбора"""
 
     def setUp(self):
         self._tmp = TemporaryDirectory()
@@ -391,7 +391,7 @@ class DecorBendTests(unittest.TestCase):
         shifts = {round(p[2] - z, 6) for p, z in zip(bulb, (0, 0, 0))}
         self.assertEqual(len(shifts), 1)             # целиком, не смята
         self.assertGreater(shifts.pop(), 0)
-        far = tris["wire"][1][1]["pos"]              # (30, 0, 0) — вне радиуса
+        far = tris["wire"][1][1]["pos"]              # (30, 0, 0) - вне радиуса
         self.assertEqual(far, (30.0, 0.0, 0.0))
 
     def test_shaped_smd_without_edits_is_the_source(self):
@@ -399,9 +399,9 @@ class DecorBendTests(unittest.TestCase):
         self.assertEqual(fd.shaped_smd(self.smd, None, []), self.smd)
 
     def test_bend_made_in_the_preview_pose_lands_there_in_the_build(self):
-        # Превью показывает гирлянду в позе оружия и гнут её там; сборка
+        # Превью показывает гирлянду в позе оружия и гнут её там, сборка
         # гнёт SMD в исходной позе. Поставленный обратно в позу результат
-        # сборки обязан совпасть с тем, что видели в превью.
+        # сборки обязан совпасть с тем, что видели в превью
         from src.services import festive_decor as fd, smd_pose
         from src.services.smd_to_obj_service import SmdToObjService
         pose = {0: (0.0, -1.0, 0.0, 1.0,     # поворот на 90° вокруг Z и сдвиг
@@ -426,13 +426,13 @@ class DecorBendTests(unittest.TestCase):
 
 class BlinkTests(unittest.TestCase):
     """Своя текстура лампочек мигает кадрами игровой: цвет свой, ритм и
-    свечение — игровые."""
+    свечение - игровые"""
 
     def setUp(self):
         from PIL import Image
         self._tmp = TemporaryDirectory()
         d = Path(self._tmp.name)
-        # Две «лампочки» по пикселю: в кадре 0 горит левая, в кадре 1 — правая.
+        # Две «лампочки» по пикселю: в кадре 0 горит левая, в кадре 1 - правая
         self.stock = []
         for k, (left, right) in enumerate([((200, 0, 0, 255), (0, 20, 0, 0)),
                                            ((20, 0, 0, 0), (0, 200, 0, 255))]):
@@ -510,7 +510,7 @@ end
 
 
 class OwnGarlandTests(unittest.TestCase):
-    """Своя модель гирлянды: скелет стоковой, материалы свои, хранится в работе."""
+    """Своя модель гирлянды: скелет стоковой, материалы свои, хранится в работе"""
 
     def setUp(self):
         self._tmp = TemporaryDirectory()
@@ -529,8 +529,8 @@ class OwnGarlandTests(unittest.TestCase):
         self.assertIn('"lights"', text)                 # кости стоковые
         self.assertIn("my_wire", text)                  # материал свой, как в studiomdl
         self.assertNotIn("festive_lights_red", text)    # треугольники только свои
-        # Кость `root` в стоковой не нашлась — вершины на кости, которую несёт
-        # стоковая гирлянда (SMDService._grip_bone), а не на кости с номером 0.
+        # Кость `root` в стоковой не нашлась - вершины на кости, которую несёт
+        # стоковая гирлянда (SMDService._grip_bone), а не на кости с номером 0
         rows = [ln.split() for ln in text.split("triangles", 1)[1].splitlines()
                 if len(ln.split()) >= 9]
         self.assertTrue(rows and all(r[0] == "1" for r in rows))
@@ -562,7 +562,7 @@ class OwnGarlandTests(unittest.TestCase):
         smd, textures = _garland_smd(str(self.dir / "g.obj"))
         self.assertTrue(smd.endswith(".smd") and Path(smd).is_file())
         self.assertEqual(list(textures.values()), [str(self.dir / "g.png")])
-        # Свой SMD — копией: загрузки лежат под постоянным именем.
+        # Свой SMD - копией: загрузки лежат под постоянным именем
         copy, none = _garland_smd(str(self.dir / "own.smd"))
         self.assertNotEqual(Path(copy).parent, self.dir)
         self.assertEqual((Path(copy).read_text(encoding="utf-8"), none), (OWN, {}))

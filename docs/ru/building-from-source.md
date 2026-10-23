@@ -120,7 +120,7 @@ build-release.ps1         скрипт выпуска релиза
 | `coverage run -m unittest discover -s tests` | Те же тесты так, как их гоняет CI. Учтите, что `unittest` не загружает `tests/conftest.py`, и перенаправление временных файлов и черновиков здесь не действует: тест, который забыл подменить папку работ, пишет в настоящую `work/`. Локально лучше гонять через pytest. |
 | `python scripts/check_coverage.py coverage.json 40 28` | Порог покрытия: 40 % строк и 28 % ветвлений. Сначала выполните `coverage json -o coverage.json`. |
 | `python -m vulture src main.py --min-confidence 80` | Мёртвый код. Для более глубокого просмотра локально понизьте порог до 60. |
-| `python scripts/check_frontend.py` | Страницу саму с собой: каждый id, который ищет код, есть в `index.html`, каждый метод API экспортирован из `api.js`, разрешён сервером и определён в `api.py`, у каждого события из Python есть обработчик. |
+| `python scripts/check_frontend.py` | Страницу саму с собой: каждый id, который ищет код, есть в `index.html`, каждый метод API экспортирован из `api.js`, у каждого события из Python есть обработчик. Доходит ли вызов до Python, проверяет `tests/test_frontend_contract.py`. |
 | `npm install`, затем `npm run check` в `frontend/` | TypeScript проверяет JavaScript-модули на сломанные импорты и имена. Известный шум сужения DOM отфильтрован. |
 
 GitHub Actions (`.github/workflows/ci.yml`) на каждый push и pull request гоняет ruff, тесты с покрытием и его порогом и vulture, под Windows с Python 3.12.

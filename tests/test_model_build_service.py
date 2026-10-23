@@ -124,8 +124,8 @@ class ModelBuildServiceTests(unittest.TestCase):
     def test_custom_cdmaterials_survives_build_qc_transform(self):
         # Пользователь поменял $cdmaterials в QC-редакторе. При сборке его текст
         # проходит через replace_texturegroup_in_text (синк стилей). Путь должен
-        # сохраниться — тогда extract_cdmaterials_path_from_qc отдаст его сборке,
-        # и мод соберётся с указанным пользователем путём.
+        # сохраниться - тогда extract_cdmaterials_path_from_qc отдаст его сборке,
+        # и мод соберётся с указанным пользователем путём
         import tempfile as _tf
         custom_path = "console\\models\\weapons\\my_custom"
         qc = "\n".join([
@@ -139,11 +139,11 @@ class ModelBuildServiceTests(unittest.TestCase):
         ])
         new_tg = '$texturegroup "skinfamilies"\n{\n\t{ "new_tex" }\n}'
         synced = ModelBuildService.replace_texturegroup_in_text(qc, new_tg)
-        # $cdmaterials пользователя не потерялся, а стили пересобрались.
+        # $cdmaterials пользователя не потерялся, а стили пересобрались
         self.assertIn(custom_path, synced)
         self.assertIn("new_tex", synced)
         self.assertNotIn("old_tex", synced)
-        # И извлечение отдаёт именно пользовательский путь (как в сборке).
+        # И извлечение отдаёт именно пользовательский путь (как в сборке)
         with _tf.TemporaryDirectory() as tmp:
             qc_file = Path(tmp) / "s.qc"
             qc_file.write_text(synced, encoding="utf-8")
@@ -182,21 +182,21 @@ class ModelBuildServiceTests(unittest.TestCase):
             self.assertNotIn("console", updated.lower())
 
     def test_apply_cdmaterials_prefix_console_is_identity_for_prefixed(self):
-        # console default: путь уже под console\ остаётся как есть.
+        # console default: путь уже под console\ остаётся как есть
         self.assertEqual(
             ModelBuildService.apply_cdmaterials_prefix("console\\models\\x"),
             "console\\models\\x")
-        # forward-слеши нормализуются к backslash.
+        # forward-слеши нормализуются к backslash
         self.assertEqual(
             ModelBuildService.apply_cdmaterials_prefix("models/x"),
             "console\\models\\x")
 
     def test_apply_cdmaterials_prefix_vgui_reroots_console(self):
-        # Crowbar-console → пере-корневание в vgui-папку (без двойного console).
+        # Crowbar-console -> пере-корневание в vgui-папку (без двойного console)
         out = ModelBuildService.apply_cdmaterials_prefix(
             "console\\models\\weapons\\c_x", "vgui\\replay\\thumbnails")
         self.assertEqual(out, "vgui\\replay\\thumbnails\\models\\weapons\\c_x")
-        # Уже под vgui-папкой — не удваиваем.
+        # Уже под vgui-папкой - не удваиваем
         again = ModelBuildService.apply_cdmaterials_prefix(
             out, "vgui\\replay\\thumbnails")
         self.assertEqual(again, out)
@@ -206,7 +206,7 @@ class ModelBuildServiceTests(unittest.TestCase):
             ModelBuildService.apply_cdmaterials_prefix("\\models\\x"),
             "console\\models\\x")
 
-    # === Тесты для extract_texturegroup_structure ===
+    # Тесты для extract_texturegroup_structure
     
     def test_extract_texturegroup_structure_with_teams_and_extras(self):
         """Тест: полная структура с RED/BLU командами и доп. материалами"""
@@ -317,11 +317,11 @@ class ModelBuildServiceTests(unittest.TestCase):
             self.assertEqual(info['extra_materials'], [])
 
     def test_extract_texturegroup_structure_file_not_found(self):
-        """Тест: несуществующий QC файл → пустая структура (не падает)."""
+        """Тест: несуществующий QC файл -> пустая структура (не падает)"""
         info = ModelBuildService.extract_texturegroup_structure("/nonexistent/path.qc")
         self.assertEqual(info['red_row'], [])
 
-    # === Тесты для extract_extra_body_smds ===
+    # Тесты для extract_extra_body_smds
     
     def test_extract_extra_body_smds_with_shell(self):
         """Тест: модель с дополнительной частью (shell)"""
@@ -433,7 +433,7 @@ class ModelBuildServiceTests(unittest.TestCase):
         self.assertEqual(ModelBuildService.generate_texturegroup_block(["m"], {}), "")
 
     def test_generate_texturegroup_block_only_variant_materials(self):
-        # В группу попадают только переменные материалы; постоянные опускаются.
+        # В группу попадают только переменные материалы, постоянные опускаются
         block = ModelBuildService.generate_texturegroup_block(
             ["body", "lefteye"], {1: {"lefteye": "lefteye_bloody"}},
         )
@@ -442,7 +442,7 @@ class ModelBuildServiceTests(unittest.TestCase):
         self.assertNotIn('body', block)   # постоянный материал не пишется
 
     def test_generate_texturegroup_block_lowercases_names(self):
-        # Имена приводятся к нижнему регистру (иначе фиолетовые текстуры).
+        # Имена приводятся к нижнему регистру (иначе фиолетовые текстуры)
         block = ModelBuildService.generate_texturegroup_block(
             ["Material.001"], {1: {"Material.001": "Material.001_Bloody"}},
         )

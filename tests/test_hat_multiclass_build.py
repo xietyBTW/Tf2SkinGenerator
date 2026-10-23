@@ -1,14 +1,13 @@
 """
-Мультиклассовая шапка: модель собирается для КАЖДОГО выбранного класса.
+Мультиклассовая шапка: модель собирается для КАЖДОГО выбранного класса
 
-У all-class шапки каждый класс — отдельный файл модели, и при компиляции путь
+У all-class шапки каждый класс - отдельный файл модели, и при компиляции путь
 к материалам переписывается на папку обхода sv_pure. Класс, чью модель не
-пересобрали, продолжает грузить оригинальную текстуру игры — мод «работает
-только на одном классе». Раньше остальные классы собирались ТОЛЬКО когда
-пользователь менял ещё и геометрию.
+пересобрали, продолжает грузить оригинальную текстуру игры - мод «работает
+только на одном классе». Классы собираются и без замены геометрии
 
-Внешние инструменты (Crowbar/studiomdl/VTFCmd/упаковка) замоканы — проверяется
-состав работы, а не результат компиляции.
+Внешние инструменты (Crowbar/studiomdl/VTFCmd/упаковка) замоканы - проверяется
+состав работы, а не результат компиляции
 """
 
 import tempfile
@@ -29,7 +28,7 @@ CLASSES = {
 
 class MulticlassHatBuildTests(unittest.TestCase):
     def _build(self, *, classes=None, replace_model=False):
-        """Гоняет build_vpk для шапки. → (ok, сколько моделей скомпилировано)."""
+        """Гоняет build_vpk для шапки. -> (ok, сколько моделей скомпилировано)"""
         from PIL import Image
 
         base = Path(tempfile.mkdtemp())
@@ -61,10 +60,8 @@ class MulticlassHatBuildTests(unittest.TestCase):
                     "extract_file_set", return_value=[str(base / "hat.mdl")]))
             m(patch("src.services.tf2_vpk_extract_service.TF2VPKExtractService."
                     "extract_vmt_file", return_value=str(base / "src.vmt")))
-            m(patch(MP + "get_cached_decompile", return_value=None))
-            m(patch(MP + "save_to_cache"))
-            m(patch(P + "ModelBuildService.decompile", return_value=str(qc)))
-            m(patch(MP + "ModelBuildService.decompile", return_value=str(qc)))
+            m(patch("src.services.model_decompile_service.decompile_into",
+                    return_value=str(qc)))
             m(patch(P + "ModelBuildService.extract_cdmaterials_path_from_qc",
                     return_value="models/player/items/all_class"))
             m(patch(P + "ModelBuildService.extract_all_cdmaterials_paths_from_qc",
@@ -117,7 +114,7 @@ class MulticlassHatBuildTests(unittest.TestCase):
         ok, compiled, msg = self._build()
         self.assertTrue(ok, msg)
         self.assertEqual(compiled, len(CLASSES),
-                         "каждый выбранный класс — своя модель в моде")
+                         "каждый выбранный класс - своя модель в моде")
 
     def test_model_replacement_still_covers_every_class(self):
         ok, compiled, msg = self._build(replace_model=True)
@@ -125,7 +122,7 @@ class MulticlassHatBuildTests(unittest.TestCase):
         self.assertEqual(compiled, len(CLASSES))
 
     def test_single_class_hat_builds_one_model(self):
-        """Обычная шапка одного класса лишних компиляций не получает."""
+        """Обычная шапка одного класса лишних компиляций не получает"""
         ok, compiled, msg = self._build(classes={"scout": CLASSES["scout"]})
         self.assertTrue(ok, msg)
         self.assertEqual(compiled, 1)

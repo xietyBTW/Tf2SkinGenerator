@@ -46,7 +46,7 @@ class VTFLibAnimatedVTFTests(unittest.TestCase):
 
 class AnimatedNormalMapTests(unittest.TestCase):
     def test_gif_with_normal_option_builds_both_vtfs(self):
-        """Гифка + включённый normal map → база И многокадровая нормаль."""
+        """Гифка + включённый normal map -> база И многокадровая нормаль"""
         from pathlib import Path
 
         from src.services.texture_service import TextureService
@@ -71,7 +71,7 @@ class AnimatedNormalMapTests(unittest.TestCase):
             )
 
             self.assertTrue(is_normal)
-            self.assertEqual(fps, 8)                       # 125 мс → 8 fps
+            self.assertEqual(fps, 8)                       # 125 мс -> 8 fps
             self.assertTrue((out_dir / "c_test.vtf").exists())
             self.assertTrue((out_dir / "c_test_normal.vtf").exists())
         except OSError as e:
@@ -86,14 +86,14 @@ class AnimatedNormalMapTests(unittest.TestCase):
 
 
 class AnimationFpsTests(unittest.TestCase):
-    """fps берётся по СРЕДНЕМУ кадру, а не по первому (переменные задержки)."""
+    """fps берётся по СРЕДНЕМУ кадру, а не по первому (переменные задержки)"""
 
     def test_fps_from_durations_averages(self):
         from src.services.texture_service import TextureService
 
-        # 100 + 300 мс → средние 200 мс → 5 fps (по первому кадру было бы 10).
+        # 100 + 300 мс -> средние 200 мс -> 5 fps (по первому кадру было бы 10)
         self.assertEqual(TextureService._fps_from_durations([100, 300]), 5)
-        # Нулевые/сверхкороткие задержки трактуются как 100 мс.
+        # Нулевые/сверхкороткие задержки трактуются как 100 мс
         self.assertEqual(TextureService._fps_from_durations([0, 0]), 10)
         self.assertEqual(TextureService._fps_from_durations([]), 10)
 
@@ -108,9 +108,9 @@ class AnimationFpsTests(unittest.TestCase):
 
             count, has_alpha = TextureService._animation_info(gif_path)
             self.assertEqual(count, 3)
-            self.assertFalse(has_alpha)          # непрозрачная гифка → DXT1, не DXT5
+            self.assertFalse(has_alpha)          # непрозрачная гифка -> DXT1, не DXT5
 
-            # Кадры отдаются потоком, задержки собираются по ходу.
+            # Кадры отдаются потоком, задержки собираются по ходу
             durations = []
             got = list(TextureService._iter_animation_frames_rgba(gif_path, (8, 8), count, durations))
             self.assertEqual(len(got), 3)

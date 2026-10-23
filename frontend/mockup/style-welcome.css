@@ -1,0 +1,378 @@
+/*
+ * Встречающее окно первого запуска (welcome.js)
+ *
+ * Язык заставки: знак капсом с разрядкой, полосы командных цветов под
+ * наклоном, буквы и слова проявляются из размытия. Позади карточки медленно
+ * плывут те же полосы - окно живое, но не дёргается. Без анимаций (настройка
+ * или системное «меньше движения») всё стоит на месте
+ *
+ * Часть стилей страницы: файлы подключены в index.html в порядке каскада
+ * (style.css первым), порядок менять нельзя.
+ */
+
+.welcome {
+  --wl-ease: cubic-bezier(.2, .7, .2, 1);
+  --wl-swing: cubic-bezier(.65, 0, .25, 1);
+  --wl-red: #b8383b;
+  --wl-blu: #5885a2;
+  position: fixed;
+  inset: 0;
+  z-index: 1500;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  /* Почти непрозрачная: размытие подложки в снимки смены темы (View
+     Transitions) не попадает, и при 84% интерфейс за окном на время волны
+     становился резким и заметным, а потом снова размывался */
+  background: color-mix(in srgb, var(--bg) 94%, transparent);
+  backdrop-filter: blur(14px) saturate(.9);
+  animation: wl-fade 420ms ease both;
+}
+@keyframes wl-fade { from { opacity: 0; } }
+/* Окно построено под заставкой (welcome.js -> prepareWelcome): подложка уже
+   на месте - заставка уходит прямо в неё, без кадра интерфейса, - а вход
+   карточки ждёт, пока её станет видно */
+.welcome.is-early { animation: none; }
+
+/* Пока окно открыто, интерфейса за ним нет вовсе: сквозь подложку он при
+   смене темы проступал кнопками (снимки перехода рисуют его без размытия).
+   Возвращается, когда окно уходит (welcome.js -> leave) */
+.has-welcome body > *:not(.welcome):not(.splash):not(dialog) { visibility: hidden; }
+
+/* Смена темы волной (welcome.js -> switchTheme): новый снимок страницы с
+   первого кадра обрезан в точку щелчка, его раскрывает анимация */
+.is-theme-vt::view-transition-new(root) {
+  clip-path: circle(0px at var(--vt-x, 50%) var(--vt-y, 50%));
+}
+.welcome.is-held .welcome__card,
+.welcome.is-held .welcome__card * { animation-play-state: paused; }
+
+/* Две широкие полосы командных цветов за карточкой: тянутся из углов и
+   медленно дышат. Очень бледные - это фон, а не украшение поверх текста */
+.welcome::before,
+.welcome::after {
+  content: "";
+  position: absolute;
+  width: 70vmax;
+  height: 18vmax;
+  opacity: .1;
+  transform: skewX(-28deg) translate(var(--x), var(--y)) rotate(-12deg);
+  filter: blur(2px);
+  animation: wl-drift 16s ease-in-out infinite alternate;
+  pointer-events: none;
+}
+.welcome::before { --x: -38vmax; --y: -30vmax; background: var(--wl-red); }
+.welcome::after  { --x: 30vmax;  --y: 28vmax;  background: var(--wl-blu); animation-delay: -8s; }
+@keyframes wl-drift {
+  to { transform: skewX(-28deg) translate(calc(var(--x) * .86), calc(var(--y) * .9)) rotate(-8deg); }
+}
+
+.welcome__card {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+  width: min(640px, calc(100vw - 48px));
+  max-height: calc(100vh - 48px);
+  border: 1px solid var(--hairline-strong);
+  background: var(--overlay);
+  color: var(--ink);
+  box-shadow: 0 40px 90px rgba(0, 0, 0, .32), 0 2px 10px rgba(0, 0, 0, .14);
+  animation: wl-card 640ms var(--wl-ease) 80ms both;
+}
+@keyframes wl-card {
+  from { opacity: 0; transform: translateY(22px) scale(.975); filter: blur(8px); }
+}
+
+/* Шаги: полосы под наклоном, как под знаком заставки */
+.welcome__head { display: flex; align-items: center; gap: 18px; padding: 22px 30px 0; }
+.welcome__steps { display: grid; grid-template-columns: repeat(5, 1fr); gap: 7px; flex: 1; }
+.welcome__seg {
+  position: relative;
+  height: 3px;
+  overflow: hidden;
+  background: var(--hairline);
+  transform: skewX(-28deg);
+}
+.welcome__seg::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: var(--ink);
+  transform: scaleX(0);
+  transform-origin: 0 50%;
+  transition: transform 560ms var(--wl-swing), background 300ms;
+}
+.welcome__seg.is-done::after { transform: scaleX(1); }
+.welcome__seg.is-now::after  { transform: scaleX(1); background: var(--accent); }
+.welcome__count {
+  flex: none;
+  font-family: var(--mono);
+  font-size: 10.5px;
+  color: var(--ink-mute);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Сцена: страницы шагов лежат в одной клетке и сменяют друг друга */
+.welcome__stage {
+  display: grid;
+  min-height: 380px;
+  overflow: hidden auto;
+}
+.welcome__page {
+  grid-area: 1 / 1;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  padding: 26px 30px 10px;
+}
+.welcome__page[inert] { pointer-events: none; }
+
+.wl-eyebrow {
+  margin: 0;
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: .16em;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+.wl-title {
+  margin: -8px 0 0;
+  font-size: 27px;
+  font-weight: 600;
+  letter-spacing: -.02em;
+  line-height: 1.18;
+}
+/* Заголовок проявляется по словам - тем же движением, что буквы знака */
+.wl-title > span {
+  display: inline-block;
+  animation: wl-word 560ms var(--wl-ease) both;
+  animation-delay: calc(60ms + var(--i) * 45ms);
+}
+@keyframes wl-word {
+  from { opacity: 0; transform: translateY(.4em); filter: blur(6px); }
+}
+.wl-text { margin: -6px 0 0; max-width: 50ch; font-size: 13px; line-height: 1.65; color: var(--ink-soft); }
+
+/* Остальное содержимое шага поднимается лесенкой (--d ставит welcome.js) */
+.wl-in { animation: wl-rise 560ms var(--wl-ease) both; animation-delay: calc(180ms + var(--d, 0) * 60ms); }
+@keyframes wl-rise { from { opacity: 0; transform: translateY(12px); filter: blur(4px); } }
+
+.wl-group { display: flex; flex-direction: column; gap: 9px; }
+.wl-label {
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: .14em;
+  text-transform: uppercase;
+  color: var(--ink-mute);
+}
+
+/* Знак на первом шаге */
+.wl-mark { position: relative; align-self: flex-start; margin: 4px 0 16px; }
+.wl-word {
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: .26em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+.wl-word > span {
+  display: inline-block;
+  animation: wl-letter 460ms var(--wl-ease) both;
+  animation-delay: calc(120ms + var(--i) * 24ms);
+}
+@keyframes wl-letter { from { opacity: 0; transform: translateY(.5em); filter: blur(5px); } }
+.wl-swash {
+  position: absolute;
+  bottom: -9px;
+  height: 3px;
+  transform: scaleX(0) skewX(-28deg);
+  animation: wl-swash 620ms var(--wl-swing) 260ms forwards;
+}
+.wl-swash--red { left: 0; right: calc(50% + 3px); background: var(--wl-red); transform-origin: 0 50%; }
+.wl-swash--blu { left: calc(50% + 3px); right: .26em; background: var(--wl-blu); transform-origin: 100% 50%; }
+@keyframes wl-swash { to { transform: scaleX(1) skewX(-28deg); } }
+
+/* Плитки выбора */
+.wl-tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 10px; }
+.wl-tile {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 0;
+  padding: 14px 16px 15px;
+  border: 1px solid var(--hairline-strong);
+  background: none;
+  color: var(--ink);
+  text-align: left;
+  cursor: pointer;
+  transition: border-color var(--dur), transform 260ms var(--wl-ease),
+              box-shadow 260ms var(--wl-ease), background var(--dur);
+}
+.wl-tile:hover { border-color: var(--ink-soft); transform: translateY(-2px);
+                 box-shadow: 0 10px 24px rgba(0, 0, 0, .12); }
+.wl-tile:active { transform: translateY(0) scale(.985); }
+.wl-tile:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px; }
+.wl-tile:disabled { opacity: .45; cursor: default; transform: none; box-shadow: none; }
+.wl-tile.is-on { border-color: var(--ink); box-shadow: inset 0 0 0 1px var(--ink); }
+/* Отметка выбора - короткая полоса акцента по верхнему краю, наклонная */
+.wl-tile::before {
+  content: "";
+  position: absolute;
+  left: 10px;
+  top: -2px;
+  width: 0;
+  height: 3px;
+  background: var(--accent);
+  transform: skewX(-28deg);
+  transition: width 420ms var(--wl-swing);
+}
+.wl-tile.is-on::before { width: 44px; }
+.wl-tile__name { font-size: 13px; font-weight: 600; }
+.wl-tile__sub { min-width: 0; font-size: 11.5px; line-height: 1.5; color: var(--ink-mute); }
+/* Плитки с путями - столбиком: путь к игре длинный, в треть ширины не влезает */
+.wl-tiles--list { grid-template-columns: 1fr; }
+.wl-tile__path {
+  display: block;
+  overflow: hidden;
+  font-family: var(--mono);
+  font-size: 10.5px;
+  color: var(--ink-soft);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.wl-tile__tag {
+  position: absolute;
+  right: 12px;
+  top: 12px;
+  font-size: 9.5px;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+  color: var(--ink-mute);
+}
+
+/* Миниатюры тем: окно приложения в своих цветах, а не в текущих */
+.wl-shot {
+  position: relative;
+  height: 62px;
+  margin-bottom: 6px;
+  border: 1px solid var(--shot-line);
+  background: var(--shot-bg);
+  overflow: hidden;
+}
+.wl-shot--light { --shot-bg: #f2f1ee; --shot-card: #ffffff; --shot-line: #d9d5cf; --shot-ink: #14120f; --shot-acc: #cc5522; }
+.wl-shot--dark  { --shot-bg: #0f0f0e; --shot-card: #1c1b1a; --shot-line: #2a2927; --shot-ink: #ecebe8; --shot-acc: #e2662c; }
+.wl-shot i { position: absolute; display: block; }
+.wl-shot i:nth-child(1) { left: 8px; right: 8px; top: 8px; height: 2px; background: var(--shot-ink); opacity: .7; width: 30%; }
+.wl-shot i:nth-child(2) { left: 8px; top: 18px; bottom: 8px; width: 42%; background: var(--shot-card); border: 1px solid var(--shot-line); }
+.wl-shot i:nth-child(3) { right: 8px; top: 18px; bottom: 8px; width: 42%; background: var(--shot-card); border: 1px solid var(--shot-line); }
+.wl-shot i:nth-child(4) { right: 14px; bottom: 14px; width: 18px; height: 3px; background: var(--shot-acc); transform: skewX(-28deg); }
+
+/* Игра: поиск и найденный путь */
+.wl-game { display: flex; flex-direction: column; gap: 12px; min-height: 64px; }
+.wl-status { display: flex; align-items: center; gap: 12px; min-height: 30px; font-size: 13px; }
+.wl-status__text { min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.wl-status__path {
+  overflow: hidden;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--ink-soft);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.wl-status.is-bad { color: var(--accent); }
+.wl-status.is-new { animation: wl-rise 420ms var(--wl-ease) both; }
+
+/* Поиск: блик бежит по линии, как на заставке */
+.wl-scan { position: relative; flex: none; width: 30px; height: 2px; overflow: hidden; background: var(--hairline); }
+.wl-scan::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  width: 50%;
+  background: var(--accent);
+  animation: wl-scan 900ms var(--wl-swing) infinite;
+}
+@keyframes wl-scan { from { transform: translateX(-100%); } to { transform: translateX(200%); } }
+
+/* Галочка рисуется линией: сначала круг, потом сам знак */
+.wl-check { flex: none; width: 30px; height: 30px; fill: none; stroke-linecap: round; stroke-linejoin: round; }
+.wl-check circle { stroke: var(--accent); stroke-width: 1.6; stroke-dasharray: 64; stroke-dashoffset: 64;
+                   animation: wl-draw 620ms var(--wl-swing) forwards; transform: rotate(-90deg); transform-origin: center; }
+.wl-check path { stroke: var(--ink); stroke-width: 2; stroke-dasharray: 18; stroke-dashoffset: 18;
+                 animation: wl-draw 380ms var(--wl-ease) 420ms forwards; }
+@keyframes wl-draw { to { stroke-dashoffset: 0; } }
+.wl-cross { flex: none; width: 30px; height: 30px; fill: none; stroke: var(--accent); stroke-width: 1.6; stroke-linecap: round; }
+
+.wl-pathrow { display: flex; align-items: flex-end; gap: 14px; }
+.wl-pathrow .input { flex: 1; min-width: 0; font-family: var(--mono); font-size: 11.5px; }
+.wl-pathrow .textbtn { flex: none; }
+
+/* Итог */
+.wl-final { display: flex; align-items: center; gap: 22px; }
+.wl-final > div:last-child { display: flex; flex-direction: column; gap: 16px; }
+.wl-big { position: relative; flex: none; width: 76px; height: 76px; }
+.wl-big .wl-check { width: 76px; height: 76px; }
+.wl-big .wl-check circle { stroke-width: 1.2; stroke-dasharray: 64; }
+.wl-big .wl-check path { stroke-width: 1.6; }
+/* Вспышка: восемь коротких наклонных полос разлетаются от галочки */
+.wl-burst { position: absolute; inset: 0; pointer-events: none; }
+.wl-burst i {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 14px;
+  height: 3px;
+  margin: -1.5px 0 0 -7px;
+  background: var(--wl-red);
+  opacity: 0;
+  transform: rotate(calc(var(--i) * 45deg)) translateX(30px) skewX(-28deg);
+  animation: wl-burst 820ms var(--wl-ease) calc(520ms + var(--i) * 18ms) forwards;
+}
+.wl-burst i:nth-child(even) { background: var(--wl-blu); }
+@keyframes wl-burst {
+  0%   { opacity: 0; transform: rotate(calc(var(--i) * 45deg)) translateX(30px) skewX(-28deg) scaleX(.3); }
+  30%  { opacity: 1; }
+  100% { opacity: 0; transform: rotate(calc(var(--i) * 45deg)) translateX(54px) skewX(-28deg) scaleX(1); }
+}
+
+.wl-sum { display: grid; grid-template-columns: auto 1fr; gap: 9px 22px; margin: 0; font-size: 12.5px; }
+.wl-sum dt { color: var(--ink-mute); font-size: 10px; letter-spacing: .14em; text-transform: uppercase; padding-top: 2px; }
+.wl-sum dd { margin: 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wl-sum .mono { font-size: 11px; color: var(--ink-soft); }
+
+/* Низ карточки */
+.welcome__foot { display: flex; align-items: center; gap: 22px; padding: 18px 30px 26px; }
+.welcome__skip { margin-right: auto; color: var(--ink-mute); }
+.welcome__next { position: relative; overflow: hidden; }
+/* Блик по кнопке на последнем шаге: «вот сюда» */
+.welcome__next.is-final::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(100deg, transparent 30%, rgba(255, 255, 255, .35), transparent 70%);
+  transform: translateX(-120%);
+  animation: wl-shine 2.4s ease-in-out 1.2s infinite;
+}
+@keyframes wl-shine { 40%, 100% { transform: translateX(120%); } }
+
+.is-shake { animation: wl-shake 420ms var(--wl-ease); }
+@keyframes wl-shake {
+  20% { transform: translateX(-6px); } 40% { transform: translateX(5px); }
+  60% { transform: translateX(-3px); } 80% { transform: translateX(2px); }
+}
+
+/* Без анимаций */
+[data-motion="off"] .welcome,
+[data-motion="off"] .welcome *,
+[data-motion="off"] .welcome::before,
+[data-motion="off"] .welcome::after { animation: none !important; transition: none !important; }
+[data-motion="off"] .wl-swash { transform: skewX(-28deg); }
+[data-motion="off"] .wl-check circle,
+[data-motion="off"] .wl-check path { stroke-dashoffset: 0; }
+@media (prefers-reduced-motion: reduce) {
+  .welcome, .welcome *, .welcome::before, .welcome::after { animation: none !important; transition: none !important; }
+  .wl-swash { transform: skewX(-28deg); }
+  .wl-check circle, .wl-check path { stroke-dashoffset: 0; }
+}

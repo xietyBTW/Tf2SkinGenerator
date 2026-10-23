@@ -1,5 +1,5 @@
 /*
- * Мелочи, которыми пользуются все части страницы.
+ * Мелочи, которыми пользуются все части страницы
  *
  * Сюда попадает только то, что ничего не знает ни о каталоге, ни о превью, ни
  * о частицах: подсветка выбранного в ряду, экранирование, склонение, чтение
@@ -9,7 +9,7 @@
 
 import { t } from './i18n.js';
 
-/** Делает элементы внутри контейнера взаимоисключающими. */
+/** Делает элементы внутри контейнера взаимоисключающими */
 export function groupIn(root, itemSelector) {
   if (!root) return;
   root.addEventListener('click', (e) => {
@@ -20,13 +20,13 @@ export function groupIn(root, itemSelector) {
   });
 }
 
-/** То же по селектору контейнера. */
+/** То же по селектору контейнера */
 export function group(selector, itemSelector) {
   groupIn(document.querySelector(selector), itemSelector);
 }
 
 //: Кавычки экранируем наравне со скобками: тот же текст уходит в атрибут
-//: title, и незакрытая кавычка ломала бы разметку зеркала.
+//: title, и незакрытая кавычка ломала бы разметку зеркала
 export const escapeHtml = (text) => String(text).replace(/[&<>"']/g,
   (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;',
             '"': '&quot;', "'": '&#39;' }[c]));
@@ -38,7 +38,7 @@ export function fillSelect(id, options, value) {
   el.value = value;
 }
 
-/** Размер файла человеческим языком: точность тут не нужна, порядок - да. */
+/** Размер файла человеческим языком: точность тут не нужна, порядок - да */
 export function fileSize(bytes) {
   const mb = bytes / (1024 * 1024);
   return mb >= 1 ? mb.toFixed(1) + ' ' + t('МБ')
@@ -46,7 +46,7 @@ export function fileSize(bytes) {
 }
 
 /**
- * Русское склонение по числу: 1 часть, 2 части, 5 частей.
+ * Русское склонение по числу: 1 часть, 2 части, 5 частей
  *
  * Выбранную форму переводим здесь же: её склеивают с числом («235 предметов»),
  * и в готовой строке словарь такое слово уже не найдёт. Английскому хватает
@@ -72,7 +72,7 @@ export function loadImage(src) {
   });
 }
 
-//: Скрытый выбор файла - один на все карточки.
+//: Скрытый выбор файла - один на все карточки
 const pickFile = document.createElement('input');
 pickFile.type = 'file';
 pickFile.accept = 'image/*';
@@ -83,7 +83,7 @@ export function chooseFile(accept = 'image/*') {
   return chooseFiles(accept, false).then((files) => files[0] || null);
 }
 
-/** Несколько файлов разом (модель вместе с её MTL и текстурами). */
+/** Несколько файлов разом (модель вместе с её MTL и текстурами) */
 export function chooseFiles(accept = 'image/*', multiple = true) {
   return new Promise((resolve) => {
     pickFile.value = '';

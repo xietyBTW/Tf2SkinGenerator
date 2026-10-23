@@ -1,5 +1,5 @@
 /*
- * Журнал приложения и переключатель темы.
+ * Журнал приложения и переключатель темы
  *
  * В журнале две ленты, и это разные вещи:
  *
@@ -7,13 +7,12 @@
  *           уровень, а НАПРАВЛЕНИЕ: сразу видно, кто кого позвал.
  *   Python  то, что пишет сам логгер приложения - 700 вызовов, из них 640 в
  *           src/services, то есть ровно там, где идёт работа: что нашлось в
- *           VPK, какой VMT взят, почему упал Crowbar. Раньше всё это уходило
- *           только в файл, и консоль в окне выглядела пустой.
+ *           VPK, какой VMT взят, почему упал Crowbar
  *
  * Python-часть забирается опросом (`log_tail`), раз в секунду и ТОЛЬКО пока
  * консоль открыта. Через поток событий воркеров её пускать нельзя: очередь
  * держит 500 штук и при переполнении выбрасывает старые, а лог одной сборки -
- * это сотни строк; он вытеснил бы progress и model_ready, и превью бы залипло.
+ * это сотни строк, он вытеснил бы progress и model_ready, и превью бы залипло
  *
  * Вьювер живёт в своём документе и токенов страницы не видит, поэтому цвет
  * фона ему передаётся явно - при старте и при каждой смене темы.
@@ -30,16 +29,16 @@ const noteBox = document.getElementById('lognote');
 const findBox = document.getElementById('logfind');
 const MAX_LOG = 2000;
 
-// ── Фильтр ──────────────────────────────────────────────────────────────
+// Фильтр
 // Маска битами: её же числом хранит Python (console_filter), не толкуя.
-// Значения заданы ЗДЕСЬ и только здесь.
+// Значения заданы ЗДЕСЬ и только здесь
 const BIT = { exchange: 1, error: 2, warning: 4, info: 8, debug: 16 };
 //: По умолчанию - обмен, ошибки, предупреждения. Инфо и отладка в спокойной
-//: работе дают сотни строк на одну сборку и мешают увидеть важное.
+//: работе дают сотни строк на одну сборку и мешают увидеть важное
 let mask = BIT.exchange | BIT.error | BIT.warning;
 let needle = '';
 
-/** Категория строки: по ней и фильтруем. CRITICAL показываем как ошибку. */
+/** Категория строки: по ней и фильтруем. CRITICAL показываем как ошибку */
 function bitOf(level) {
   if (!level) return BIT.exchange;
   const low = level.toLowerCase();
@@ -47,7 +46,7 @@ function bitOf(level) {
   return BIT[low] || BIT.info;
 }
 
-/** Прячет или показывает строку по текущему фильтру и поиску. */
+/** Прячет или показывает строку по текущему фильтру и поиску */
 function applyOne(line) {
   const okLevel = (Number(line.dataset.bit) & mask) !== 0;
   const okFind = !needle || line.textContent.toLowerCase().includes(needle);
@@ -61,7 +60,7 @@ function applyAll() {
   }
 }
 
-// ── Отрисовка строки ────────────────────────────────────────────────────
+// Отрисовка строки
 
 function stamp(date) {
   const p = (n) => String(n).padStart(2, '0');
@@ -69,9 +68,9 @@ function stamp(date) {
 }
 
 /**
- * Добавляет строку в ленту.
+ * Добавляет строку в ленту
  *
- * `dir` - направление обмена (→ ← ↓ !), `level` - уровень записи Python.
+ * `dir` - направление обмена (-> <- ↓ !), `level` - уровень записи Python.
  * Одновременно они не приходят: строка либо из обмена, либо из логгера.
  */
 function push({ time, dir, level, source, text, kind }) {
@@ -92,7 +91,7 @@ function push({ time, dir, level, source, text, kind }) {
   line.querySelector('.logline__src').textContent = source || '';
   // Через t(): подписи страницы переводятся на границе показа, и сообщения
   // Python - не исключение (см. strings.js). Незнакомая строка остаётся как
-  // есть, и пропуск виден на экране.
+  // есть, и пропуск виден на экране
   line.querySelector('.logline__text').textContent = text ? t(text) : '';
 
   const atEnd = logBody.scrollTop + logBody.clientHeight >= logBody.scrollHeight - 30;
@@ -100,11 +99,11 @@ function push({ time, dir, level, source, text, kind }) {
   logBody.appendChild(line);
   while (logBody.children.length > MAX_LOG) logBody.firstChild.remove();
   // Прокручиваем только если человек и так смотрел конец: иначе журнал
-  // выдёргивал бы его из места, которое он читает.
+  // выдёргивал бы его из места, которое он читает
   if (atEnd) logBody.scrollTop = logBody.scrollHeight;
 }
 
-/** Короткая метка уровня в колонке направления - чтобы колонки не разъезжались. */
+/** Короткая метка уровня в колонке направления - чтобы колонки не разъезжались */
 function levelMark(level) {
   return { ERROR: 'ERR', CRITICAL: 'CRIT', WARNING: 'WARN',
            INFO: 'INFO', DEBUG: 'DBG' }[level] || '';
@@ -112,10 +111,10 @@ function levelMark(level) {
 
 api.setLogSink((dir, text, kind) => push({ dir, text, kind }));
 
-// ── Забор журнала Python ────────────────────────────────────────────────
+// Забор журнала Python
 
 //: Номер последней взятой записи. Кольцо в Python нумерует их сквозным
-//: счётчиком, поэтому разрыв в номерах - это потеря, а не тишина.
+//: счётчиком, поэтому разрыв в номерах - это потеря, а не тишина
 let seen = 0;
 let timer = null;
 
@@ -147,12 +146,12 @@ function watch(on) {
   }
 }
 
-// ── Открытие, закрытие, действия ────────────────────────────────────────
+// Открытие, закрытие, действия
 
 function toggleConsole(show) {
   const open = show === undefined ? consoleBox.hidden : show;
   consoleBox.hidden = !open;
-  // Опрашиваем только пока смотрят: закрыта консоль почти всегда.
+  // Опрашиваем только пока смотрят: закрыта консоль почти всегда
   watch(open);
 }
 
@@ -168,7 +167,7 @@ document.getElementById('logclear').addEventListener('click', async () => {
 
 document.getElementById('logcopy').addEventListener('click', () => {
   // Копируем ВИДИМОЕ: человек отфильтровал ошибки и хочет отправить их, а не
-  // две тысячи строк вместе с отладкой.
+  // две тысячи строк вместе с отладкой
   const text = [...logBody.children]
     .filter((l) => !l.hidden)
     .map((l) => l.textContent.replace(/\s+/g, ' ').trim())
@@ -201,7 +200,7 @@ findBox.addEventListener('input', () => {
 });
 
 // Состояние лежит ВНУТРИ кнопки «Параметры», и без остановки всплытия щелчок
-// по нему открывал заодно панель настроек - журнал и параметры вылезали вместе.
+// по нему открывал заодно панель настроек - журнал и параметры вылезали вместе
 document.querySelector('.dock__state').addEventListener('click', (e) => {
   e.stopPropagation();
   toggleConsole();
@@ -211,23 +210,23 @@ document.addEventListener('keydown', (e) => {
   if (e.key === '`' || e.key === 'ё') { e.preventDefault(); toggleConsole(); }
 });
 
-// ── Ширина: тянут за левый край ─────────────────────────────────────────
+// Ширина: тянут за левый край
 // Тот же приём, что у панели параметров (panel-resize.js): ширина живёт в
 // CSS-переменной, а между запусками - в общем конфиге. localStorage не годится:
-// страницу отдаёт локальный сервер на СЛУЧАЙНОМ порту, origin каждый раз свой.
+// страницу отдаёт локальный сервер на СЛУЧАЙНОМ порту, origin каждый раз свой
 
 const grip = document.getElementById('loggrip');
 const MIN_W = 320;
 let drag = null;
 
-/** Ставит сохранённую ширину. 0 - край не трогали, ширину задаёт CSS. */
+/** Ставит сохранённую ширину. 0 - край не трогали, ширину задаёт CSS */
 export function setConsoleWidth(px) {
   const want = Number(px) || 0;
   if (want >= MIN_W) root.style.setProperty('--cw', `${want}px`);
   else root.style.removeProperty('--cw');
 }
 
-/** Ставит сохранённый фильтр. Зовётся из настроек вместе с остальной раскладкой. */
+/** Ставит сохранённый фильтр. Зовётся из настроек вместе с остальной раскладкой */
 export function setConsoleFilter(bits) {
   const want = Number(bits);
   mask = Number.isFinite(want) ? want : mask;
@@ -242,7 +241,7 @@ grip.addEventListener('pointerdown', (e) => {
 
 grip.addEventListener('pointermove', (e) => {
   if (!drag) return;
-  // Консоль прижата к правому краю: тянем влево - она шире.
+  // Консоль прижата к правому краю: тянем влево - она шире
   const want = Math.max(MIN_W, Math.min(window.innerWidth - 120,
                                         drag.w + (drag.x - e.clientX)));
   root.style.setProperty('--cw', `${Math.round(want)}px`);
@@ -258,9 +257,9 @@ grip.addEventListener('pointerup', (e) => {
 
 applyAll();
 
-// ── Тема ────────────────────────────────────────────────────────────────
+// Тема
 // Вьювер живёт в своём документе и токенов страницы не видит - цвет фона ему
-// передаём явно, при старте и при каждой смене темы.
+// передаём явно, при старте и при каждой смене темы
 export function syncViewerTheme() {
   const bg = getComputedStyle(root).getPropertyValue('--viewport').trim();
   withViewer((w) => w.setViewerBackground && w.setViewerBackground(bg));
@@ -272,8 +271,17 @@ export function syncViewerTheme() {
  * открывалось светлым.
  */
 export function setTheme(name) {
-  root.dataset.theme = name === 'dark' ? 'dark' : 'light';
-  // Для первого кадра после перезагрузки страницы (см. index.html).
+  const next = name === 'dark' ? 'dark' : 'light';
+  // Переходы цвета (наведение) на смене темы срабатывали все разом: надписи
+  // секунду перетекали из старого цвета в новый через цвет фона и пропадали.
+  // Тема меняется сразу, переходы возвращаются через кадр
+  if (root.dataset.theme !== next) {
+    root.classList.add('is-retheming');
+    requestAnimationFrame(() => requestAnimationFrame(
+      () => root.classList.remove('is-retheming')));
+  }
+  root.dataset.theme = next;
+  // Для первого кадра после перезагрузки страницы (см. index.html)
   try { sessionStorage.setItem('theme', root.dataset.theme); } catch {}
   syncViewerTheme();
 }

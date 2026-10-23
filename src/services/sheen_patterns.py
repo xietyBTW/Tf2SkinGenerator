@@ -1,22 +1,22 @@
 """
-Свои узоры блеска Killstreak: анимированная маска `$sheenmapmask`.
+Свои узоры блеска Killstreak: анимированная маска `$sheenmapmask`
 
 Как это устроено в игре (source-sdk-2013: c_tf_player.cpp,
 weapon_sheen_pass_ps2x.fxc):
   • прокси AnimatedWeaponSheen берёт число кадров у САМОЙ текстуры маски
     (GetNumAnimationFrames) и крутит их с tf_sheen_framerate = 25 кадров в
-    секунду; паузу между проходами он сокращает с серией убийств (5 с без
-    убийств, 0 с при пяти) — для своей маски всё это остаётся;
+    секунду, паузу между проходами он сокращает с серией убийств (5 с без
+    убийств, 0 с при пяти) - для своей маски всё это остаётся;
   • кадр 0 не рисуется (ShouldDrawMaterialSheen), поэтому он пустой;
   • маска умножает цвет блеска (RGB) и даёт прозрачность (красный канал),
-    координата X — вдоль оружия: стоковая полоса идёт по X слева направо
-    за 50 кадров шириной ~0.2, потом ~10 пустых кадров.
+    координата X - вдоль оружия: стоковая полоса идёт по X слева направо
+    за 50 кадров шириной ~0.2, потом ~10 пустых кадров
 
 Моды с GameBanana (Pulsing Killstreak Sheens, Sap Experimental) подменяют
 общую маску effects/animatedsheen/animatedsheen0 у ВСЕГО оружия. Здесь маска
 своя у материала: `$sheenmapmask "tf2sg/sheen/<узор>_<кадров>"`, а файл
-по этому имени достраивает сборка (`materialize`) — хранить его не нужно,
-он целиком задаётся именем.
+по этому имени достраивает сборка (`materialize`) - хранить его не нужно,
+он целиком задаётся именем
 """
 
 from __future__ import annotations
@@ -31,12 +31,12 @@ from src.shared.logging_config import get_logger
 
 logger = get_logger(__name__)
 
-#: Старые готовые узоры. Эффект их больше не предлагает (готовые узоры теперь
-#: - шаблоны конструктора, sheen_builder.PRESETS), но маски по этим именам
-#: ещё собираются: на них ссылаются VMT уже сделанных работ.
+#: Готовые узоры старых работ. Эффект их не предлагает (готовые узоры -
+#: шаблоны конструктора, sheen_builder.PRESETS), но на них ссылаются VMT
+#: сделанных работ, поэтому маски по этим именам собираются
 PATTERNS = ("double", "pulse", "pulse2", "stripes", "sparkle", "mist")
 
-#: Старый узор -> шаблон конструктора, которым он заменён в форме эффекта.
+#: Старый узор -> шаблон конструктора, которым он заменён в форме эффекта
 LEGACY_PRESETS = {"double": "double", "pulse": "pulse", "pulse2": "pulse",
                   "stripes": "running", "sparkle": "sparkle", "mist": "mist"}
 
@@ -47,34 +47,34 @@ MIN_FRAMES, MAX_FRAMES = 26, 201
 PEAK = 230                     # стоковая маска доходит до 216
 
 #: Ровная кубмапа блеска вместо игровой cubemaps/cubemap_sheen001. Цвет
-#: прохода = кубмапа x цвет x 10 x маска, а прозрачность - его яркость; у
+#: прохода = кубмапа x цвет x 10 x маска, а прозрачность - его яркость, у
 #: игровой кубмапы почти всё тёмное (в среднем 30-60 из 255) с редкими
 #: светлыми пятнами, поэтому от узора видны только куски. Серый 89 (sRGB)
-#: = 0.1 линейно: x10 даёт ровно цвет блеска по всему узору.
+#: = 0.1 линейно: x10 даёт ровно цвет блеска по всему узору
 FLAT_CUBE = PREFIX + "flat"
 FLAT_GREY = 89
 STOCK_CUBE = "cubemaps/cubemap_sheen001"
 
-#: Готовый узор: имя, «_r» - маска повёрнута (оружие длинное по Z), кадры.
+#: Готовый узор: имя, «_r» - маска повёрнута (оружие длинное по Z), кадры
 _NAME_RE = re.compile(r'^tf2sg/sheen/([a-z0-9]+?)(_r)?_(\d+)$')
 #: `$sheenmapmask` с нашей маской: в кавычках или без, с пробелом или без,
-#: с обратными слэшами, с папкой-обходом впереди (повторная упаковка).
+#: с обратными слэшами, с папкой-обходом впереди (повторная упаковка)
 _VMT_RE = re.compile(r'("?\$sheenmapmask"?\s*"?)((?:[\w.\\/-]*[\\/])?tf2sg[\\/]sheen[\\/]\w+?_\d+)'
                      r'(?:\.vtf)?', re.IGNORECASE)
 
 
-#: `$sheenmap` с нашей ровной кубмапой (не `$sheenmapmask`).
+#: `$sheenmap` с нашей ровной кубмапой (не `$sheenmapmask`)
 _CUBE_RE = re.compile(r'("?\$sheenmap"?\s+"?)((?:[\w.\\/-]*[\\/])?tf2sg[\\/]sheen[\\/]flat)'
                       r'(?:\.vtf)?(?![\w])', re.IGNORECASE)
 
 
 def is_flat_cube(name: str) -> bool:
-    """`$sheenmap` - наша ровная кубмапа (в том числе уже в папке-обходе)."""
+    """`$sheenmap` - наша ровная кубмапа (в том числе уже в папке-обходе)"""
     return str(name or '').strip().lower().replace('\\', '/').endswith(FLAT_CUBE)
 
 
 def frames_for(seconds: float) -> int:
-    """Кадров на проход заданной длины (+ пустой нулевой)."""
+    """Кадров на проход заданной длины (+ пустой нулевой)"""
     return int(min(MAX_FRAMES, max(MIN_FRAMES, round(seconds * FPS) + 1)))
 
 
@@ -84,7 +84,7 @@ def texture_name(pattern: str, frames: int, rotate: bool = False) -> str:
 
 def rotated(name: str) -> bool:
     """Маска повёрнута на 90°: оружие длинное по Z, маска лежит по X и Z
-    (vmt_effects.sheen_mask_params, «stencil»), а рисуется длиной по X."""
+    (vmt_effects.sheen_mask_params, «stencil»), а рисуется длиной по X"""
     short = str(name or '').strip().lower().replace('\\', '/')
     m = _NAME_RE.match(short)
     if m and m.group(1) in PATTERNS:
@@ -94,7 +94,7 @@ def rotated(name: str) -> bool:
 
 
 def parse(name: str) -> Optional[Tuple[str, int]]:
-    """(узор, кадров) по имени текстуры или None — не наша / не та."""
+    """(узор, кадров) по имени текстуры или None - не наша / не та"""
     m = _NAME_RE.match(str(name or '').strip().lower().replace('\\', '/'))
     if not m or m.group(1) not in PATTERNS:
         return None
@@ -103,7 +103,7 @@ def parse(name: str) -> Optional[Tuple[str, int]]:
 
 
 #: Маска конструктора: id узора (свой u… или шаблон p_…), (в моде) отпечаток
-#: содержимого, пропорция, «r» - повёрнута, «k» - чёрный блеск, кадры.
+#: содержимого, пропорция, «r» - повёрнута, «k» - чёрный блеск, кадры
 _CUSTOM_RE = re.compile(
     r'^tf2sg/sheen/(u[0-9a-f]{8}|p_[a-z0-9]+)(?:_h[0-9a-f]{8})?_a(\d+)(r?)(k?)_(\d+)$')
 
@@ -111,25 +111,25 @@ _CUSTOM_RE = re.compile(
 def custom_name(pattern_id: str, aspect: float, frames: int, rotate: bool = False,
                 dark: bool = False) -> str:
     """Своя маска из конструктора: id узора, пропорция оружия ×10 («r» -
-    маска повёрнута, «k» - только красный канал для чёрного блеска), кадры."""
+    маска повёрнута, «k» - только красный канал для чёрного блеска), кадры"""
     return (f"{PREFIX}{pattern_id}_a{int(round(max(0.5, min(12.0, aspect)) * 10))}"
             f"{'r' if rotate else ''}{'k' if dark else ''}_{int(frames)}")
 
 
 def darkened(name: str) -> bool:
-    """Маска чёрного блеска: узор только в красном канале.
+    """Маска чёрного блеска: узор только в красном канале
 
     Непрозрачность прохода = яркость оттенка x КРАСНЫЙ канал маски, а цвет =
     оттенок x маска по каналам (weapon_sheen_pass). Зелёный оттенок на красной
     маске даёт цвет 0 при полной непрозрачности - полоса затемняет оружие.
-    Проверено в игре 2026-10-19 (обрез).
+    Проверено в игре (обрез)
     """
     m = _CUSTOM_RE.match(str(name or '').strip().lower().replace('\\', '/'))
     return bool(m and m.group(4))
 
 
 def parse_custom(name: str) -> Optional[Tuple[str, float, int]]:
-    """(id узора, пропорция, кадров) или None."""
+    """(id узора, пропорция, кадров) или None"""
     m = _CUSTOM_RE.match(str(name or '').strip().lower().replace('\\', '/'))
     if not m:
         return None
@@ -140,14 +140,14 @@ def parse_custom(name: str) -> Optional[Tuple[str, float, int]]:
 
 
 def _envelope(t: float) -> float:
-    """Плавно появиться и погаснуть; последние ~10 % прохода пусто, как у
-    стоковой маски (пауза внутри прохода)."""
+    """Плавно появиться и погаснуть, последние ~10 % прохода пусто, как у
+    стоковой маски (пауза внутри прохода)"""
     t = min(1.0, max(0.0, t / 0.9))
     return min(1.0, t / 0.12) * min(1.0, (1 - t) / 0.2)
 
 
 def _noise(size: int, cells: int, seed: int) -> np.ndarray:
-    """Плавный бесшовный шум (value noise, косинусная интерполяция) 0…1."""
+    """Плавный бесшовный шум (value noise, косинусная интерполяция) 0…1"""
     rng = np.random.default_rng(seed)
     grid = rng.random((cells, cells))
     x = np.arange(size) * cells / size
@@ -165,7 +165,7 @@ def _fbm(size: int, seed: int) -> np.ndarray:
 
 
 def _frame(pattern: str, t: float, u: np.ndarray, v: np.ndarray, extra) -> np.ndarray:
-    """Яркость маски 0…1 в момент t (0…1 прохода)."""
+    """Яркость маски 0…1 в момент t (0…1 прохода)"""
     env = _envelope(t)
     if env <= 0:
         return np.zeros_like(u)
@@ -179,7 +179,7 @@ def _frame(pattern: str, t: float, u: np.ndarray, v: np.ndarray, extra) -> np.nd
         k = 1 if pattern == "pulse" else 2
         tt = min(1.0, t / 0.9)
         beat = np.sin(np.pi * k * tt) ** 2
-        # Не ровная заливка: лёгкий рисунок, иначе вспышка выглядит плоской.
+        # Не ровная заливка: лёгкий рисунок, иначе вспышка выглядит плоской
         return beat * (0.75 + 0.25 * extra) * np.ones_like(u)
     if pattern == "stripes":
         phase = u * 5.0 - t * 3.0 + wave * 4
@@ -206,7 +206,7 @@ def _frame(pattern: str, t: float, u: np.ndarray, v: np.ndarray, extra) -> np.nd
 
 
 def frames(pattern: str, count: int, size: int = SIZE) -> List[np.ndarray]:
-    """Кадры маски RGBA uint8; кадр 0 пустой (игра его не рисует)."""
+    """Кадры маски RGBA uint8; кадр 0 пустой (игра его не рисует)"""
     if pattern not in PATTERNS:
         raise ValueError(f"unknown sheen pattern {pattern}")
     v, u = np.mgrid[0:size, 0:size] / float(size)
@@ -228,7 +228,7 @@ def frames(pattern: str, count: int, size: int = SIZE) -> List[np.ndarray]:
 
 
 def write_vtf(pattern: str, count: int, out_path: Path) -> Path:
-    """VTF маски: DXT1 без мипмапов, как маски модов (NOMIP | NOLOD)."""
+    """VTF маски: DXT1 без мипмапов, как маски модов (NOMIP | NOLOD)"""
     return _write(frames(pattern, count), out_path)
 
 
@@ -246,8 +246,8 @@ def _write(pics: List[np.ndarray], out_path: Path) -> Path:
 
 def _bypass_folder() -> str:
     """Папка-обход sv_pure из настроек (console или vgui/replay/thumbnails):
-    в казуале из мода грузятся только файлы в ней — маска должна лежать там
-    же, где сборка кладёт остальные файлы оружия."""
+    в казуале из мода грузятся только файлы в ней - маска должна лежать там
+    же, где сборка кладёт остальные файлы оружия"""
     try:
         from src.config.app_config import AppConfig
         from src.shared.constants import bypass_prefix
@@ -256,13 +256,13 @@ def _bypass_folder() -> str:
         return "console"
 
 
-#: Наш оттенок блеска и его яркость в VMT (vmt_effects._sheen).
+#: Наш оттенок блеска и его яркость в VMT (vmt_effects._sheen)
 _TINT_RE = re.compile(r'("?\$tf2sg_sheen"?\s+")\[[^\]]*\](")', re.IGNORECASE)
 _BRIGHT_RE = re.compile(r'"?\$tf2sg_sheenbright"?\s+"?([\d.]+)', re.IGNORECASE)
 
 
 def _retint(text: str, palette: str) -> str:
-    """Оттенок своего узора - по его гамме на момент сборки."""
+    """Оттенок своего узора - по его гамме на момент сборки"""
     from src.services import sheen_palette
     m = _BRIGHT_RE.search(text)
     bright = float(m.group(1)) if m else 1.0
@@ -272,24 +272,24 @@ def _retint(text: str, palette: str) -> str:
 
 def materialize(vpkroot_dir: Path, folder: Optional[str] = None,
                 namespace: str = "") -> int:
-    """Маски узоров, на которые ссылаются VMT мода, — в мод; сколько создано.
+    """Маски узоров, на которые ссылаются VMT мода, - в мод, сколько создано
 
     Редактор пишет короткое имя `tf2sg/sheen/<узор>_<кадров>`; здесь ссылка
     в VMT мода переносится в папку-обход (`folder`, по умолчанию из
-    настроек), и файл кладётся туда же. Не вышло — исключение: мод без маски
-    в игре показал бы на оружии «шахматку».
+    настроек), и файл кладётся туда же. Не вышло - исключение: мод без маски
+    в игре показал бы на оружии «шахматку»
 
     `namespace` - своя подпапка мода (`<обход>/<мод>/tf2sg/sheen/…`). Без неё
     два мода клали ровную кубмапу и одинаковые маски по одному пути:
     прелоадер видел конфликт, а при разном содержимом один мод ломал бы
-    блеск другого.
+    блеск другого
     """
     root = Path(vpkroot_dir)
     materials = root / "materials"
     if not materials.is_dir():
         return 0
     folder = (_bypass_folder() if folder is None else folder).replace('\\', '/').strip('/').lower()
-    # Коротко: путь в VPK упирается в MAX_PATH vpk.exe.
+    # Коротко: путь в VPK упирается в MAX_PATH vpk.exe
     space = re.sub(r'[^a-z0-9_]+', '_', namespace.lower()).strip('_')[:32]
     folder = '/'.join(x for x in (folder, space) if x)
     wanted = set()
@@ -309,8 +309,8 @@ def materialize(vpkroot_dir: Path, folder: Optional[str] = None,
             short = ref[ref.index('tf2sg/sheen/'):]
             own = parse_custom(short)
             if own:
-                # В моде — с отпечатком содержимого: моды, собранные до и
-                # после правки узора, не делят один путь.
+                # В моде - с отпечатком содержимого: моды, собранные до и
+                # после правки узора, не делят один путь
                 from src.services import sheen_builder, sheen_library, sheen_palette
                 digest = sheen_library.content_hash(own[0])
                 if not digest:
@@ -319,7 +319,7 @@ def materialize(vpkroot_dir: Path, folder: Optional[str] = None,
                 dark = darkened(short)
                 if sheen_library.ID_RE.match(own[0]):
                     # Гамма своего узора - по его цветам СЕЙЧАС: узор могли
-                    # перекрасить после того, как эффект встал в VMT.
+                    # перекрасить после того, как эффект встал в VMT
                     gamut.append(sheen_palette.palette_of(own[0]))
                     dark = gamut[-1] == sheen_palette.COLD
                 short = (f"{PREFIX}{own[0]}_h{digest}_a{int(round(own[1] * 10))}"
@@ -360,13 +360,13 @@ def materialize(vpkroot_dir: Path, folder: Optional[str] = None,
                 raise RuntimeError(f"sheen pattern {pattern_id} not found in "
                                    f"{sheen_builder.library_dir()}")
             if sheen_library.ID_RE.match(pattern_id):
-                # Свой узор: гамма по цветам слоёв (sheen_palette).
+                # Свой узор: гамма по цветам слоёв (sheen_palette)
                 pics = sheen_builder.render(data["spec"], count, aspect,
                                             palette="cold" if darkened(short) else "warm")
             else:
                 pics = sheen_builder.render(data["spec"], count, aspect)
                 if darkened(short):
-                    # Чёрный готовый узор: форма в красном, цвета нет.
+                    # Чёрный готовый узор: форма в красном, цвета нет
                     for pic in pics:
                         pic[..., 0] = pic[..., :3].max(axis=-1)
                         pic[..., 1:3] = 0
@@ -374,7 +374,7 @@ def materialize(vpkroot_dir: Path, folder: Optional[str] = None,
             pattern, count = parse(short)
             pics = frames(pattern, count)
         if rotated(short):
-            # Длина узора - по вертикали маски (ось Z оружия).
+            # Длина узора - по вертикали маски (ось Z оружия)
             pics = [np.ascontiguousarray(np.transpose(p, (1, 0, 2))) for p in pics]
         _write(pics, target)
         logger.info(f"[sheen] маска узора {target.relative_to(root).as_posix()} ({count} кадров)")

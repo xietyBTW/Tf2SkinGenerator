@@ -20,11 +20,10 @@ except ImportError:
     VPK_AVAILABLE = False
     vpk = None
 
-# Кэш открытых VPK теперь общий для всех потребителей — см. src/services/vpk_cache.py
-# (один разбор каталога на запуск; раньше извлечение и GameVpkReader держали
-# отдельные кэши и открывали один и тот же игровой VPK дважды за прогон воркера).
+# Кэш открытых VPK общий для всех потребителей - см. src/services/vpk_cache.py
+# (один разбор каталога на запуск).
 # Имя с подчёркиванием сохранено как тонкий алиас: на него завязаны вызовы
-# _open_vpk_cached внутри этого файла.
+# _open_vpk_cached внутри этого файла
 from src.services.vpk_cache import open_vpk_cached as _open_vpk_cached  # noqa: E402
 
 
@@ -57,8 +56,8 @@ class TF2VPKExtractService:
         # Нормализуем путь (используем прямые слеши)
         normalized_path = mdl_rel_path.replace("\\", "/")
         
-        # Открываем VPK файл если не передан — через общий кэш (vpk.open парсит
-        # весь каталог архива). Кэшированный хэндл НЕ закрываем.
+        # Открываем VPK файл если не передан - через общий кэш (vpk.open парсит
+        # весь каталог архива). Кэшированный хэндл НЕ закрываем
         if vpk_file is None:
             try:
                 vpk_file = _open_vpk_cached(dir_vpk_path)
@@ -68,7 +67,7 @@ class TF2VPKExtractService:
             if vpk_file is None:
                 return False
 
-        # Проверяем существование файла в VPK (быстрая операция).
+        # Проверяем существование файла в VPK (быстрая операция)
         return normalized_path in vpk_file
     
     @staticmethod
@@ -137,8 +136,8 @@ class TF2VPKExtractService:
         phy_path = os.path.join(mdl_dir, f"{mdl_basename}.phy").replace("\\", "/")
         files_to_extract.append(phy_path)
         
-        # Открываем VPK через общий кэш (vpk.open парсит весь каталог архива —
-        # дорого на каждую сборку). Кэшированный хэндл не закрываем.
+        # Открываем VPK через общий кэш (vpk.open парсит весь каталог архива -
+        # дорого на каждую сборку). Кэшированный хэндл не закрываем
         try:
             vpk_file = _open_vpk_cached(dir_vpk_path)
         except Exception as e:
@@ -222,7 +221,7 @@ class TF2VPKExtractService:
             return extracted_files
 
         finally:
-            # VPK кэшируется (_open_vpk_cached) — общий хэндл не закрываем.
+            # VPK кэшируется (_open_vpk_cached) - общий хэндл не закрываем
             pass
 
     @staticmethod
@@ -315,21 +314,21 @@ class TF2VPKExtractService:
                     
                     logger.info(f"Извлечен VMT файл: {path_to_try} -> {extracted_file_path}")
                     return extracted_file_path
-            # VPK кэшируется (_open_vpk_cached) — НЕ закрываем.
+            # VPK кэшируется (_open_vpk_cached) - НЕ закрываем
 
         except Exception as e:
             logger.warning(f"Ошибка при извлечении VMT файла: {e}", exc_info=True)
             return None
 
-        # Не найден по этому пути — норма при переборе $cdmaterials путей/VPK.
-        # DEBUG, чтобы не спамить лог (раньше был WARNING на каждый промах).
+        # Не найден по этому пути - норма при переборе $cdmaterials путей/VPK.
+        # DEBUG, чтобы не спамить лог
         logger.debug(f"VMT файл не найден по пути: {vmt_rel_path}")
         return None
     
     @staticmethod
     def _scan_dir_for_vtf(vpk_file, dir_path: str) -> List[Tuple[str, str]]:
         """Возвращает список (rel_path, filename) для всех .vtf файлов
-        непосредственно в dir_path внутри VPK (без рекурсии в подпапки)."""
+        непосредственно в dir_path внутри VPK (без рекурсии в подпапки)"""
         prefix = dir_path.rstrip('/') + '/'
         results = []
         for path in vpk_file:
@@ -350,13 +349,13 @@ class TF2VPKExtractService:
         cancel_callback: Optional[Callable[[], bool]] = None
     ) -> Tuple[bool, str, bool]:
         """
-        Извлекает VTF-текстуры оружия — ровно те, что при сборке мода будут заменены.
+        Извлекает VTF-текстуры оружия - ровно те, что при сборке мода будут заменены
 
         Алгоритм (приоритет по убыванию):
-          1. WEAPON_TEXTURE_PATHS override — явный список файлов для нестандартных оружий.
-          2. QC из decompile-кэша → parse $texturegroup → red_row + blu_row
+          1. WEAPON_TEXTURE_PATHS override - явный список файлов для нестандартных оружий.
+          2. QC из decompile-кэша -> parse $texturegroup -> red_row + blu_row
              (та же логика что build: ModelBuildService.extract_texturegroup_structure).
-          3. Fallback: ищем только главный VTF по weapon_key (одна текстура).
+          3. Fallback: ищем только главный VTF по weapon_key (одна текстура)
         """
         t = TRANSLATIONS.get(language, TRANSLATIONS['en'])
 
@@ -368,12 +367,12 @@ class TF2VPKExtractService:
             return bool(cancel_callback and cancel_callback())
 
         def _close(vpk_f) -> None:
-            # VPK кэшируется (_open_vpk_cached) — общий хэндл не закрываем.
-            # Оставлено как no-op, чтобы не трогать все места вызова.
+            # VPK кэшируется (_open_vpk_cached) - общий хэндл не закрываем.
+            # Оставлено как no-op, чтобы не трогать все места вызова
             pass
 
         def _extract_and_convert(vpk_f, rel_path: str, filename: str) -> Optional[str]:
-            """Извлекает один VTF и конвертирует если нужно. Возвращает финальный путь или None."""
+            """Извлекает один VTF и конвертирует если нужно. Возвращает финальный путь или None"""
             try:
                 out_path = sanitize_path(filename, out_dir)
             except ValueError as exc:
@@ -404,7 +403,7 @@ class TF2VPKExtractService:
                 msg = header + '\n' + '\n'.join(paths)
             return True, msg, False
 
-        # ── Базовые проверки ──────────────────────────────────────────────────
+        # Базовые проверки
         emit_progress(10, t.get('extract_init', 'Initializing extraction...'))
 
         if is_cancelled():
@@ -423,12 +422,12 @@ class TF2VPKExtractService:
 
         ensure_directory_exists(out_dir)
 
-        # ── Производные имена для построения путей поиска ────────────────────
+        # Производные имена для построения путей поиска
         base_key = weapon_key[2:] if weapon_key.startswith('c_') else weapon_key
         _parts = base_key.rsplit('_', 1)
         parent_key = ('c_' + _parts[0]) if len(_parts) == 2 else None
 
-        # ── Пути поиска в VPK (приоритет: workshop_partner → workshop → weapons)
+        # Пути поиска в VPK (приоритет: workshop_partner -> workshop -> weapons)
         search_paths = [
             f"materials/models/workshop_partner/weapons/c_models/{weapon_key}",
         ] + ([f"materials/models/workshop_partner/weapons/c_models/{parent_key}"] if parent_key else []) + [
@@ -443,9 +442,7 @@ class TF2VPKExtractService:
         ]
 
         try:
-            # ══════════════════════════════════════════════════════════════════
-            # СПОСОБ 1: WEAPON_TEXTURE_PATHS — явный список файлов
-            # ══════════════════════════════════════════════════════════════════
+            # СПОСОБ 1: WEAPON_TEXTURE_PATHS - явный список файлов
             if weapon_key in WEAPON_TEXTURE_PATHS:
                 emit_progress(50, t.get('extract_extracting', 'Extracting texture...'))
                 vpk_file = _open_vpk_cached(textures_vpk_path)
@@ -467,13 +464,11 @@ class TF2VPKExtractService:
                 _close(vpk_file)
                 if extracted_paths:
                     return _finish(extracted_paths)
-                # override не дал результата — идём дальше
+                # override не дал результата - идём дальше
 
-            # ══════════════════════════════════════════════════════════════════
-            # СПОСОБ 2: QC из кэша декомпиляции → $texturegroup (точная копия логики build)
-            # Если пользователь ранее строил мод или смотрел 3D-превью —
-            # кэш есть, и мы знаем РОВНО те же текстуры что заменит build.
-            # ══════════════════════════════════════════════════════════════════
+            # СПОСОБ 2: QC из кэша декомпиляции -> $texturegroup (точная копия логики build)
+            # Если пользователь ранее строил мод или смотрел 3D-превью -
+            # кэш есть, и мы знаем РОВНО те же текстуры что заменит build
             emit_progress(25, t.get('extract_searching', 'Searching for texture...'))
             qc_texture_names: List[str] = []
             try:
@@ -525,12 +520,10 @@ class TF2VPKExtractService:
                 _close(vpk_file)
                 if extracted_paths:
                     return _finish(extracted_paths)
-                # ни одной текстуры не нашли — идём к fallback
+                # ни одной текстуры не нашли - идём к fallback
 
-            # ══════════════════════════════════════════════════════════════════
-            # СПОСОБ 3: Fallback — ищем только главный VTF по weapon_key
+            # СПОСОБ 3: Fallback - ищем только главный VTF по weapon_key
             # (кэша нет, пользователь ещё не строил мод для этого оружия)
-            # ══════════════════════════════════════════════════════════════════
             emit_progress(50, t.get('extract_extracting', 'Extracting texture...'))
             vtf_candidates = [
                 f"{weapon_key}.vtf",
@@ -584,13 +577,13 @@ class TF2VPKExtractService:
         arm_model_key: Optional[str] = None,
     ) -> Tuple[bool, str, bool]:
         """
-        Извлекает текстуры персонажа из tf2_textures_dir.vpk.
+        Извлекает текстуры персонажа из tf2_textures_dir.vpk
 
         Два режима:
-          • use_explicit_list=False (по умолч.) — сканирует папки, извлекает ВСЁ
+          • use_explicit_list=False (по умолч.) - сканирует папки, извлекает ВСЁ
             (используется для обычных рук, где нужны все текстуры из папки).
-          • use_explicit_list=True — извлекает только файлы из списка hand_textures
-            (используется для тел персонажей после диалога выбора).
+          • use_explicit_list=True - извлекает только файлы из списка hand_textures
+            (используется для тел персонажей после диалога выбора)
 
         Args:
             textures_vpk_path:  Путь к tf2_textures_dir.vpk
@@ -599,8 +592,8 @@ class TF2VPKExtractService:
             export_format:      VTF / PNG / TGA / JPG
             language:           Язык сообщений
             progress_callback:  callback(pct, msg)
-            cancel_callback:    callable → bool
-            use_explicit_list:  True → извлекать только явно перечисленные файлы
+            cancel_callback:    callable -> bool
+            use_explicit_list:  True -> извлекать только явно перечисленные файлы
 
         Returns:
             (success, message, cancelled)
@@ -653,10 +646,10 @@ class TF2VPKExtractService:
             except Exception as _e:
                 logger.warning(f"[extract] Не удалось открыть misc VPK {misc_vpk_path}: {_e}")
 
-        # ── Попытка получить точный список текстур из QC кэша (как при сборке) ─ #
+        # Попытка получить точный список текстур из QC кэша (как при сборке) ─
         # Если для данного arm_model_key есть декомпилированный QC, берём
-        # red_row + blu_row из $texturegroup — точно те же текстуры, что создаёт
-        # сборщик мода, а не потенциально неполный список из player_hands.py.
+        # red_row + blu_row из $texturegroup - точно те же текстуры, что создаёт
+        # сборщик мода, а не потенциально неполный список из player_hands.py
         if use_explicit_list and arm_model_key:
             try:
                 from src.services import decompile_cache
@@ -678,8 +671,8 @@ class TF2VPKExtractService:
                             qc_tex_names.append(name)
 
                     if qc_tex_names and cdmaterials_raw:
-                        # cdmaterials обычно выглядит как "models/player/scout" —
-                        # берём последний компонент пути в качестве папки.
+                        # cdmaterials обычно выглядит как "models/player/scout" -
+                        # берём последний компонент пути в качестве папки
                         folder_from_qc = cdmaterials_raw.replace("\\", "/").rstrip("/").split("/")[-1]
                         if folder_from_qc:
                             hand_textures = [(folder_from_qc, name) for name in qc_tex_names]
@@ -691,8 +684,8 @@ class TF2VPKExtractService:
                 logger.debug(f"[extract-hands] QC кэш недоступен для {arm_model_key}: {_qc_err}")
 
         if use_explicit_list:
-            # ── Режим явного списка: ищем в нескольких путях и VPK ───────── #
-            # Порядок поиска: textures VPK → misc VPK; prefixes: player → workshop_partner → workshop
+            # Режим явного списка: ищем в нескольких путях и VPK
+            # Порядок поиска: textures VPK -> misc VPK; prefixes: player -> workshop_partner -> workshop
             _PLAYER_PREFIXES = [
                 "materials/models/player",
                 "materials/models/workshop_partner/player",
@@ -720,7 +713,7 @@ class TF2VPKExtractService:
                         f"(проверено {len(_PLAYER_PREFIXES)} префиксов в {len(_vpk_sources)} VPK)"
                     )
         else:
-            # ── Режим сканирования папок: извлекаем всё из папок ─────────── #
+            # Режим сканирования папок: извлекаем всё из папок
             seen_folders: set = set()
             player_dirs: List[str] = []
             for folder, _vtf_name in hand_textures:
@@ -737,8 +730,8 @@ class TF2VPKExtractService:
                         seen_files.add(filename)
                         all_vtfs.append((rel_path, filename, vpk_file))
 
-        # VPK (textures + misc) кэшируются (_open_vpk_cached) — общие хэндлы не
-        # закрываем: их переиспользуют последующие вызовы.
+        # VPK (textures + misc) кэшируются (_open_vpk_cached) - общие хэндлы не
+        # закрываем: их переиспользуют последующие вызовы
         if not all_vtfs:
             _weapon_name = hand_textures[0][1] if hand_textures else "unknown"
             return (
@@ -747,7 +740,7 @@ class TF2VPKExtractService:
                 False,
             )
 
-        # ── Извлекаем и конвертируем все найденные файлы ─────────────────── #
+        # Извлекаем и конвертируем все найденные файлы
         extracted_paths: List[str] = []
         n = max(len(all_vtfs), 1)
 
@@ -789,7 +782,7 @@ class TF2VPKExtractService:
                 else:
                     extracted_paths.append(dest_path)
         finally:
-            # VPK кэшируются (_open_vpk_cached) — общие хэндлы не закрываем.
+            # VPK кэшируются (_open_vpk_cached) - общие хэндлы не закрываем
             pass
 
         if not extracted_paths:

@@ -1,28 +1,31 @@
 """
-Конвертер SMD (Valve Model Data) → OBJ для 3D Preview.
+Конвертер SMD (Valve Model Data) -> OBJ для 3D Preview
 
-SMD — текстовый формат Source Engine для хранения 3D-геометрии.
-OBJ — универсальный текстовый формат, читаемый Three.js.
+SMD - текстовый формат Source Engine для хранения 3D-геометрии.
+OBJ - универсальный текстовый формат, читаемый Three.js
 
 Формат вершины SMD:
     parent_bone  x y z  nx ny nz  u v  [links...]
 
 UV:
-    Source Engine SMD хранит UV в OpenGL convention (v=0 снизу) — флип НЕ нужен.
-    Three.js TextureLoader по умолчанию делает flipY сам — ещё один флип сломает UV.
+    Source Engine SMD хранит UV в OpenGL convention (v=0 снизу) - флип НЕ нужен.
+    Three.js TextureLoader по умолчанию делает flipY сам - ещё один флип сломает UV
 
 Система координат:
     Оружия (Z-up): правая система, Z-up (x=вправо, y=вперёд, z=вверх)
-    Персонажи (Y-up): SMD уже в Y-up — $upaxis Y в QC, Crowbar экспортирует как есть.
+    Персонажи (Y-up): SMD уже в Y-up - $upaxis Y в QC, Crowbar экспортирует как есть.
     Three.js OBJ: правая система, Y-up (x=вправо, y=вверх, z=к зрителю)
 
-    Конвертация Z-up → Y-up: (x, y, z) → (x, z, -y)   [оружия]
-    Конвертация Y-up → Y-up: (x, y, z) → (x, y, -z)   [персонажи, зеркало Z для
+    Конвертация Z-up -> Y-up: (x, y, z) -> (x, z, -y)   [оружия]
+    Конвертация Y-up -> Y-up: (x, y, z) -> (x, y, -z)   [персонажи, зеркало Z для
                                                           корректной ориентации]
 """
 
+import hashlib
 import os
 import re
+import threading
+from collections import OrderedDict
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Sequence, Tuple
 
@@ -30,42 +33,70 @@ from src.shared.logging_config import get_logger
 
 logger = get_logger(__name__)
 
-#: Секция triangles целиком — её разбирают и полный парсер, и быстрый скан.
+#: Секция triangles целиком - её разбирают и полный парсер, и быстрый скан
 _RE_TRIANGLES = re.compile(r"\btriangles\b(.*?)\bend\b", re.DOTALL | re.IGNORECASE)
 
 
 @dataclass(frozen=True)
 class MeshPart:
-    """Один меш сцены со своей позой.
+    """Один меш сцены со своей позой
 
-    Обычная модель — это одна часть. Вьюмодель — две (руки и оружие): скелеты
+    Обычная модель - это одна часть. Вьюмодель - две (руки и оружие): скелеты
     разные, матрицы скиннинга считаются отдельно (см. viewmodel_pose), а сцена
-    и оси общие.
+    и оси общие
     """
 
     smd_path: str
-    #: Бодигруппы и прочие части, разделяющие скелет с основным мешем.
+    #: Бодигруппы и прочие части, разделяющие скелет с основным мешем
     extra_smd_paths: Sequence[str] = ()
-    #: {кость: матрица} — готовые матрицы скиннинга. None — меш как есть.
+    #: {кость: матрица} - готовые матрицы скиннинга. None - меш как есть
     skinning: Optional[dict] = None
-    #: Если задан — оставить только эти материалы.
+    #: Если задан - оставить только эти материалы
     include_mats: Optional[set] = None
     #: Приставка к именам материалов части: так вьювер отличает призрак
-    #: оригинала (`ghost:`) от самой модели, даже если имена совпали.
+    #: оригинала (`ghost:`) от самой модели, даже если имена совпали
     material_prefix: str = ''
-    #: Какие из extra_smd_paths — «поздние» детали (снаряд в оружии): их
+    #: Какие из extra_smd_paths - «поздние» детали (снаряд в оружии): их
     #: треугольники помечаются в OBJ строкой LATE_PREFIX, и части модели
-    #: нумеруют их куски после кусков основной модели (mesh_parts_service).
+    #: нумеруют их куски после кусков основной модели (mesh_parts_service)
     late_smd_paths: Sequence[str] = ()
 
 
 #: Строка шапки OBJ: с какого номера треугольника материала начинаются
-#: «поздние» детали (`мат=номер|…`).
+#: «поздние» детали (`мат=номер|…`)
 LATE_PREFIX = '# Late:'
+
+#: Последние готовые OBJ: {ключ входа: (OBJ, MTL, материалы)}. Каталог щёлкают
+#: туда-обратно, а разбор SMD и запись OBJ - 0,4 с на модель, вход тот же -
+#: те же файлы. Только в памяти: по паре мегабайт на модель
+_recent: "OrderedDict[bytes, Tuple[bytes, bytes, Tuple[str, ...]]]" = OrderedDict()
+_RECENT_MAX = 8
+_recent_lock = threading.Lock()
+
+
+def _convert_key(parts: Sequence[MeshPart], obj_path: str, source_zup: bool,
+                 keep_source_axes: bool) -> Optional[bytes]:
+    """Отпечаток всего, от чего зависит OBJ; None - запоминать нельзя"""
+    items = []
+    for part in parts:
+        stamps = []
+        for path in (part.smd_path, *part.extra_smd_paths):
+            try:
+                st = os.stat(path)
+            except OSError:
+                return None
+            stamps.append((path, st.st_mtime_ns, st.st_size))
+        skinning = sorted(part.skinning.items()) if part.skinning else None
+        items.append((stamps, tuple(part.late_smd_paths),
+                      sorted(part.include_mats) if part.include_mats is not None else None,
+                      part.material_prefix, skinning))
+    # Имя файла входит в OBJ ссылкой на MTL
+    raw = repr((items, os.path.basename(obj_path), source_zup, keep_source_axes))
+    return hashlib.blake2b(raw.encode('utf-8'), digest_size=16).digest()
 
 
 class SmdToObjService:
-    """Конвертирует SMD файл в OBJ + MTL для Three.js."""
+    """Конвертирует SMD файл в OBJ + MTL для Three.js"""
 
     @staticmethod
     def convert(
@@ -80,39 +111,39 @@ class SmdToObjService:
         late_smd_paths: Optional[list] = None,
     ) -> Tuple[bool, List[str]]:
         """
-        Конвертирует SMD → OBJ + MTL с поддержкой нескольких материалов.
+        Конвертирует SMD -> OBJ + MTL с поддержкой нескольких материалов
 
         MTL файл создаётся рядом с OBJ.
-        При одном материале — ссылается на «texture.png».
-        При нескольких — каждый материал ссылается на «{mat_name}.png».
+        При одном материале - ссылается на «texture.png».
+        При нескольких - каждый материал ссылается на «{mat_name}.png»
 
         Args:
             smd_path:     Путь к входному .smd файлу
             obj_path:     Путь к выходному .obj файлу
-            include_mats: Если задан — оставляем только эти материалы.
+            include_mats: Если задан - оставляем только эти материалы.
                           Используется для моделей рук, чтобы исключить костюм
                           и оставить только нужные меши.
-            keep_source_axes: True — не трогать оси вообще. Нужно превью
+            keep_source_axes: True - не трогать оси вообще. Нужно превью
                           частиц: его сцена живёт в координатах Source (Z-up,
                           камера с up=(0,0,1)), и модель обязана попасть в ту же
                           систему, что и контрол-пойнты с частицами.
-            source_zup:   True (по умолчанию) — применять конвертацию Z-up→Y-up
-                          для оружий и рук. False — для персонажей ($upaxis Y),
+            source_zup:   True (по умолчанию) - применять конвертацию Z-up->Y-up
+                          для оружий и рук. False - для персонажей ($upaxis Y),
                           SMD уже в Y-up и только зеркалим Z для Three.js.
             pose_smd_path: SMD анимации, первый кадр которой задаёт позу. Игра
                           всегда проигрывает последовательность, и reference-меш
-                          — не то, что видит игрок: у Мутировавшего молока хлеб
+                          - не то, что видит игрок: у Мутировавшего молока хлеб
                           в bind-позе торчит из банки. Не задан или поза
-                          совпадает с bind — меш остаётся как есть.
+                          совпадает с bind - меш остаётся как есть.
             on_player:    Косметика: перенести в позу игрока, как делает
                           bonemerge (см. cosmetic_pose). В MDL шапка лежит как
                           автору было удобно, и без переноса стоит боком.
-            late_smd_paths: Какие из extra_smd_paths — снаряд в оружии: части
-                          модели нумеруют его куски после основной (LATE_PREFIX).
+            late_smd_paths: Какие из extra_smd_paths - снаряд в оружии: части
+                          модели нумеруют его куски после основной (LATE_PREFIX)
 
         Returns:
-            (success, material_names) где material_names — список уникальных
-            имён материалов в том порядке, в котором они встречаются в SMD.
+            (success, material_names) где material_names - список уникальных
+            имён материалов в том порядке, в котором они встречаются в SMD
         """
         return SmdToObjService.convert_parts(
             [MeshPart(
@@ -136,22 +167,58 @@ class SmdToObjService:
         keep_source_axes: bool = False,
     ) -> Tuple[bool, List[str]]:
         """
-        Собирает ОДИН OBJ + MTL из нескольких мешей с разными позами.
+        Собирает ОДИН OBJ + MTL из нескольких мешей с разными позами
 
-        Нужно там, где в кадре несколько моделей сразу: вьюмодель — это руки
+        Нужно там, где в кадре несколько моделей сразу: вьюмодель - это руки
         класса и оружие, у каждого свой скелет и своя матрица скиннинга, но
-        общее пространство и одна сцена.
+        общее пространство и одна сцена
 
         Оси задаются на всю сцену, а не на часть: части уже приведены в одно
-        пространство своими позами, и разная конвертация развалила бы кадр.
+        пространство своими позами, и разная конвертация развалила бы кадр
 
-        Имена материалов у частей обязаны различаться — по ним вьювер потом
+        Имена материалов у частей обязаны различаться - по ним вьювер потом
         раскладывает текстуры. Совпадение логируется: значит, пользовательская
-        текстура ляжет сразу на обе части.
+        текстура ляжет сразу на обе части
 
         Returns:
-            (успех, имена материалов) — в порядке появления, части за частью.
+            (успех, имена материалов) - в порядке появления, части за частью
         """
+        key = _convert_key(parts, obj_path, source_zup, keep_source_axes)
+        mtl_path = os.path.splitext(obj_path)[0] + '.mtl'
+        with _recent_lock:
+            hit = _recent.get(key) if key else None
+            if hit:
+                _recent.move_to_end(key)
+        if hit:
+            obj_bytes, mtl_bytes, names = hit
+            os.makedirs(os.path.dirname(obj_path) or '.', exist_ok=True)
+            with open(obj_path, 'wb') as f:
+                f.write(obj_bytes)
+            with open(mtl_path, 'wb') as f:
+                f.write(mtl_bytes)
+            return True, list(names)
+
+        ok, names = SmdToObjService._convert_parts(
+            parts, obj_path, source_zup=source_zup, keep_source_axes=keep_source_axes)
+        if ok and key:
+            with open(obj_path, 'rb') as f:
+                obj_bytes = f.read()
+            with open(mtl_path, 'rb') as f:
+                mtl_bytes = f.read()
+            with _recent_lock:
+                _recent[key] = (obj_bytes, mtl_bytes, tuple(names))
+                while len(_recent) > _RECENT_MAX:
+                    _recent.popitem(last=False)
+        return ok, names
+
+    @staticmethod
+    def _convert_parts(
+        parts: Sequence["MeshPart"],
+        obj_path: str,
+        *,
+        source_zup: bool = True,
+        keep_source_axes: bool = False,
+    ) -> Tuple[bool, List[str]]:
         try:
             triangles_by_mat: Dict[str, List[List[dict]]] = {}
             late_at: Dict[str, int] = {}
@@ -161,7 +228,7 @@ class SmdToObjService:
                     if mat in triangles_by_mat:
                         logger.warning(
                             f"SMD→OBJ: материал '{mat}' есть у нескольких частей "
-                            f"сцены — они получат одну текстуру"
+                            f"сцены - они получат одну текстуру"
                         )
                     if mat in part_late and mat not in late_at:
                         late_at[mat] = len(triangles_by_mat.get(mat, [])) + part_late[mat]
@@ -182,7 +249,7 @@ class SmdToObjService:
             mat_names = list(triangles_by_mat.keys())
             multi     = len(mat_names) > 1
 
-            # ── MTL ──────────────────────────────────────────────────────── #
+            # MTL
             with open(mtl_path, "w", encoding="utf-8") as f:
                 for mat in mat_names:
                     tex_file = f"{mat}.png" if multi else "texture.png"
@@ -193,7 +260,7 @@ class SmdToObjService:
                     f.write("Ns 32.0\n")
                     f.write(f"map_Kd {tex_file}\n\n")
 
-            # ── OBJ ──────────────────────────────────────────────────────── #
+            # OBJ
             positions : List[Tuple[float, float, float]] = []
             uvs       : List[Tuple[float, float]]        = []
             normals   : List[Tuple[float, float, float]] = []
@@ -215,15 +282,15 @@ class SmdToObjService:
                             positions.append((x, y, z))
                             normals.append((nx, ny, nz))
                         elif source_zup:
-                            # Оружия/руки: Source Z-up → Three.js Y-up: (x,y,z) → (x, z, -y)
+                            # Оружия/руки: Source Z-up -> Three.js Y-up: (x,y,z) -> (x, z, -y)
                             positions.append((x, z, -y))
                             normals.append((nx, nz, -ny))
                         else:
                             # Персонажи ($upaxis Y): SMD уже Y-up, только зеркалим Z
-                            # чтобы персонаж смотрел на зрителя: (x,y,z) → (x, y, -z)
+                            # чтобы персонаж смотрел на зрителя: (x,y,z) -> (x, y, -z)
                             positions.append((x, y, -z))
                             normals.append((nx, ny, -nz))
-                        # UV: не флипаем — Three.js сам делает flipY
+                        # UV: не флипаем - Three.js сам делает flipY
                         uvs.append(vert["uv"])
 
                         face_idx.extend([v_i, vt_i, vn_i])
@@ -232,8 +299,8 @@ class SmdToObjService:
 
             sources = ", ".join(os.path.basename(p.smd_path) for p in parts)
             # Все SMD по порядку, с бодигруппами: номер треугольника в OBJ ведёт
-            # к треугольнику в них — по нему сборка делает часть своим
-            # материалом (part_materials.SOURCES_PREFIX).
+            # к треугольнику в них - по нему сборка делает часть своим
+            # материалом (part_materials.SOURCES_PREFIX)
             from src.services.part_materials import SOURCES_PREFIX
             files = []
             for p in parts:
@@ -241,9 +308,9 @@ class SmdToObjService:
                 for path in (p.smd_path, *p.extra_smd_paths):
                     if path != p.smd_path and not os.path.exists(path):
                         continue
-                    # SMD чужой модели — пушка-носитель праздничного оружия:
+                    # SMD чужой модели - пушка-носитель праздничного оружия:
                     # она в конце OBJ и в сборку этой модели не входит. Номера
-                    # своих треугольников она не сдвигает, источником не числим.
+                    # своих треугольников она не сдвигает, источником не числим
                     if os.path.dirname(os.path.abspath(path)) != home:
                         break
                     files.append(os.path.basename(path))
@@ -291,15 +358,15 @@ class SmdToObjService:
                 exc_info=True)
             return False, []
 
-    # ── Внутренние методы ─────────────────────────────────────────────────── #
+    # Внутренние методы
 
     @staticmethod
     def scan_material_names(smd_paths: Sequence[str]) -> set:
         """
-        Имена материалов из SMD без разбора вершин — в 10-30 раз быстрее.
+        Имена материалов из SMD без разбора вершин - в 10-30 раз быстрее
 
         Нужно там, где важен только состав модели: подобрать превью-фильтр или
-        понять, какие меши сцены чьи.
+        понять, какие меши сцены чьи
         """
         result: set = set()
         for path in smd_paths:
@@ -312,7 +379,7 @@ class SmdToObjService:
                 if not m:
                     continue
                 lines = [ln.strip() for ln in m.group(1).splitlines() if ln.strip()]
-                # Каждые 4 строки: имя материала, вершина, вершина, вершина.
+                # Каждые 4 строки: имя материала, вершина, вершина, вершина
                 result.update(lines[i] for i in range(0, len(lines), 4))
             except Exception as exc:
                 logger.debug(f"SMD: не прочитать материалы {path}: {exc}")
@@ -321,13 +388,13 @@ class SmdToObjService:
     @staticmethod
     def _part_triangles(part: "MeshPart") -> Tuple[Dict[str, List[List[dict]]], Dict[str, int]]:
         """Треугольники одной части сцены: меш + бодигруппы, уже в своей позе,
-        и {материал: номер первого треугольника «поздних» деталей}."""
+        и {материал: номер первого треугольника «поздних» деталей}"""
         triangles_by_mat = SmdToObjService._parse_triangles_by_mat(part.smd_path)
         late = {os.path.normcase(os.path.abspath(p)) for p in part.late_smd_paths}
         late_from: Dict[str, int] = {}
 
         # Бодигруппы (доп. геометрия из отдельных SMD) делят скелет с основным
-        # мешем, поэтому доливаются ДО применения позы.
+        # мешем, поэтому доливаются ДО применения позы
         for extra in part.extra_smd_paths:
             if not os.path.exists(extra):
                 logger.warning(f"SMD→OBJ: extra SMD не найден: {extra}")
@@ -361,7 +428,7 @@ class SmdToObjService:
     @staticmethod
     def _skinning(ref_smd: str, pose_smd: Optional[str],
                   on_player: bool) -> Optional[dict]:
-        """Поза анимации, а поверх неё — перенос косметики на игрока."""
+        """Поза анимации, а поверх неё - перенос косметики на игрока"""
         mats = SmdToObjService._pose_matrices(ref_smd, pose_smd)
         if not on_player:
             return mats
@@ -374,7 +441,7 @@ class SmdToObjService:
 
     @staticmethod
     def _pose_matrices(ref_smd: str, pose_smd: Optional[str]) -> Optional[dict]:
-        """Матрицы скиннинга по SMD анимации той же модели (кости по номерам)."""
+        """Матрицы скиннинга по SMD анимации той же модели (кости по номерам)"""
         if not pose_smd:
             return None
         try:
@@ -388,19 +455,19 @@ class SmdToObjService:
     def _apply_skinning(triangles_by_mat: Dict[str, List[List[dict]]],
                         mats: Optional[dict], label: str) -> bool:
         """
-        Двигает вершины части по матрицам скиннинга (на месте).
+        Двигает вершины части по матрицам скиннинга (на месте)
 
-        Любая неудача — молчаливый отказ: меш остаётся в bind-позе, как было.
+        Любая неудача - молчаливый отказ: меш остаётся в bind-позе, как было
 
         Returns:
-            True, если поза применена.
+            True, если поза применена
         """
         if not mats:
             return False
         from src.services import smd_pose
 
         # Считаем в сторону, чтобы можно было отказаться: моделей в игре
-        # тысячи, все не проверить, и на незнакомой поза может разъехаться.
+        # тысячи, все не проверить, и на незнакомой поза может разъехаться
         verts = [v for triangles in triangles_by_mat.values()
                  for tri in triangles for v in tri]
         posed = [smd_pose.apply_to_vertex(
@@ -410,7 +477,7 @@ class SmdToObjService:
         if not smd_pose.looks_sane([v["pos"] for v in verts],
                                    [p for p, _ in posed]):
             logger.warning(
-                f"SMD→OBJ: поза {label} разъехалась — оставляем bind-позу")
+                f"SMD→OBJ: поза {label} разъехалась - оставляем bind-позу")
             return False
 
         for vert, (pos, nrm) in zip(verts, posed):
@@ -424,10 +491,10 @@ class SmdToObjService:
     @staticmethod
     def _parse_triangles_by_mat(smd_path: str) -> Dict[str, List[List[dict]]]:
         """
-        Парсит секцию triangles SMD файла.
+        Парсит секцию triangles SMD файла
 
         Returns:
-            OrderedDict: {material_name: [triangles]} в порядке первого появления.
+            OrderedDict: {material_name: [triangles]} в порядке первого появления
         """
         with open(smd_path, "r", encoding="utf-8", errors="replace") as f:
             content = f.read()
@@ -475,13 +542,13 @@ class SmdToObjService:
     @staticmethod
     def _parse_vertex(line: str) -> Optional[dict]:
         """
-        Парсит строку вершины SMD.
+        Парсит строку вершины SMD
 
         Формат: parent_bone  x y z  nx ny nz  u v  [кол-во кость вес …]
 
         Привязка к костям нужна, чтобы перевести меш в позу из анимации
         (см. smd_pose). Хвост со связями необязателен: без него вершина висит
-        целиком на parent_bone.
+        целиком на parent_bone
         """
         parts = line.split()
         if len(parts) < 9:

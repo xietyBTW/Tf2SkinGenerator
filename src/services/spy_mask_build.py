@@ -1,6 +1,6 @@
 """
 Мод с масками маскировки шпиона: только VTF+VMT по игровому пути
-materials/models/player/spy/, без декомпиляции и компиляции модели.
+materials/models/player/spy/, без декомпиляции и компиляции модели
 """
 
 import os
@@ -34,11 +34,11 @@ def build_spy_masks_vpk(
     t,
 ):
     """
-    Строит VPK-мод с кастомными масками маскировки шпиона.
+    Строит VPK-мод с кастомными масками маскировки шпиона
 
-    В отличие от player skin, здесь НЕТ деcompile/patch/compile — только
+    В отличие от player skin, здесь НЕТ деcompile/patch/compile - только
     VTF+VMT файлы по оригинальному пути materials/models/player/spy/.
-    Это гарантирует что body-текстуры шпиона остаются из игры.
+    Это гарантирует что body-текстуры шпиона остаются из игры
     """
     try:
         # Папка для текстур масок внутри vpkroot
@@ -51,7 +51,7 @@ def build_spy_masks_vpk(
         except Exception:
             tf2_misc_vpk_path = None
 
-        # Оригинальный cdmaterials — нужен для VMT $basetexture
+        # Оригинальный cdmaterials - нужен для VMT $basetexture
         spy_cdmat = "models/player/spy"
 
         any_created = False
@@ -77,13 +77,13 @@ def build_spy_masks_vpk(
                     logger.debug(f"Маска не найдена в VPK, пропускаем: {vtf_name}")
                     continue
             elif mask_img and str(mask_img).lower().endswith('.vtf'):
-                # В карточку маски загрузили готовый VTF — копируем как есть
+                # В карточку маски загрузили готовый VTF - копируем как есть
                 copy_file_safe(mask_img, mask_vtf_path)
                 logger.info(f"Маска: готовый VTF скопирован → {vtf_name}.vtf")
             elif mask_img and os.path.isfile(mask_img):
                 # Конвертируем изображение пользователя.
                 # ВАЖНО: имя PNG должно совпадать с именем VTF (без _tmp),
-                # иначе VTFCmd создаст файл с неправильным именем.
+                # иначе VTFCmd создаст файл с неправильным именем
                 tmp_png = masks_dir / f"{vtf_name}.png"
                 TextureService.process_image(mask_img, tmp_png, size)
                 vtf_flags, merged = TextureService.resolve_vtf_flags_and_options(flags, vtf_options, drop_normal=True)
@@ -92,11 +92,11 @@ def build_spy_masks_vpk(
                     tmp_png.unlink()
                 logger.info(f"Создан VTF маски: {vtf_name}.vtf")
             else:
-                # Пользователь пропустил — не включаем
+                # Пользователь пропустил - не включаем
                 logger.debug(f"Маска пропущена: {vtf_name}")
                 continue
 
-            # VMT — простой VertexLitGeneric по оригинальному пути
+            # VMT - простой VertexLitGeneric по оригинальному пути
             if mask_vtf_path.exists():
                 vmt_content = (
                     '"VertexLitGeneric"\n'

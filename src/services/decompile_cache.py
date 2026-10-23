@@ -1,14 +1,14 @@
 """
-Кэш декомпилированных моделей TF2.
+Кэш декомпилированных моделей TF2
 
-Crowbar decompile — самый долгий шаг (10-30 сек).
-Плюс extract_file_set — ещё 3-10 сек.
-Вместе это ~15-40 секунд которые можно сэкономить.
+Crowbar decompile - самый долгий шаг (10-30 сек).
+Плюс extract_file_set - ещё 3-10 сек.
+Вместе это ~15-40 секунд которые можно сэкономить
 
 Ключ кэша = weapon_key + mdl_rel_path + mtime VPK файла.
-  - mtime VPK меняется при обновлении TF2 → кэш автоматически инвалидируется.
+  - mtime VPK меняется при обновлении TF2 -> кэш автоматически инвалидируется.
   - Проверка mtime мгновенная (один stat() вызов).
-  - На cache hit: пропускаем и extraction, и decompile.
+  - На cache hit: пропускаем и extraction, и decompile
 """
 
 import hashlib
@@ -30,24 +30,34 @@ _CACHE_VERSION = 4  # v3: vpk_mtime вместо mdl_hash; v4: SMD дописа�
 
 # Мягкий потолок размера кэша. После сохранения новой записи кэш само-урезается
 # до этого размера, удаляя самые давно использованные записи (LRU по mtime папки;
-# mtime «трогается» на cache hit). Без лимита кэш рос бы бесконечно. <=0 — выкл.
-# Это умолчание: человек выбирает потолок в настройках (`model_cache_mb`).
+# mtime «трогается» на cache hit). Без лимита кэш рос бы бесконечно. <=0 - выкл.
+# Это умолчание: человек выбирает потолок в настройках (`model_cache_mb`)
 _CACHE_MAX_MB = 1024
 
 #: Превью и поиск стилей разбирают одну модель параллельно и оба несут её в
 #: кэш: rmtree одного стирал copytree другого, и в записи оставались метаданные
-#: без QC. Пишем по одному; второй застаёт готовую запись и не трогает её.
+#: без QC. Пишем по одному, второй застаёт готовую запись и не трогает её
 _SAVE_LOCK = threading.Lock()
+
+#: Метаданные записей в памяти: find_* зовутся по нескольку раз на загрузку
+#: превью, а чтение всех meta.json с диска стоит десятки мс. Читается с диска
+#: один раз на папку кэша, дальше его правят сохранение и удаление записей
+_INDEX_LOCK = threading.Lock()
+_index: dict = {}                      # имя папки записи -> meta
+_index_root: Optional[Path] = None
+
+#: Обходы лимита по одному: фоновый после сохранения и вызов из настроек
+_LIMIT_LOCK = threading.Lock()
 
 
 def get_cache_dir() -> Path:
-    """Возвращает папку кэша, создаёт если нет."""
+    """Возвращает папку кэша, создаёт если нет"""
     _CACHE_DIR.mkdir(parents=True, exist_ok=True)
     return _CACHE_DIR
 
 
 def _vpk_mtime(vpk_path: str) -> str:
-    """Время модификации VPK файла — меняется при обновлении игры."""
+    """Время модификации VPK файла - меняется при обновлении игры"""
     try:
         mtime = os.path.getmtime(vpk_path)
         return f"{mtime:.0f}"
@@ -58,7 +68,7 @@ def _vpk_mtime(vpk_path: str) -> str:
 def _cache_key(weapon_key: str, vpk_path: str, mdl_rel_path: str) -> str:
     """
     Ключ кэша на основе оружия, VPK файла и пути к MDL.
-    Используем hash чтобы избежать проблем с длинными путями.
+    Используем hash чтобы избежать проблем с длинными путями
     """
     raw = f"{weapon_key}|{vpk_path}|{mdl_rel_path}|{_vpk_mtime(vpk_path)}"
     return hashlib.sha1(raw.encode("utf-8")).hexdigest()[:20]
@@ -68,13 +78,54 @@ def _meta_path(cache_entry_dir: Path) -> Path:
     return cache_entry_dir / _META_FILENAME
 
 
+def _entries(root: Optional[Path] = None) -> list:
+    """[(папка записи, meta)] из индекса"""
+    global _index, _index_root
+    root = root or get_cache_dir()
+    with _INDEX_LOCK:
+        if _index_root != root:
+            _index, _index_root = _scan(root), root
+        return [(root / name, meta) for name, meta in _index.items()]
+
+
+def _scan(root: Path) -> dict:
+    found = {}
+    for meta_file in root.glob(f"*/{_META_FILENAME}"):
+        if ".tmp-" in meta_file.parent.name:
+            continue                    # запись ещё собирается, см. _save_to_cache
+        try:
+            with open(meta_file, "r", encoding="utf-8") as f:
+                found[meta_file.parent.name] = json.load(f)
+        except (OSError, ValueError):
+            continue
+    return found
+
+
+def _index_put(entry_dir: Path, meta: dict) -> None:
+    with _INDEX_LOCK:
+        if _index_root == entry_dir.parent:
+            _index[entry_dir.name] = meta
+
+
+def _remove_entry(entry_dir: Path) -> None:
+    shutil.rmtree(entry_dir, ignore_errors=True)
+    with _INDEX_LOCK:
+        if _index_root == entry_dir.parent:
+            _index.pop(entry_dir.name, None)
+
+
+def _data_size(entry_dir: Path) -> int:
+    return sum(f.stat().st_size for f in entry_dir.rglob("*")
+               if f.is_file() and not f.name.startswith(_META_FILENAME))
+
+
 def get_cached_decompile(
     weapon_key: str,
     vpk_path: str,
     mdl_rel_path: str,
 ) -> Optional[str]:
     """
-    Проверяет кэш **до** extraction — только по mtime VPK.
+    Проверяет кэш **до** extraction - только по mtime VPK
 
     Args:
         weapon_key:   Ключ оружия (например "c_flaregun_pyro")
@@ -82,7 +133,7 @@ def get_cached_decompile(
         mdl_rel_path: Относительный путь к MDL внутри VPK
 
     Returns:
-        Путь к закэшированной папке с QC/SMD, или None при промахе.
+        Путь к закэшированной папке с QC/SMD, или None при промахе
     """
     try:
         key = _cache_key(weapon_key, vpk_path, mdl_rel_path)
@@ -94,7 +145,7 @@ def get_cached_decompile(
 
         meta_file = _meta_path(entry_dir)
         if not meta_file.exists():
-            shutil.rmtree(entry_dir, ignore_errors=True)
+            _remove_entry(entry_dir)
             return None
 
         with open(meta_file, "r", encoding="utf-8") as f:
@@ -102,7 +153,7 @@ def get_cached_decompile(
 
         if meta.get("version") != _CACHE_VERSION:
             logger.info(f"Версия кэша устарела для {weapon_key}, сбрасываем")
-            shutil.rmtree(entry_dir, ignore_errors=True)
+            _remove_entry(entry_dir)
             return None
 
         # Проверяем что VPK не изменился (дополнительная страховка)
@@ -110,24 +161,24 @@ def get_cached_decompile(
         current_mtime = _vpk_mtime(vpk_path)
         if stored_mtime != current_mtime:
             logger.info(f"VPK обновился, кэш для {weapon_key} недействителен")
-            shutil.rmtree(entry_dir, ignore_errors=True)
+            _remove_entry(entry_dir)
             return None
 
         # Проверяем что QC файл на месте
         qc_name = meta.get("qc_filename")
         if not qc_name or not (entry_dir / qc_name).exists():
             logger.warning(f"QC файл в кэше не найден: {weapon_key}")
-            shutil.rmtree(entry_dir, ignore_errors=True)
+            _remove_entry(entry_dir)
             return None
 
-        # Cache hit — обновляем mtime записи, чтобы LRU-эвикция
-        # (enforce_cache_limit) считала её свежеиспользованной.
+        # Cache hit - обновляем mtime записи, чтобы LRU-эвикция
+        # (enforce_cache_limit) считала её свежеиспользованной
         try:
             os.utime(entry_dir, None)
         except OSError:
             pass
 
-        logger.info(f"✓ Кэш декомпила: {weapon_key} — пропускаем extraction + decompile")
+        logger.info(f"Кэш декомпила: {weapon_key} - пропускаем extraction + decompile")
         return str(entry_dir)
 
     except Exception as e:
@@ -137,52 +188,39 @@ def get_cached_decompile(
 
 def find_same_model(vpk_path: str, mdl_rel_path: str) -> Optional[str]:
     """
-    Готовая запись ТОЙ ЖЕ модели под другим ключом, либо None.
+    Готовая запись ТОЙ ЖЕ модели под другим ключом, либо None
 
-    Ключ записи — логический (оружие, `__player_heavy`, путь шапки), и одну
+    Ключ записи - логический (оружие, `__player_heavy`, путь шапки), и одну
     модель разные части приложения называли по-своему: модель класса лежала
-    в кэше трижды (`heavy`, `models/player/heavy.mdl`, `__player_heavy`) —
-    три запуска Crowbar. Годность та же, что у `get_cached_decompile`.
+    в кэше трижды (`heavy`, `models/player/heavy.mdl`, `__player_heavy`) -
+    три запуска Crowbar. Годность та же, что у `get_cached_decompile`
     """
     want = mdl_rel_path.replace("\\", "/").lower()
     stamp = _vpk_mtime(vpk_path)
-    for meta_file in get_cache_dir().glob(f"*/{_META_FILENAME}"):
-        try:
-            with open(meta_file, "r", encoding="utf-8") as f:
-                meta = json.load(f)
-        except (OSError, ValueError):
-            continue
+    for entry, meta in _entries():
         if (meta.get("version") == _CACHE_VERSION
                 and meta.get("vpk_mtime") == stamp
                 and os.path.normcase(str(meta.get("vpk_path") or "")) == os.path.normcase(vpk_path)
                 and str(meta.get("mdl_rel_path") or "").replace("\\", "/").lower() == want
-                and (meta_file.parent / str(meta.get("qc_filename") or "")).is_file()):
-            return str(meta_file.parent)
+                and (entry / str(meta.get("qc_filename") or "")).is_file()):
+            return str(entry)
     return None
 
 
 def _purge_stale_entries(weapon_key: str, mdl_rel_path: str, keep_key: str) -> None:
     """
-    Удаляет записи того же оружия с устаревшим mtime VPK.
+    Удаляет записи того же оружия с устаревшим mtime VPK
 
     mtime входит в ключ кэша, поэтому после обновления игры старые записи
-    становятся недостижимыми, но без этой очистки копились бы бесконечно.
+    становятся недостижимыми, но без этой очистки копились бы бесконечно
     """
     try:
-        for entry in get_cache_dir().iterdir():
-            if not entry.is_dir() or entry.name == keep_key:
-                continue
-            meta_file = _meta_path(entry)
-            if not meta_file.exists():
-                continue
-            try:
-                with open(meta_file, "r", encoding="utf-8") as f:
-                    meta = json.load(f)
-            except Exception:
+        for entry, meta in _entries():
+            if entry.name == keep_key:
                 continue
             if (meta.get("weapon_key") == weapon_key
                     and meta.get("mdl_rel_path") == mdl_rel_path):
-                shutil.rmtree(entry, ignore_errors=True)
+                _remove_entry(entry)
                 logger.debug(f"Удалена устаревшая запись кэша: {entry.name} ({weapon_key})")
     except Exception as e:
         logger.warning(f"Ошибка очистки устаревшего кэша для {weapon_key}: {e}")
@@ -195,7 +233,7 @@ def save_to_cache(
     decompile_dir: str,
 ) -> Optional[str]:
     """
-    Сохраняет декомпилированные файлы в кэш.
+    Сохраняет декомпилированные файлы в кэш
 
     Args:
         weapon_key:    Ключ оружия
@@ -204,7 +242,7 @@ def save_to_cache(
         decompile_dir: Папка с QC + SMD после Crowbar
 
     Returns:
-        Путь к папке записи кэша, или None при ошибке.
+        Путь к папке записи кэша, или None при ошибке
     """
     with _SAVE_LOCK:
         return _save_to_cache(weapon_key, vpk_path, mdl_rel_path, decompile_dir)
@@ -216,7 +254,7 @@ def _save_to_cache(weapon_key: str, vpk_path: str, mdl_rel_path: str,
     try:
         ready = get_cached_decompile(weapon_key, vpk_path, mdl_rel_path)
         if ready:
-            return ready                # сосед успел раньше — запись целая
+            return ready                # сосед успел раньше - запись целая
 
         key = _cache_key(weapon_key, vpk_path, mdl_rel_path)
         entry_dir = get_cache_dir() / key
@@ -225,8 +263,8 @@ def _save_to_cache(weapon_key: str, vpk_path: str, mdl_rel_path: str,
 
         # Запись собирается рядом и встаёт под свой ключ одним переименованием.
         # Читатель (get_cached_decompile) идёт без замка: застав папку посреди
-        # copytree ещё без метаданных, он считал её битой и стирал — копия
-        # падала с WinError 3.
+        # copytree ещё без метаданных, он считал её битой и стирал - копия
+        # падала с WinError 3
         staging = entry_dir.with_name(f"{key}.tmp-{uuid.uuid4().hex[:8]}")
         shutil.copytree(decompile_dir, staging)
 
@@ -244,17 +282,22 @@ def _save_to_cache(weapon_key: str, vpk_path: str, mdl_rel_path: str,
             "mdl_rel_path": mdl_rel_path,
             "vpk_mtime": _vpk_mtime(vpk_path),
             "qc_filename": qc_name,
+            # Для лимита: иначе каждое сохранение обходило бы все файлы кэша
+            "size": _data_size(staging),
         }
         with open(_meta_path(staging), "w", encoding="utf-8") as f:
             json.dump(meta, f, indent=2)
         if entry_dir.exists():
             shutil.rmtree(entry_dir)
         os.rename(staging, entry_dir)
+        _index_put(entry_dir, meta)
 
-        logger.info(f"✓ Кэш декомпила сохранён: {weapon_key}")
+        logger.info(f"Кэш декомпила сохранён: {weapon_key}")
 
-        # Само-урезание кэша до мягкого потолка (удаляем давно не used записи).
-        enforce_cache_limit()
+        # В фоне: сохранение идёт внутри загрузки превью и держит _SAVE_LOCK.
+        # Потолок и папку берём сейчас, чтобы поток не увидел чужие
+        threading.Thread(target=enforce_cache_limit, args=(_limit_mb(), get_cache_dir()),
+                         daemon=True, name="decompile-cache-limit").start()
         return str(entry_dir)
 
     except Exception as e:
@@ -265,7 +308,7 @@ def _save_to_cache(weapon_key: str, vpk_path: str, mdl_rel_path: str,
 
 
 def _limit_mb() -> float:
-    """Потолок из настроек (вкладка «Обслуживание»); 0 — без ограничения."""
+    """Потолок из настроек (вкладка «Обслуживание»); 0 - без ограничения"""
     try:
         from src.config.app_config import AppConfig
         return float(AppConfig.get('model_cache_mb', _CACHE_MAX_MB))
@@ -273,42 +316,50 @@ def _limit_mb() -> float:
         return _CACHE_MAX_MB
 
 
-def enforce_cache_limit(max_mb: Optional[float] = None) -> int:
-    """Удаляет самые давно использованные записи, пока кэш не уложится в max_mb.
+def enforce_cache_limit(max_mb: Optional[float] = None, root: Optional[Path] = None) -> int:
+    """Удаляет самые давно использованные записи, пока кэш не уложится в max_mb
 
     LRU приближается через mtime папки записи (трогается на cache hit в
-    get_cached_decompile). Запись — атомарная единица удаления. Метафайл записи
-    учитывается в её размере. None — потолок из настроек; <=0 — лимит отключён.
+    get_cached_decompile). Запись - атомарная единица удаления. Метафайл записи
+    учитывается в её размере. None - потолок из настроек; <=0 - лимит отключён
 
     Returns:
-        Количество удалённых записей.
+        Количество удалённых записей
     """
     if max_mb is None:
         max_mb = _limit_mb()
     if not max_mb or max_mb <= 0:
         return 0
+    with _LIMIT_LOCK:
+        return _enforce_cache_limit(max_mb, root or get_cache_dir())
+
+
+def _enforce_cache_limit(max_mb: float, root: Path) -> int:
     try:
-        cache_dir = get_cache_dir()
         sized = []          # (mtime, size_bytes, entry_dir)
         total = 0
-        for entry in cache_dir.iterdir():
-            if not entry.is_dir():
+        for entry, meta in _entries(root):
+            try:
+                if meta.get("size") is None:
+                    _store_size(entry, meta)
+                size = meta["size"] + _meta_path(entry).stat().st_size
+                mtime = entry.stat().st_mtime
+            except OSError:
                 continue
-            size = sum(f.stat().st_size for f in entry.rglob("*") if f.is_file())
             total += size
-            sized.append((entry.stat().st_mtime, size, entry))
+            sized.append((mtime, size, entry))
 
         limit = max_mb * 1024 * 1024
         if total <= limit:
             return 0
 
-        # Старые (меньший mtime = давно используемые) — первыми под нож.
+        # Старые (меньший mtime = давно используемые) - первыми под нож
         sized.sort(key=lambda x: x[0])
         removed = 0
         for _mtime, size, entry in sized:
             if total <= limit:
                 break
-            shutil.rmtree(entry, ignore_errors=True)
+            _remove_entry(entry)
             total -= size
             removed += 1
             logger.debug(
@@ -317,7 +368,7 @@ def enforce_cache_limit(max_mb: Optional[float] = None) -> int:
             )
         if removed:
             logger.info(
-                f"Кэш декомпила превысил {max_mb:.0f} МБ — удалено записей: {removed}"
+                f"Кэш декомпила превысил {max_mb:.0f} МБ - удалено записей: {removed}"
             )
         return removed
     except Exception as e:
@@ -325,12 +376,21 @@ def enforce_cache_limit(max_mb: Optional[float] = None) -> int:
         return 0
 
 
+def _store_size(entry: Path, meta: dict) -> None:
+    """Размер записи из прошлых версий: считаем один раз и пишем в meta"""
+    meta["size"] = _data_size(entry)
+    tmp = entry / f"{_META_FILENAME}.tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(meta, f, indent=2)
+    os.replace(tmp, _meta_path(entry))     # читатель не застанет полфайла
+
+
 def restore_from_cache(cache_dir: str, target_dir: str) -> str:
     """
-    Копирует QC/SMD из кэша в рабочую директорию.
+    Копирует QC/SMD из кэша в рабочую директорию
 
     Returns:
-        Путь к QC файлу в target_dir.
+        Путь к QC файлу в target_dir
     """
     cache_path = Path(cache_dir)
     target_path = Path(target_dir)
@@ -339,13 +399,13 @@ def restore_from_cache(cache_dir: str, target_dir: str) -> str:
     shutil.copytree(
         cache_path, target_path,
         dirs_exist_ok=True,
-        ignore=shutil.ignore_patterns(_META_FILENAME),
+        ignore=shutil.ignore_patterns(_META_FILENAME + "*"),
     )
 
-    with open(cache_path / _META_FILENAME, "r", encoding="utf-8") as f:
-        meta = json.load(f)
-
-    qc_name = meta.get("qc_filename")
+    qc_name = None
+    if _meta_path(cache_path).is_file():     # temp-папка Crowbar приходит без meta
+        with open(_meta_path(cache_path), "r", encoding="utf-8") as f:
+            qc_name = json.load(f).get("qc_filename")
     if qc_name and (target_path / qc_name).exists():
         return str(target_path / qc_name)
 
@@ -359,34 +419,23 @@ def restore_from_cache(cache_dir: str, target_dir: str) -> str:
 def find_cached_qc_for_weapon(weapon_key: str) -> Optional[str]:
     """
     Ищет в кэше декомпиляции QC-файл для любого варианта weapon_key
-    (не требует знать точный vpk_path или mdl_rel_path).
+    (не требует знать точный vpk_path или mdl_rel_path)
 
-    Используется, например, при извлечении текстуры шапки — чтобы
+    Используется, например, при извлечении текстуры шапки - чтобы
     узнать реальное имя текстуры из $texturegroup, а не угадывать его
-    по имени MDL-файла.
+    по имени MDL-файла
 
     Returns:
-        Полный путь к QC-файлу или None если кэша нет.
+        Полный путь к QC-файлу или None если кэша нет
     """
     try:
-        cache_dir = get_cache_dir()
-        for entry in cache_dir.iterdir():
-            if not entry.is_dir():
-                continue
-            meta_file = _meta_path(entry)
-            if not meta_file.exists():
-                continue
-            try:
-                with open(meta_file, "r", encoding="utf-8") as f:
-                    meta = json.load(f)
-            except Exception:
-                continue
+        for entry, meta in _entries():
             if meta.get("weapon_key") != weapon_key:
                 continue
             if meta.get("version") != _CACHE_VERSION:
                 continue
-            # Запись от старой версии VPK (игра обновилась) → пропускаем,
-            # иначе вернём устаревший QC.
+            # Запись от старой версии VPK (игра обновилась) -> пропускаем,
+            # иначе вернём устаревший QC
             stored_vpk = meta.get("vpk_path", "")
             if stored_vpk and meta.get("vpk_mtime", "") != _vpk_mtime(stored_vpk):
                 logger.debug(f"Кэш QC для {weapon_key} устарел (VPK обновился), пропускаем")
@@ -405,33 +454,24 @@ def find_cached_qc_for_weapon(weapon_key: str) -> Optional[str]:
 
 def clear_cache(weapon_key: Optional[str] = None) -> int:
     """
-    Очищает кэш.
+    Очищает кэш
 
     Args:
-        weapon_key: Если указан — только для этого оружия. None — весь кэш.
+        weapon_key: Если указан - только для этого оружия. None - весь кэш
 
     Returns:
-        Количество удалённых записей.
+        Количество удалённых записей
     """
     cache_dir = get_cache_dir()
     count = 0
     try:
-        for entry in cache_dir.iterdir():
-            if not entry.is_dir():
-                continue
-            if weapon_key is not None:
-                meta_file = _meta_path(entry)
-                if meta_file.exists():
-                    try:
-                        with open(meta_file, "r", encoding="utf-8") as f:
-                            meta = json.load(f)
-                        if meta.get("weapon_key") != weapon_key:
-                            continue
-                    except Exception:
-                        pass
-                else:
-                    continue
-            shutil.rmtree(entry, ignore_errors=True)
+        if weapon_key is None:
+            targets = [e for e in cache_dir.iterdir() if e.is_dir()]
+        else:
+            targets = [e for e, meta in _entries(cache_dir)
+                       if meta.get("weapon_key") == weapon_key]
+        for entry in targets:
+            _remove_entry(entry)
             count += 1
     except Exception as e:
         logger.warning(f"Ошибка при очистке кэша: {e}")
@@ -439,7 +479,7 @@ def clear_cache(weapon_key: Optional[str] = None) -> int:
 
 
 def get_cache_size_mb() -> float:
-    """Размер кэша в МБ."""
+    """Размер кэша в МБ"""
     try:
         total = sum(
             f.stat().st_size

@@ -1,11 +1,11 @@
 """
-Регрессия JS-движка превью (engine.js) через Node.
+Регрессия JS-движка превью (engine.js) через Node
 
-Движок — ~1200 строк портированной логики Source; ошибки в нём не видны
+Движок - ~1200 строк портированной логики Source; ошибки в нём не видны
 глазами (эффект просто выглядит «не так, как в игре»). Здесь проверяются
-инварианты операторов, на которых мы уже обжигались.
+инварианты операторов, на которых мы уже обжигались
 
-Тест пропускается, если node недоступен.
+Тест пропускается, если node недоступен
 """
 
 import json
@@ -23,7 +23,7 @@ pytestmark = pytest.mark.skipif(
 
 
 def _run_js(body: str) -> dict:
-    """Выполняет фрагмент в Node с импортом движка, возвращает JSON-результат."""
+    """Выполняет фрагмент в Node с импортом движка, возвращает JSON-результат"""
     script = f"""
 import {{ ParticleSystemInstance }} from {ENGINE.as_uri()!r};
 
@@ -85,7 +85,7 @@ console.log(JSON.stringify(result));
 
 
 #: Осциллятор с параметрами, как в стоковых эффектах Valve: окно задано
-#: долей жизни через «start/end proportional», а «proportional 0/1» = false.
+#: долей жизни через «start/end proportional», а «proportional 0/1» = false
 _OSC = """
   const osc = (field, rate) => ({
     functionName: 'Oscillate Vector',
@@ -108,9 +108,9 @@ _OSC = """
 
 
 def test_oscillate_vector_moves_position():
-    """Поле 0 — позиция; окно берётся из «start/end proportional» (доля
+    """Поле 0 - позиция, окно берётся из «start/end proportional» (доля
     жизни), а не из «proportional 0/1» (иначе осцилляция обрывалась через
-    секунду и в превью выглядела как отсутствующая)."""
+    секунду и в превью выглядела как отсутствующая)"""
     res = _run_js(_OSC + """
       const s = spanOf(mkSystem([osc(0, 25)]), p => p.pos[0]);
       const t0 = firstChangeTime(mkSystem([osc(0, 25)]), p => p.pos[0]);
@@ -122,8 +122,8 @@ def test_oscillate_vector_moves_position():
 
 
 def test_oscillate_vector_scalar_field():
-    """Поле 4 (вращение) — 285 стоковых модулей; раньше такой оператор
-    молча не делал ничего."""
+    """Поле 4 (вращение) - 285 стоковых модулей, оператор обязан на нём
+    что-то делать"""
     res = _run_js(_OSC + """
       const s = spanOf(mkSystem([osc(4, 6)]), p => p.rotation);
       return { span: s.span };
@@ -133,7 +133,7 @@ def test_oscillate_vector_scalar_field():
 
 def test_oscillate_vector_respects_window_end():
     """За пределами окна оператор молчит: с end=0.5 доли жизни движение
-    во второй половине жизни прекращается."""
+    во второй половине жизни прекращается"""
     res = _run_js(_OSC + """
       const half = osc(0, 25);
       half.attrs['end time min'] = {t:'float', v:0.5};
@@ -149,9 +149,9 @@ def test_oscillate_vector_respects_window_end():
 
 def test_sheet_animation_fit_lifetime():
     """Sheet-анимация (много кадров в одной секвенции) с
-    animation_fit_lifetime растягивается на всю жизнь частицы; без флага и
+    animation_fit_lifetime растягивается на всю жизнь частицы, без флага и
     при rate=1 длинная анимация почти стоит (кадр 0). Реальный кейс:
-    workshop animated_vortex_energy — 30 кадров, particle живёт секунды."""
+    workshop animated_vortex_energy - 30 кадров, particle живёт секунды"""
     build = """
       const frames = [];
       for (let i = 0; i < 30; i++)
@@ -200,17 +200,17 @@ def test_sheet_animation_fit_lifetime():
     assert res["fit_start"] < 5, res
     assert res["fit_mid"] > 10, res
     assert res["fit_end"] > 25, res
-    # rate=1 без флага fps — ЦИКЛ в секунду: за 0.5 c уже середина листа
+    # rate=1 без флага fps - ЦИКЛ в секунду: за 0.5 c уже середина листа
     assert res["loops_mid"] > 10, res
-    # rate=1 С флагом fps — 1 КАДР в секунду: за 1.9 c почти стоит
+    # rate=1 С флагом fps - 1 КАДР в секунду: за 1.9 c почти стоит
     assert res["fps1_end"] <= 2, res
 
 
 def test_rotation_orient_to_2d_direction_world_plane():
     """Оператор ориентирует в ГОРИЗОНТАЛЬНОЙ ПЛОСКОСТИ МИРА (стороны света),
-    без камеры — подтверждено вики Valve и официальным редактором. Реальный
+    без камеры - подтверждено вики Valve и официальным редактором. Реальный
     инцидент: бабочки с ним летали «боком» в игре, а превью (экранная
-    версия) показывало красиво — превью врало."""
+    версия) показывало красиво - превью врало"""
     res = _run_js("""
       const mk = (vel, offsetDeg, strength) => {
         const def = {
@@ -242,19 +242,19 @@ def test_rotation_orient_to_2d_direction_world_plane():
       };
       // Скорость задаётся в локальной системе CP (x*Forward - y*Right + z*Up
       // при базисе по умолчанию Forward=(0,1,0), Right=(1,0,0)), поэтому
-      // мировой +X — это локальное (0,-200,0), а мировой +Y — (200,0,0)
+      // мировой +X - это локальное (0,-200,0), а мировой +Y - (200,0,0)
       return {
         plusX: mk([0,-200,0], 0, 1),         // atan2(0,+)=0
         plusY: mk([200,0,0], 0, 1),          // atan2(+,0)=PI/2
         plusX_off90: mk([0,-200,0], 90, 1),  // 0 + 90°
-        pureZ: mk([0,0,200], 0, 1),          // вертикально — XY вырожден
-        zeroStrength: mk([0,-200,0], 90, 0), // strength 0 — не трогает
+        pureZ: mk([0,0,200], 0, 1),          // вертикально - XY вырожден
+        zeroStrength: mk([0,-200,0], 90, 0), // strength 0 - не трогает
       };
     """)
     PI = 3.14159265
-    # Курс +X даёт 180°, +Y — 270° (симуляция Valve через ParticleOracle:
+    # Курс +X даёт 180°, +Y - 270° (симуляция Valve через ParticleOracle:
     # atan2 от обратного вектора), смещение прибавляется как есть. Углы
-    # сравниваем по модулю 2π.
+    # сравниваем по модулю 2π
     ang = lambda a, b: abs((a - b + PI) % (2 * PI) - PI)
     assert ang(res["plusX"], PI) < 1e-3, res
     assert ang(res["plusY"], 3 * PI / 2) < 1e-3, res
@@ -265,10 +265,10 @@ def test_rotation_orient_to_2d_direction_world_plane():
 
 
 def test_render_screen_velocity_rotate_marks_sprites():
-    """Разворот по скорости НА ЭКРАНЕ — отдельный РЕНДЕРЕР (так делают
+    """Разворот по скорости НА ЭКРАНЕ - отдельный РЕНДЕРЕР (так делают
     стоковые пауки/призраки: он ставится вторым рядом с
     render_animated_sprites). Движок помечает спрайты: vel + forward_angle;
-    экранный угол досчитывает рендер."""
+    экранный угол досчитывает рендер"""
     res = _run_js("""
       const def = {
         name: 'fx',
@@ -315,8 +315,8 @@ def test_render_screen_velocity_rotate_marks_sprites():
 
 def test_oscillate_position_feeds_velocity():
     """Oscillate Vector на поле позиции (field 0) в интеграторе Верле
-    подмешивается в скорость — частица разгоняется и дёргается, как в
-    игре (бабочки). Раньше компенсация prevPos гасила это в гладкий дрейф."""
+    подмешивается в скорость - частица разгоняется и дёргается, как в
+    игре (бабочки), а не гасится компенсацией prevPos в гладкий дрейф"""
     res = _run_js("""
       const mk = (osc) => {
         const ops = [{functionName:'Movement Basic',
@@ -358,18 +358,18 @@ def test_oscillate_position_feeds_velocity():
       };
       return { withOsc: maxSpeed(mk(true)), noOsc: maxSpeed(mk(false)) };
     """)
-    # без осциллятора частица стоит (нет начальной скорости) → ~0
+    # без осциллятора частица стоит (нет начальной скорости) -> ~0
     assert res["noOsc"] < 1, res
-    # осциллятор позиции разгоняет — скорость заметно ненулевая
+    # осциллятор позиции разгоняет - скорость заметно ненулевая
     assert res["withOsc"] > 20, res
 
 
 def test_oscillate_proportional_default_accelerates():
     """«proportional 0/1» по умолчанию ИСТИНА (как в Source и стоковых
     модулях): фаза синуса идёт от доли жизни, за жизнь проходит всего
-    mult*freq — знак не меняется, и оператор гонит частицу в одну сторону.
-    Раньше движок всегда считал фазу от абсолютного времени: в превью был
-    аккуратный трепет, а в игре частицы разлетались."""
+    mult*freq - знак не меняется, и оператор гонит частицу в одну сторону.
+    От абсолютного времени фазу считать нельзя: в превью был бы аккуратный
+    трепет, а в игре частицы разлетаются"""
     res = _run_js("""
       const mk = (proportional) => {
         const osc = {functionName:'Oscillate Vector', attrs:{
@@ -396,16 +396,16 @@ def test_oscillate_proportional_default_accelerates():
       };
       return { def: dist(mk(null)), off: dist(mk(false)) };
     """)
-    # атрибут не задан → как в игре: снос на сотни юнитов за 3 с
+    # атрибут не задан -> как в игре: снос на сотни юнитов за 3 с
     assert res["def"] > 100, res
-    # proportional=0 — настоящее колебание вокруг старта
+    # proportional=0 - настоящее колебание вокруг старта
     assert res["off"] < res["def"] / 4, res
 
 
 def test_movement_drag_is_framerate_independent():
-    """drag в PCF — доля, теряемая за 1/30 c (ExponentialDecay в
+    """drag в PCF - доля, теряемая за 1/30 c (ExponentialDecay в
     C_OP_BasicMovement), а не за кадр: за одинаковое время скорость должна
-    падать одинаково при любом FPS."""
+    падать одинаково при любом FPS"""
     res = _run_js("""
       const speedAfter = (fps) => {
         const sys = mkSystem([
@@ -421,14 +421,14 @@ def test_movement_drag_is_framerate_independent():
       return { f60: speedAfter(60), f240: speedAfter(240) };
     """)
     assert abs(res["f60"] - res["f240"]) < 0.05 * res["f60"], res
-    # (1-0.2)^30 за секунду ≈ 0.12 % от старта — скорость почти погашена
+    # (1-0.2)^30 за секунду ≈ 0.12 % от старта - скорость почти погашена
     assert res["f60"] < 1, res
 
 
 def test_fade_out_starts_near_end_of_life():
-    """C_OP_FadeOut: «fade out time» — ДЛИТЕЛЬНОСТЬ угасания перед смертью,
+    """C_OP_FadeOut: «fade out time» - ДЛИТЕЛЬНОСТЬ угасания перед смертью,
     а не момент старта. При 0.25 частица должна быть полностью видимой на
-    середине жизни и гаснуть только в последней четверти."""
+    середине жизни и гаснуть только в последней четверти"""
     res = _run_js("""
       const op = {functionName:'Alpha Fade Out Random', attrs:{
         'fade out time min':{t:'float', v:0.25},
@@ -447,15 +447,15 @@ def test_fade_out_starts_near_end_of_life():
       }
       return at;
     """)
-    assert abs(res["mid"] - 1.0) < 1e-6, res          # 50% жизни — непрозрачна
-    assert abs(res["beforeFade"] - 1.0) < 1e-6, res  # 70% — угасание ещё не началось
-    assert 0.2 < res["late"] < 0.5, res               # 90% — примерно наполовину
+    assert abs(res["mid"] - 1.0) < 1e-6, res          # 50% жизни - непрозрачна
+    assert abs(res["beforeFade"] - 1.0) < 1e-6, res  # 70% - угасание ещё не началось
+    assert 0.2 < res["late"] < 0.5, res               # 90% - примерно наполовину
 
 
 def test_velocity_random_reads_random_speed_and_cp_axes():
     """C_INIT_VelocityRandom: параметры зовутся random_speed_*, а локальная
     скорость раскладывается по базису CP (x*Forward - y*Right + z*Up).
-    Раньше движок читал несуществующие speed_* и клал локальные оси как мировые."""
+    Не speed_*, и локальные оси не мировые"""
     res = _run_js("""
       const mk = (attrs) => {
         const sys = mkSystem([{functionName:'Movement Basic',
@@ -496,16 +496,16 @@ def test_velocity_random_reads_random_speed_and_cp_axes():
     """)
     # локальный +X (Forward) = мировой +Y
     assert res["local"][1] > 90 and abs(res["local"][0]) < 1e-6, res
-    # random_speed — покомпонентный вектор в кубе: при min=max=100 это (100,100,100)
+    # random_speed - покомпонентный вектор в кубе: при min=max=100 это (100,100,100)
     assert all(v > 90 for v in res["randSpeed"]), res
-    # старые имена атрибутов у этого модуля не существуют — движения быть не должно
+    # старые имена атрибутов у этого модуля не существуют - движения быть не должно
     assert all(abs(v) < 1e-6 for v in res["oldNames"]), res
 
 
 def test_spin_roll_matches_engine_rate():
-    """CGeneralSpin: drot = dt * |градусы * (PI/180) * 2PI| — реальная
-    скорость в 2PI раз больше «градусов в секунду». Плюс spin_stop_time —
-    доля жизни с линейным замедлением, а не секунды с обрывом."""
+    """CGeneralSpin: drot = dt * |градусы * (PI/180) * 2PI| - реальная
+    скорость в 2PI раз больше «градусов в секунду». Плюс spin_stop_time -
+    доля жизни с линейным замедлением, а не секунды с обрывом"""
     res = _run_js("""
       const spin = (extra) => {
         const attrs = {'spin_rate_degrees':{t:'float', v:10}};
@@ -532,7 +532,7 @@ def test_spin_roll_matches_engine_rate():
 def test_position_lock_fades_out_with_age():
     """C_OP_PositionLock: привязка к CP ослабевает между start_fadeout и
     end_fadeout (доли жизни) и после end_fadeout исчезает совсем. По
-    умолчанию (оба = 1) частица держится за CP всю жизнь."""
+    умолчанию (оба = 1) частица держится за CP всю жизнь"""
     res = _run_js("""
       const run = (extra) => {
         const attrs = {'control_point_number':{t:'integer', v:0}};
@@ -570,10 +570,10 @@ def test_position_lock_fades_out_with_age():
 
 
 def test_position_lock_without_fade_outlives_lifetime():
-    """Окно спада целиком за концом жизни (все четыре >= 1) — «без спада»:
+    """Окно спада целиком за концом жизни (все четыре >= 1) - «без спада»:
     у Valve (probe_lock_overlife) такая привязка держит и частицу старше
     своей жизни. Якорь анюжуала шапки (lifetime 1, без Lifespan Decay) живёт
-    вечно и должен ехать за головой, а не отваливаться через секунду."""
+    вечно и должен ехать за головой, а не отваливаться через секунду"""
     res = _run_js("""
       const sys = mkSystem([
         {functionName:'Movement Basic', attrs:{drag:{t:'float', v:0}}},
@@ -581,7 +581,7 @@ def test_position_lock_without_fade_outlives_lifetime():
          attrs:{'control_point_number':{t:'integer', v:0}}}], 1);
       // Без Lifespan Decay: как у unusual_butterfly_move_blue
       sys.operators = sys.operators.filter(o => o.mod.functionName !== 'Lifespan Decay');
-      for (let i = 0; i < 30; i++) {      // 3 c — втрое дольше жизни
+      for (let i = 0; i < 30; i++) {      // 3 c - втрое дольше жизни
         sys.controller.controlPoints[0] = [i * 10, 0, 0];
         sys.movement(0.1);
       }
@@ -594,7 +594,7 @@ def test_position_lock_without_fade_outlives_lifetime():
 def test_operator_fade_envelope_gates_operator():
     """CheckIfOperatorShouldRun: при нулевой силе оператор не запускается
     вовсе. Movement Basic с «operator end fadeout» = 1 после первой секунды
-    жизни системы перестаёт двигать частицы — позиция замирает."""
+    жизни системы перестаёт двигать частицы - позиция замирает"""
     res = _run_js("""
       const run = (extra) => {
         const attrs = {drag:{t:'float', v:0}, gravity:{t:'vec3', v:[0,0,0]}};
@@ -641,7 +641,7 @@ def test_operator_fade_envelope_gates_operator():
 def test_emitter_fade_envelope_scales_rate():
     """Эмиттер получает ту же силу: flEmissionRate *= strength. При линейном
     fadein за 2 c за первую секунду должно родиться примерно вчетверо меньше
-    частиц (площадь под треугольником)."""
+    частиц (площадь под треугольником)"""
     res = _run_js("""
       const run = (extra) => {
         const attrs = {emission_rate:{t:'float', v:100}};
@@ -673,8 +673,8 @@ def test_emitter_fade_envelope_scales_rate():
 def test_control_point_orientation_drives_local_axes():
     """Локальные системы координат берут базис CP: скорость Velocity Random
     ложится по Forward, а «bias in local system» разворачивает и позицию.
-    Базис приходит снаружи (controlPointBases) — туда же будет писать
-    привязка к attachment модели."""
+    Базис приходит снаружи (controlPointBases) - туда же будет писать
+    привязка к attachment модели"""
     res = _run_js("""
       // CP повёрнут: Forward=+Z, Right=+X, Up=-Y
       const basis = {fwd:[0,0,1], right:[1,0,0], up:[0,-1,0]};
@@ -730,9 +730,9 @@ def test_control_point_orientation_drives_local_axes():
 
 def test_oriented_sprites_get_plane_axes_from_cp():
     """orientation_type 2/3 с «orientation control point» кладут спрайт в
-    плоскость базиса CP: ось right спрайта — это Forward контрол-пойнта,
-    ось up — его Right (в Source имена перепутаны). Без CP осей нет — рендер
-    рисует прежнюю плоскость мира."""
+    плоскость базиса CP: ось right спрайта - это Forward контрол-пойнта,
+    ось up - его Right (в Source имена перепутаны). Без CP осей нет - рендер
+    рисует прежнюю плоскость мира"""
     res = _run_js("""
       const run = (orientType, orientCP) => {
         const def = {
@@ -771,8 +771,8 @@ def test_oriented_sprites_get_plane_axes_from_cp():
 
 def test_position_offset_respects_local_space_flag():
     """«offset in local space 0/1» поворачивает смещение матрицей CP. Флаг
-    игнорировался, и точка спавна в превью уезжала относительно игры —
-    у эффектов на оружии это сразу видно."""
+    игнорировался, и точка спавна в превью уезжала относительно игры -
+    у эффектов на оружии это сразу видно"""
     res = _run_js("""
       const run = (local, bases) => {
         const def = {
@@ -813,7 +813,7 @@ def test_gif_sheet_animates_without_animated_sprites(tmp_path):
     """Гифка, положенная как текстура партикла, анимируется в превью даже у
     системы с обычным render_sprites: sheet-данные из _gif_to_sheet движок
     крутит на дефолтном rate (1 цикл/сек). Проверяется именно тот JSON,
-    который отдаёт Python — формат листа легко разъехаться с движком."""
+    который отдаёт Python - формат листа легко разъехаться с движком"""
     pytest.importorskip("PIL")
     from PIL import Image
 
@@ -853,16 +853,16 @@ def test_gif_sheet_animates_without_animated_sprites(tmp_path):
       return { f0: cellAt(0.05), f1: cellAt(0.5), f2: cellAt(0.9) };
     """)
 
-    # Кадр занимает четверть листа (сетка 2x2) — масштаб UV 0.5 на кадре
+    # Кадр занимает четверть листа (сетка 2x2) - масштаб UV 0.5 на кадре
     assert res["f0"][:2] == [0.5, 0.5], res
-    # Смещение кадра меняется во времени: (0,0) → (0.5,0) → (0,0.5)
+    # Смещение кадра меняется во времени: (0,0) -> (0.5,0) -> (0,0.5)
     assert res["f0"][2:] == [0.0, 0.0], res
     assert res["f1"][2:] == [0.5, 0.0], res
     assert res["f2"][2:] == [0.0, 0.5], res
 
 
 #: Голое определение системы: только то, что задаёт тест. Нужен там, где
-#: mkSystem не подходит — свои атрибуты системы или свой набор модулей.
+#: mkSystem не подходит - свои атрибуты системы или свой набор модулей
 _BARE = """
   const bare = (over = {}) => {
     const def = {
@@ -887,7 +887,7 @@ _BARE = """
 
 def test_sphere_distance_bias_absolute_value():
     """distance_bias_absolute_value складывает полусферу (fabs у Valve).
-    В стоке так сделаны 195 систем — раньше они разлетались полным шаром."""
+    В стоке так сделаны 195 систем, и полным шаром они не разлетаются"""
     res = _run_js(_BARE + """
       const run = (abs) => {
         const s = bare({initializers: [
@@ -911,8 +911,8 @@ def test_sphere_distance_bias_absolute_value():
 
 
 def test_sphere_distance_distribution_matches_unit_sphere():
-    """Дистанция — длина точки, равномерной по объёму шара (CDF r³):
-    внутри половины радиуса должно оказаться ~12.5% частиц."""
+    """Дистанция - длина точки, равномерной по объёму шара (CDF r³):
+    внутри половины радиуса должно оказаться ~12.5% частиц"""
     res = _run_js(_BARE + """
       const s = bare({initializers: [
         {functionName:'Position Within Sphere Random',
@@ -930,8 +930,8 @@ def test_sphere_distance_distribution_matches_unit_sphere():
 
 
 def test_remap_control_point_to_scalar_axis_name():
-    """Ось берётся из 'input field 0-2 X/Y/Z' — короткого 'input field'
-    у этого модуля в файлах игры нет, и ось всегда читалась как X."""
+    """Ось берётся из 'input field 0-2 X/Y/Z' - короткого 'input field'
+    у этого модуля в файлах игры нет, и ось всегда читалась как X"""
     res = _run_js(_BARE + """
       const s = bare({
         cps: [[0,0,0],[0,0,50]],
@@ -951,8 +951,8 @@ def test_remap_control_point_to_scalar_axis_name():
 
 
 def test_remap_noise_to_scalar_invert_absolute_value():
-    """Флаг называется 'invert absolute value' (сокращённое имя — у
-    векторного Velocity Noise), иначе переключатель ничего не делал."""
+    """Флаг называется 'invert absolute value' (сокращённое имя - у
+    векторного Velocity Noise), иначе переключатель ничего не делал"""
     res = _run_js(_BARE + """
       const run = (inv) => {
         const s = bare({initializers: [
@@ -974,8 +974,8 @@ def test_remap_noise_to_scalar_invert_absolute_value():
 
 
 def test_initial_particles_spawn_without_emitter():
-    """initial_particles — стартовый залп самой системы (591 стоковая
-    система); эмиттера при этом может не быть вовсе."""
+    """initial_particles - стартовый залп самой системы (591 стоковая
+    система), эмиттера при этом может не быть вовсе"""
     res = _run_js(_BARE + """
       const s = bare({emitters: [], initializers: [lifetime(10)],
                       attrs: { initial_particles: {t:'integer', v:7} }});
@@ -990,8 +990,8 @@ def test_initial_particles_spawn_without_emitter():
 
 def test_maximum_time_step_substeps_simulation():
     """Большой шаг режется на куски по 'maximum time step' (в игре дефолт
-    0.1), но не больше десяти — как у Valve: время не теряется, пока кусков
-    хватает, а при dt 0.25 и шаге 0.02 продвигается лишь на 0.2."""
+    0.1), но не больше десяти - как у Valve: время не теряется, пока кусков
+    хватает, а при dt 0.25 и шаге 0.02 продвигается лишь на 0.2"""
     res = _run_js(_BARE + """
       const s = bare({attrs: { 'maximum time step': {t:'float', v:0.05} }});
       s.movement(0.25);
@@ -1010,7 +1010,7 @@ def test_maximum_time_step_substeps_simulation():
 def test_velocity_noise_local_space():
     """'apply velocity in local space' раскладывает скорость по осям CP
     (164 стоковых модуля): на повёрнутом CP тот же шум толкает в другую
-    сторону мира."""
+    сторону мира"""
     res = _run_js(_BARE + """
       const noise = (local) => ({functionName:'Velocity Noise', attrs:{
         'output minimum':{t:'vec3', v:[0,0,50]},
@@ -1040,7 +1040,7 @@ def test_velocity_noise_local_space():
 
 def test_lock_rotation_carries_particles_around_cp():
     """«lock rotation» тянет частицы и за поворотом контрольной точки
-    (1645 стоковых модулей): без него аура на вращающемся CP стояла."""
+    (1645 стоковых модулей): без него аура на вращающемся CP стояла"""
     res = _run_js(_BARE + """
       const run = (lock) => {
         const s = bare({
@@ -1071,7 +1071,7 @@ def test_lock_rotation_carries_particles_around_cp():
     """)
     bx, by = res["locked"]["before"][0], res["locked"]["before"][1]
     ax, ay = res["locked"]["after"][0], res["locked"]["after"][1]
-    # Поворот на 90° вокруг Z: (x, y) → (-y, x)
+    # Поворот на 90° вокруг Z: (x, y) -> (-y, x)
     assert abs(ax + by) < 1e-6 and abs(ay - bx) < 1e-6, res["locked"]
     # Без флага частица остаётся на месте
     assert res["free"]["before"] == res["free"]["after"], res["free"]
@@ -1079,7 +1079,7 @@ def test_lock_rotation_carries_particles_around_cp():
 
 def test_instantaneous_emitter_respects_max_per_frame():
     """«maximum emission per frame» размазывает залп по кадрам (452 стоковых
-    эмиттера); -1 означает «весь залп сразу»."""
+    эмиттера); -1 означает «весь залп сразу»"""
     res = _run_js(_BARE + """
       const run = (perFrame) => {
         const s = bare({
@@ -1098,7 +1098,7 @@ def test_instantaneous_emitter_respects_max_per_frame():
 
 
 def test_child_control_points_respect_group_id():
-    """Оператор адресует детей своей группы, а не всех подряд."""
+    """Оператор адресует детей своей группы, а не всех подряд"""
     res = _run_js("""
       const child = (name, groupId) => ({
         name: name,
@@ -1132,13 +1132,13 @@ def test_child_control_points_respect_group_id():
       for (const c of sys.children) byName[c.name] = Object.keys(c.cpOverrides).length;
       return byName;
     """)
-    assert res["b"] == 2, res      # группа 1 — адресована
-    assert res["a"] == 0, res      # группа 0 — не тронута
+    assert res["b"] == 2, res      # группа 1 - адресована
+    assert res["a"] == 0, res      # группа 0 - не тронута
 
 
 def test_renderer_envelope_gates_drawing():
     """У рендерера та же огибающая, что у операторов: при нулевой силе
-    Source его не запускает и частицы не рисуются."""
+    Source его не запускает и частицы не рисуются"""
     res = _run_js(_BARE + """
       const s = bare({initializers: [
         {functionName:'Position Within Sphere Random', attrs:{}}, lifetime(10)]});
@@ -1159,9 +1159,9 @@ def test_renderer_envelope_gates_drawing():
 
 def test_first_position_initializer_wins():
     """Source пропускает второй инициализатор того же атрибута
-    (InitMultipleOverride): сфера в нуле, а за ней бокс в (10,10,10) —
+    (InitMultipleOverride): сфера в нуле, а за ней бокс в (10,10,10) -
     частица остаётся в нуле. Модификаторы (offset) правят поверх.
-    Снято с симуляции Valve через particles.lib (ParticleOracle)."""
+    Снято с симуляции Valve через particles.lib (ParticleOracle)"""
     res = _run_js("""
       const sys = mkSystem([]);
       sys.def.initializers.push(
@@ -1180,7 +1180,7 @@ def test_first_position_initializer_wins():
 
 def test_twist_force_direction_matches_valve():
     """Отрицательная сила с осью Z крутит частицу на +X в сторону +Y
-    (r × axis), не -Y. Направление снято с симуляции Valve."""
+    (r × axis), не -Y. Направление снято с симуляции Valve"""
     res = _run_js("""
       const sys = mkSystem([{functionName:'Movement Basic', attrs:{}}]);
       sys.def.initializers.push({functionName:'Position Modify Offset Random',
@@ -1197,7 +1197,7 @@ def test_twist_force_direction_matches_valve():
 def test_parent_scaled_emission_multiplies_by_parent_count():
     """emit_continuously с «use parent particles for emission scaling»:
     темп = rate × число частиц родителя × «scale emission to used control
-    points», умолчание множителя — ноль (симуляция Valve)."""
+    points», умолчание множителя - ноль (симуляция Valve)"""
     res = _run_js("""
       const child = (scale) => ({
         name: 'kid',
@@ -1220,7 +1220,7 @@ def test_parent_scaled_emission_multiplies_by_parent_count():
       };
       return {none: run(null), one: run(1.0), half: run(0.5)};
     """)
-    # родитель — 4 частицы: 100/с × 4 × scale за секунду
+    # родитель - 4 частицы: 100/с × 4 × scale за секунду
     assert res["none"] == 0, res
     assert 380 <= res["one"] <= 400, res
     assert 190 <= res["half"] <= 200, res
@@ -1229,7 +1229,7 @@ def test_parent_scaled_emission_multiplies_by_parent_count():
 def test_maintain_position_along_path_is_a_chain():
     """Цепочка seamine: каждый кадр частицы сажаются на кривую между двумя
     точками (снято с particles.lib оракулом). Счётчик доли НЕ сбрасывается
-    между кадрами, при loop после единицы идёт ноль."""
+    между кадрами, при loop после единицы идёт ноль"""
     res = _run_js(_BARE + """
       const s = bare({
         cps: [[0,0,0],[0,0,100]],
@@ -1257,7 +1257,7 @@ def test_maintain_position_along_path_is_a_chain():
 
 def test_remap_to_alpha_clamps_the_output_range():
     """«output maximum 100» на альфе у Valve означает 1, а не 100: зажат
-    диапазон выхода, не результат (0..25 у seamine даёт альфу 0..1 линейно)."""
+    диапазон выхода, не результат (0..25 у seamine даёт альфу 0..1 линейно)"""
     res = _run_js(_BARE + """
       const s = bare({
         cps: [[0,0,0],[0,0,100]],
@@ -1281,9 +1281,9 @@ def test_remap_to_alpha_clamps_the_output_range():
 
 
 def test_slow_emitter_births_in_the_past():
-    """0.325/с у seamine: рождение — в момент пересечения счётчиком целого, а
+    """0.325/с у seamine: рождение - в момент пересечения счётчиком целого, а
     не «начало кадра + 1/rate» (три секунды в будущем: отрицательный возраст
-    держал 0.1-секундную вспышку три секунды, а её дети плодились)."""
+    держал 0.1-секундную вспышку три секунды, а её дети плодились)"""
     res = _run_js(_BARE + """
       const s = bare({
         emitters: [{functionName:'emit_continuously',
@@ -1299,4 +1299,4 @@ def test_slow_emitter_births_in_the_past():
       return { born, seenAt, alive };
     """)
     assert res["born"] <= res["seenAt"] + 1e-6, res
-    assert res["alive"] <= 8, res          # две вспышки по 0.1 с — по 3-4 кадра, не 90
+    assert res["alive"] <= 8, res          # две вспышки по 0.1 с - по 3-4 кадра, не 90

@@ -1,4 +1,4 @@
-"""Инструменты: библиотека модов, извлечение, экспорт, объединение VPK."""
+"""Инструменты: библиотека модов, извлечение, экспорт, объединение VPK"""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ from src.app.api._common import _lang, endpoint
 
 @endpoint
 def mod_library() -> List[dict]:
-    """Что лежит в библиотеке модов (новые сверху)."""
+    """Что лежит в библиотеке модов (новые сверху)"""
     from src.services import mod_library_service
     return mod_library_service.items()
 
@@ -17,10 +17,10 @@ def mod_library() -> List[dict]:
 @endpoint
 def mod_icon(name: str = '') -> Dict[str, object]:
     """
-    Обложка мода — его основная текстура, при первом запросе строится.
+    Обложка мода - его основная текстура, при первом запросе строится
 
     Отдельным вызовом, а не в списке: декодировать VTF всей библиотеки ради
-    открытия каталога незачем, а карточки и без обложек показываются сразу.
+    открытия каталога незачем, а карточки и без обложек показываются сразу
     """
     from src.services import mod_library_service
 
@@ -30,7 +30,7 @@ def mod_icon(name: str = '') -> Dict[str, object]:
 
 @endpoint
 def add_mod(path: str = '') -> Dict[str, object]:
-    """Кладёт открытый мод в библиотеку и отдаёт его постоянный путь."""
+    """Кладёт открытый мод в библиотеку и отдаёт его постоянный путь"""
     from src.services import mod_library_service
 
     saved = mod_library_service.add(path)
@@ -41,7 +41,7 @@ def add_mod(path: str = '') -> Dict[str, object]:
 
 @endpoint
 def remove_mod(name: str = '') -> Dict[str, object]:
-    """Удаляет мод из библиотеки. Принимается только ИМЯ файла в ней."""
+    """Удаляет мод из библиотеки. Принимается только ИМЯ файла в ней"""
     from src.services import mod_library_service
 
     if not mod_library_service.remove(name):
@@ -51,7 +51,7 @@ def remove_mod(name: str = '') -> Dict[str, object]:
 
 @endpoint
 def load_vpk_mod(path: str = '', lang: str = '') -> Dict[str, object]:
-    """Показывает чужой мод из VPK: его модель и его текстуры."""
+    """Показывает чужой мод из VPK: его модель и его текстуры"""
     from src.app.session import session
 
     lang = _lang(lang)
@@ -60,7 +60,7 @@ def load_vpk_mod(path: str = '', lang: str = '') -> Dict[str, object]:
 
 @endpoint
 def extract_model(lang: str = '') -> Dict[str, object]:
-    """Декомпилирует модель; список файлов приходит событием extract_files."""
+    """Декомпилирует модель, список файлов приходит событием extract_files"""
     from src.app.session import session
 
     lang = _lang(lang)
@@ -70,7 +70,7 @@ def extract_model(lang: str = '') -> Dict[str, object]:
 @endpoint
 def export_model_files(files: Optional[List[str]] = None,
                        lang: str = '') -> Dict[str, object]:
-    """Сохраняет выбранные файлы модели (пустой список — отказ и уборка)."""
+    """Сохраняет выбранные файлы модели (пустой список - отказ и уборка)"""
     from src.app.session import session
 
     lang = _lang(lang)
@@ -80,7 +80,7 @@ def export_model_files(files: Optional[List[str]] = None,
 @endpoint
 def extract_texture(textures: Optional[List[str]] = None,
                     lang: str = '') -> Dict[str, object]:
-    """Извлекает оригинальные текстуры предмета в папку экспорта."""
+    """Извлекает оригинальные текстуры предмета в папку экспорта"""
     from src.app.session import session
 
     lang = _lang(lang)
@@ -89,7 +89,7 @@ def extract_texture(textures: Optional[List[str]] = None,
 
 @endpoint
 def export_vpks() -> List[str]:
-    """Собранные моды в папке экспорта."""
+    """Собранные моды в папке экспорта"""
     from src.app.session import session
     return session().tools.export_vpks()
 
@@ -97,7 +97,7 @@ def export_vpks() -> List[str]:
 @endpoint
 def merge_vpk(files: Optional[List[str]] = None, name: str = '',
               confirmed: bool = False, lang: str = '') -> Dict[str, object]:
-    """Сливает выбранные моды в один VPK."""
+    """Сливает выбранные моды в один VPK"""
     from src.app.session import session
 
     lang = _lang(lang)
@@ -106,6 +106,6 @@ def merge_vpk(files: Optional[List[str]] = None, name: str = '',
 
 @endpoint
 def export_uv(size: int = 1024) -> Dict[str, object]:
-    """Рисует UV-шаблон модели в папку экспорта. Путь придёт событием."""
+    """Рисует UV-шаблон модели в папку экспорта. Путь придёт событием"""
     from src.app.session import session
     return session().export_uv(size)

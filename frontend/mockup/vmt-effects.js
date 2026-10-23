@@ -1,12 +1,12 @@
 /*
- * «Готовые эффекты» редактора VMT: панель категорий вместо длинного меню.
+ * «Готовые эффекты» редактора VMT: панель категорий вместо длинного меню
  *
  * Слева категории, справа пункты выбранной - высота панели своя, и она не
  * тянется через весь экран, как меню на двадцать пунктов с пояснениями.
  * Эффект с настройками (цвет, сила) открывает форму на месте списка: она
  * заполнена тем, что уже стоит в материале, так что эффект можно
  * перенастроить. Текст эффекта собирает Python (vmt_effects.py) - здесь
- * только выбор значений.
+ * только выбор значений
  *
  * Панель отдаёт выбор, а вставляет его vmt.js: {item} - обычный пункт меню,
  * {text, replace} - готовый текст эффекта.
@@ -17,7 +17,7 @@ import { t } from './i18n.js';
 import { picking } from './picker.js';
 import { openSheenBuilder } from './sheen-builder.js';
 
-//: Свой узор блеска из конструктора: id вида u + 8 hex (sheen_builder.ID_RE).
+//: Свой узор блеска из конструктора: id вида u + 8 hex (sheen_builder.ID_RE)
 const OWN_PATTERN = /^u[0-9a-f]{8}$/;
 
 const panel = document.getElementById('vmt-fx');
@@ -25,14 +25,14 @@ const cats = document.getElementById('vmt-fx-cats');
 const pane = document.getElementById('vmt-fx-pane');
 
 //: Последняя открытая категория: к особым материалам возвращаются чаще, чем
-//: листают всё с начала.
+//: листают всё с начала
 let lastGroup = 0;
-//: Закрыть текущий показ (Promise ждёт выбора).
+//: Закрыть текущий показ (Promise ждёт выбора)
 let finish = null;
-//: Игровой оригинал материала: из него эффект берёт родную текстуру.
+//: Игровой оригинал материала: из него эффект берёт родную текстуру
 let gameText = '';
 
-/** Панель открыта - повторный щелчок по кнопке её закрывает. */
+/** Панель открыта - повторный щелчок по кнопке её закрывает */
 export function closeEffects() {
   if (!finish) return false;
   finish(null);
@@ -49,12 +49,12 @@ export function pickEffect(anchor, data, getText, game = '') {
   return new Promise((resolve) => {
     const onAway = (e) => {
       // Палитра своего цвета - отдельный поповер, но выбор идёт для панели.
-      // И окно конструктора узора блеска: оно поверх панели, но работает на неё.
+      // И окно конструктора узора блеска: оно поверх панели, но работает на неё
       if (e.target.closest && e.target.closest('.picker, #sheenb')) return;
       if (!panel.contains(e.target) && e.target !== anchor) done(null);
     };
     // Esc - только панель: общий Esc закрыл бы и само окно редактора. Пока
-    // открыта палитра, Esc закрывает её одну (picker.js).
+    // открыта палитра, Esc закрывает её одну (picker.js)
     const onKey = (e) => {
       if (e.key !== 'Escape' || picking() || document.getElementById('sheenb')?.open) return;
       e.preventDefault();
@@ -67,7 +67,7 @@ export function pickEffect(anchor, data, getText, game = '') {
       document.removeEventListener('keydown', onKey, true);
       if (panel.matches(':popover-open')) panel.hidePopover();
       panel.hidden = true;
-      // Кнопка выбранного пункта уже вне документа - фокус ушёл бы в body.
+      // Кнопка выбранного пункта уже вне документа - фокус ушёл бы в body
       if (!value) anchor.focus();
       resolve(value);
     };
@@ -86,7 +86,7 @@ export function pickEffect(anchor, data, getText, game = '') {
   });
 }
 
-/** Над кнопкой (она внизу окна), не за краем экрана. */
+/** Над кнопкой (она внизу окна), не за краем экрана */
 function place(anchor) {
   const a = anchor.getBoundingClientRect();
   const box = panel.getBoundingClientRect();
@@ -119,7 +119,7 @@ function showGroup(groups, index, done, getText) {
     const name = document.createElement('span');
     name.className = 'fxpick__name';
     name.textContent = it.label;
-    // Пункт с формой отмечен: щелчок не вставит сразу, а спросит значения.
+    // Пункт с формой отмечен: щелчок не вставит сразу, а спросит значения
     if (it.fields.length) name.append(' ', Object.assign(document.createElement('span'),
       { className: 'fxpick__more', textContent: '›' }));
     const hint = document.createElement('span');
@@ -137,7 +137,7 @@ function showGroup(groups, index, done, getText) {
   pane.scrollTop = 0;
 }
 
-/** Форма эффекта: поля по описанию из Python, значения - из материала. */
+/** Форма эффекта: поля по описанию из Python, значения - из материала */
 async function openForm(item, back, done, getText) {
   let values = {};
   try {
@@ -145,7 +145,7 @@ async function openForm(item, back, done, getText) {
     values = res.values || {};
   } catch { /* не прочиталось - умолчания формы */ }
   // Пока ждали, панель закрыли или открыли заново: форма старого показа в
-  // новую панель не ложится (её `done` - чужой).
+  // новую панель не ложится (её `done` - чужой)
   if (finish !== done) return;
   for (const f of item.fields) if (!(f.key in values)) values[f.key] = f.default;
 
@@ -164,10 +164,10 @@ async function openForm(item, back, done, getText) {
   form.append(head, hint);
 
   // `show_if`: поле видно, пока другие поля имеют указанные значения («Круг
-  // цветов» - только у радуги, плашки - только у одного цвета).
+  // цветов» - только у радуги, плашки - только у одного цвета)
   const rows = [];
   const sync = () => rows.forEach(({ f, row }) => {
-    // «ключ!» - поле видно, пока значение НЕ равно указанному.
+    // «ключ!» - поле видно, пока значение НЕ равно указанному
     row.hidden = !Object.entries(f.show_if || {}).every(([k, v]) => (k.endsWith('!')
       ? values[k.slice(0, -1)] !== v
       : (Array.isArray(v) ? v.includes(values[k]) : values[k] === v)));
@@ -180,7 +180,7 @@ async function openForm(item, back, done, getText) {
   sync();
 
   // Замена всего материала - предупреждение прямо в форме, а не отдельным
-  // окном после выбора: человек видит его до того, как нажмёт.
+  // окном после выбора: человек видит его до того, как нажмёт
   if (item.replace) {
     form.append(Object.assign(document.createElement('p'), {
       className: 'fxpick__note',
@@ -209,12 +209,12 @@ async function openForm(item, back, done, getText) {
 }
 
 /** Одно поле формы. Значение пишется в `values[f.key]` сразу при выборе;
- *  `changed` - пересчитать, какие поля видны. */
+ *  `changed` - пересчитать, какие поля видны */
 function field(f, values, changed = () => {}) {
   const row = document.createElement('div');
   row.className = 'fxpick__field';
   row.dataset.key = f.key;
-  // Без подписи - поле продолжает предыдущее (цвет под «Один цвет / Радуга»).
+  // Без подписи - поле продолжает предыдущее (цвет под «Один цвет / Радуга»)
   if (f.label) {
     row.append(Object.assign(document.createElement('span'),
       { className: 'label fxpick__label', textContent: f.label }));
@@ -224,7 +224,7 @@ function field(f, values, changed = () => {}) {
 
   if (f.type === 'color') {
     // Свой цвет - подписанная кнопка с образцом и кодом, а не ещё один
-    // квадрат после готовых: пунктирный квадрат никто не узнавал как палитру.
+    // квадрат после готовых: пунктирный квадрат никто не узнавал как палитру
     const own = Object.assign(document.createElement('label'), { className: 'fxpick__own' });
     const pick = Object.assign(document.createElement('input'),
       { type: 'color', className: 'parts__color', value: values[f.key] });
@@ -261,7 +261,7 @@ function field(f, values, changed = () => {}) {
     ctl.append(...f.choices.map((c) => tag(c.value, c.label)));
     let syncEdit = () => {};
     if (f.builder) {
-      // Свои узоры из конструктора - следом за готовыми, и сам конструктор.
+      // Свои узоры из конструктора - следом за готовыми, и сам конструктор
       const own = document.createElement('span');
       own.className = 'fxpick__own-patterns';
       const create = Object.assign(document.createElement('button'),
@@ -287,7 +287,7 @@ function field(f, values, changed = () => {}) {
         }
         values[f.key] = res.id;
         values.length = res.length;
-        // Длина прохода из конструктора - и в её ползунок формы.
+        // Длина прохода из конструктора - и в её ползунок формы
         const len = row.parentElement?.querySelector('[data-key="length"] input[type=range]');
         if (len) { len.value = res.length; len.dispatchEvent(new Event('input')); }
         changed();

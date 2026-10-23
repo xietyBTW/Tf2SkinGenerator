@@ -1,16 +1,16 @@
 """
-Геометрия модели прямо из MDL/VVD/VTX — там, где Crowbar её теряет.
+Геометрия модели прямо из MDL/VVD/VTX - там, где Crowbar её теряет
 
 Crowbar 0.68 у меша, разбитого на две strip-группы VTX (флексы + обычная),
 пишет в SMD только первую: у Air Head оставалось 112 треугольников из 1398,
-у Sheriff's Stetson — 478 из 1374, у тела пиромана — четыре. В превью такая
-шапка — чёрная пуговица, а собранный из этого SMD стиль в игре — тоже.
+у Sheriff's Stetson - 478 из 1374, у тела пиромана - четыре. В превью такая
+шапка - чёрная пуговица, а собранный из этого SMD стиль в игре - тоже
 
 Здесь читаются три файла модели (формат v48, без фикс-апов и с ними) и
 отдаются треугольники LOD0 в том же виде, что пишет Crowbar: позиция и
 нормаль в пространстве модели, UV как в VVD, веса костей по номерам костей
 MDL. `repair_smd` дописывает в SMD Crowbar недостающие треугольники, не
-трогая уже записанные — их номера вершин держит VTA флексов.
+трогая уже записанные - их номера вершин держит VTA флексов
 """
 
 from __future__ import annotations
@@ -25,7 +25,7 @@ from src.shared.logging_config import get_logger
 
 logger = get_logger(__name__)
 
-#: mstudiovertex_t: веса (3f) + кости (3B) + число (B) + позиция + нормаль + UV.
+#: mstudiovertex_t: веса (3f) + кости (3B) + число (B) + позиция + нормаль + UV
 _VERT = struct.Struct('<3f3BB3f3f2f')
 _VTX_VERT = struct.Struct('<3BBH3B')          # Vertex_t, 9 байт
 _STRIP = struct.Struct('<iiiihBii')            # StripHeader_t, 27 байт
@@ -42,7 +42,7 @@ class Tri:
 
 @dataclass
 class ModelMesh:
-    """Один `$model`/`studio` — треугольники LOD0 по strip-группам."""
+    """Один `$model`/`studio` - треугольники LOD0 по strip-группам"""
     bodypart: int
     model: int
     name: str
@@ -59,7 +59,7 @@ def _cstr(data: bytes, offset: int) -> str:
 
 
 def _vvd_vertices(vvd: bytes) -> List[tuple]:
-    """Вершины LOD0 с учётом таблицы фикс-апов."""
+    """Вершины LOD0 с учётом таблицы фикс-апов"""
     num_fixups, fixup_start, vert_start = struct.unpack_from('<iii', vvd, 48)
     count = struct.unpack_from('<i', vvd, 16)[0]        # numLODVertexes[0]
     raw = [_VERT.unpack_from(vvd, vert_start + i * _VERT.size)
@@ -76,10 +76,10 @@ def _vvd_vertices(vvd: bytes) -> List[tuple]:
 
 
 def materials(mdl: bytes) -> Tuple[List[str], List[str]]:
-    """(имена материалов как в MDL, пути $cdmaterials) — без Crowbar.
+    """(имена материалов как в MDL, пути $cdmaterials) - без Crowbar
 
-    Имя бывает с путём (у мастерской — models/workshop/…/c_tomislav), путь
-    $cdmaterials — пустым: тогда материал ищется по своему полному имени.
+    Имя бывает с путём (у мастерской - models/workshop/…/c_tomislav), путь
+    $cdmaterials - пустым: тогда материал ищется по своему полному имени
     """
     num_textures, texture_index = struct.unpack_from('<ii', mdl, 204)
     names = [_cstr(mdl, texture_index + i * 64
@@ -92,16 +92,16 @@ def materials(mdl: bytes) -> Tuple[List[str], List[str]]:
 
 
 def _mdl_meshes(mdl: bytes) -> Iterator[Tuple[int, int, str, int, List[Tuple[int, int]]]]:
-    """(bodypart, model, имя модели, первый индекс VVD, [(смещение, материал)…])."""
+    """(bodypart, model, имя модели, первый индекс VVD, [(смещение, материал)…])"""
     num_textures, texture_index = struct.unpack_from('<ii', mdl, 204)
     num_skinref, num_skinfam, skin_index = struct.unpack_from('<iii', mdl, 220)
-    # Имя материала в MDL бывает с путём (у мастерской —
-    # models/workshop/…/dec25_air_head); Crowbar и QC знают его по basename.
+    # Имя материала в MDL бывает с путём (у мастерской -
+    # models/workshop/…/dec25_air_head); Crowbar и QC знают его по basename
     textures = [_cstr(mdl, texture_index + i * 64
                       + struct.unpack_from('<i', mdl, texture_index + i * 64)[0])
                 .replace(chr(92), '/').rsplit('/', 1)[-1]
                 for i in range(num_textures)]
-    # Материал меша — номер в skin-таблице, а не в списке текстур.
+    # Материал меша - номер в skin-таблице, а не в списке текстур
     skin0 = [struct.unpack_from('<h', mdl, skin_index + i * 2)[0]
              for i in range(num_skinref)] if num_skinfam else list(range(num_textures))
     num_bodyparts, bodypart_index = struct.unpack_from('<ii', mdl, 232)
@@ -123,7 +123,7 @@ def _mdl_meshes(mdl: bytes) -> Iterator[Tuple[int, int, str, int, List[Tuple[int
 
 
 def read_meshes(mdl: bytes, vvd: bytes, vtx: bytes) -> List[ModelMesh]:
-    """Треугольники LOD0 всех моделей всех частей тела."""
+    """Треугольники LOD0 всех моделей всех частей тела"""
     verts = _vvd_vertices(vvd)
     num_bodyparts, bodypart_offset = struct.unpack_from('<ii', vtx, 28)
     out: List[ModelMesh] = []
@@ -154,7 +154,7 @@ def read_meshes(mdl: bytes, vvd: bytes, vtx: bytes) -> List[ModelMesh]:
                     idx = indices[s_i_off:s_i_off + s_num_i]
                     faces = (zip(idx[0::3], idx[1::3], idx[2::3]) if flags & _STRIP_IS_TRILIST
                              else _unstrip(idx))
-                    # Обход как у Crowbar: второй и третий поменяны местами.
+                    # Обход как у Crowbar: второй и третий поменяны местами
                     for a, b, c in faces:
                         tris.append(Tri(material, [
                             _vert(verts[first + vertex_offset + gverts[i]]) for i in (a, c, b)]))
@@ -164,7 +164,7 @@ def read_meshes(mdl: bytes, vvd: bytes, vtx: bytes) -> List[ModelMesh]:
 
 
 def _unstrip(idx) -> Iterator[Tuple[int, int, int]]:
-    """Полоса → треугольники, с чередованием обхода; вырожденные — мимо."""
+    """Полоса -> треугольники, с чередованием обхода, вырожденные - мимо"""
     for i in range(len(idx) - 2):
         a, b, c = idx[i], idx[i + 1], idx[i + 2]
         if a == b or b == c or a == c:
@@ -177,12 +177,12 @@ def _vert(v: tuple) -> tuple:
     bones = v[3:6]
     n = v[6]
     links = [(bones[i], w[i]) for i in range(min(n, 3)) if w[i] > 0]
-    # V в SMD идёт снизу вверх — Crowbar пишет 1 - v.
+    # V в SMD идёт снизу вверх - Crowbar пишет 1 - v
     return (v[7:10], v[10:13], (v[13], 1.0 - v[14]), links or [(bones[0], 1.0)])
 
 
 def format_tri(tri: Tri) -> str:
-    """Треугольник строками SMD — как пишет Crowbar."""
+    """Треугольник строками SMD - как пишет Crowbar"""
     lines = [tri.material]
     for pos, nrm, uv, links in tri.verts:
         parent = links[0][0]
@@ -193,7 +193,7 @@ def format_tri(tri: Tri) -> str:
     return '\n'.join(lines)
 
 
-# ── Починка SMD после Crowbar ─────────────────────────────────────────────── #
+# Починка SMD после Crowbar
 
 def smd_triangle_count(path: str) -> int:
     n = 0
@@ -210,7 +210,7 @@ def smd_triangle_count(path: str) -> int:
 
 
 def _qc_studios(qc_text: str) -> List[str]:
-    """Файлы `$model`/`$body`/`studio` в порядке частей тела; `blank` — пусто."""
+    """Файлы `$model`/`$body`/`studio` в порядке частей тела; `blank` - пусто"""
     out: List[str] = []
     for m in re.finditer(r'^\s*(?:\$model\s+"[^"]*"\s+"([^"]+)"|\$body\s+"[^"]*"\s+"([^"]+)"'
                          r'|studio\s+"([^"]+)"|(blank))', qc_text, re.M | re.I):
@@ -220,15 +220,15 @@ def _qc_studios(qc_text: str) -> List[str]:
 
 def repair_smd(qc_path: str, mdl: bytes, vvd: bytes, vtx: bytes) -> Dict[str, int]:
     """
-    Дописывает в SMD декомпиляции треугольники, которых Crowbar не записал.
+    Дописывает в SMD декомпиляции треугольники, которых Crowbar не записал
 
     SMD сопоставляются моделям MDL по порядку в QC (`$model`, `$body`,
     `studio` внутри `$bodygroup`). Записанные Crowbar треугольники не
     трогаем: их вершины нумерует VTA флексов. Считаем, что Crowbar пишет
-    strip-группы по порядку и обрывается целыми группами — так у всех
-    проверенных моделей; иначе SMD оставляем как есть.
+    strip-группы по порядку и обрывается целыми группами - так у всех
+    проверенных моделей, иначе SMD оставляем как есть
 
-    Returns: {файл SMD: сколько треугольников дописано}.
+    Returns: {файл SMD: сколько треугольников дописано}
     """
     try:
         with open(qc_path, encoding='utf-8', errors='ignore') as f:
@@ -249,7 +249,7 @@ def repair_smd(qc_path: str, mdl: bytes, vvd: bytes, vtx: bytes) -> Dict[str, in
         total = sum(len(g) for g in model.groups)
         if have >= total:
             continue
-        # Записаны первые группы целиком — дописываем остальные.
+        # Записаны первые группы целиком - дописываем остальные
         seen = 0
         missing: List[Tri] = []
         for group in model.groups:
@@ -259,7 +259,7 @@ def repair_smd(qc_path: str, mdl: bytes, vvd: bytes, vtx: bytes) -> Dict[str, in
             missing.extend(group)
         if seen != have or not missing:
             logger.warning(f"[mdl] {smd_name}: {have} треугольников в SMD против "
-                           f"{total} в VTX, но по группам не сходится — не трогаю")
+                           f"{total} в VTX, но по группам не сходится - не трогаю")
             continue
         _append_triangles(path, missing)
         done[smd_name] = len(missing)

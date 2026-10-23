@@ -682,7 +682,7 @@ TRANSLATIONS = {
         'vmt_reset_tooltip': 'Отменить все правки и восстановить оригинальный VMT из игры',
         'vmt_reset_confirm': 'Все ваши правки будут удалены и VMT будет восстановлен до оригинала из игры.\n\nПродолжить?',
         'vmt_unsaved_changes': '● Есть несохранённые изменения',
-        'vmt_custom_active': '✓ Используется кастомный VMT',
+        'vmt_custom_active': 'Используется кастомный VMT',
         'vmt_showing_original': 'Показывается оригинал из игры',
         'vmt_unsaved_title': 'Несохранённые изменения',
         'vmt_unsaved_confirm': 'Есть несохранённые изменения. Закрыть без сохранения?',
@@ -732,7 +732,7 @@ TRANSLATIONS = {
         'success': 'Успех',
         
         # Тема страницы и безымянный стиль косметики: подписи выбора, а не
-        # сообщения - им положено следовать языку приложения.
+        # сообщения - им положено следовать языку приложения
         'theme_light': 'Светлая',
         'theme_dark': 'Тёмная',
         'hat_style_n': 'Стиль {n}',
@@ -740,12 +740,12 @@ TRANSLATIONS = {
         # Фильтр списка косметики: это переключатели «скрыть», а не «показать»
         # (одних медалей 7628 из 9504). Короткое имя - на кнопку, полное - в
         # подсказку: в ряду фильтров «Скрыть сезонные (Christmas и др.)» не
-        # помещается.
+        # помещается
         'hat_filter_medals': 'Медали',
         'hat_filter_medals_tip': 'Скрыть турнирные и общественные медали (их больше семи тысяч)',
         'hat_filter_halloween': 'Хэллоуин',
         'hat_filter_halloween_tip': 'Скрыть шапки, которые игра показывает только в Хэллоуин и в полнолуние',
-        # Куда надевается (equip_region игры, сведённый к группам).
+        # Куда надевается (equip_region игры, сведённый к группам)
         'hat_region_head': 'Голова',
         'hat_region_face': 'Лицо',
         'hat_region_body': 'Тело',
@@ -1480,7 +1480,7 @@ TRANSLATIONS = {
         'vmt_reset_tooltip': "Discard all edits and restore the game's original VMT",
         'vmt_reset_confirm': "This will discard all your edits and restore the game's original VMT.\n\nContinue?",
         'vmt_unsaved_changes': '● Unsaved changes',
-        'vmt_custom_active': '✓ Custom VMT active',
+        'vmt_custom_active': 'Custom VMT active',
         'vmt_showing_original': 'Showing game original',
         'vmt_unsaved_title': 'Unsaved changes',
         'vmt_unsaved_confirm': 'You have unsaved changes. Close without saving?',
@@ -1530,16 +1530,16 @@ TRANSLATIONS = {
         'success': 'Success',
         
         # Page theme and an unnamed cosmetic style: these are choices, not
-        # messages, so they follow the application language.
+        # messages, so they follow the application language
         'theme_light': 'Light',
         'theme_dark': 'Dark',
         'hat_style_n': 'Style {n}',
 
         # Cosmetics list filter: these hide, not show (medals alone are 7628
-        # of 9504). Short name goes on the button, full one into the tooltip.
+        # of 9504). Short name goes on the button, full one into the tooltip
         'hat_filter_medals': 'Medals',
         'hat_filter_medals_tip': 'Hide tournament and community medals (over seven thousand)',
-        # Where it is worn (the game's equip_region, grouped).
+        # Where it is worn (the game's equip_region, grouped)
         'hat_region_head': 'Head',
         'hat_region_face': 'Face',
         'hat_region_body': 'Body',

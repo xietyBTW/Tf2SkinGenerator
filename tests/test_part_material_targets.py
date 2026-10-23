@@ -1,11 +1,11 @@
 """
-Куда уходят части, ставшие своими материалами (src/app/parts_editor.py).
+Куда уходят части, ставшие своими материалами (src/app/parts_editor.py)
 
 - Материал части в стиле оружия (Bloody у гильотины): в стиле он виден, его
-  правка стиля — его, и сборка ставит её в строку стиля, а не в базовую.
+  правка стиля - его, и сборка ставит её в строку стиля, а не в базовую.
 - Родной материал модели как цель: треугольники берут его имя, своей
   карточки и столбца в $texturegroup у такой записи нет, а его картинки и
-  карты остаются его.
+  карты остаются его
 """
 
 import os
@@ -21,7 +21,7 @@ from tests.test_part_materials import SQUARES, names_in, smd, tri
 from types import SimpleNamespace
 
 
-#: SQUARES плюс второй родной материал c_y — квадрат на той же развёртке.
+#: SQUARES плюс второй родной материал c_y - квадрат на той же развёртке
 TWO = SQUARES + "usemtl c_y\nf 1/1 2/2 3/3\nf 1/1 3/3 4/4\n"
 
 
@@ -86,7 +86,7 @@ def _editor(folder, obj_text, names):
 
 
 class StyleTests(unittest.TestCase):
-    """Гильотина: одна модель, стиль Bloody меняет c_x на c_x_bloody."""
+    """Гильотина: одна модель, стиль Bloody меняет c_x на c_x_bloody"""
 
     def setUp(self):
         from src.domain.preview.texture_state import SINGLE_TEX_KEY
@@ -107,16 +107,16 @@ class StyleTests(unittest.TestCase):
         self.tmp.cleanup()
 
     def test_part_made_in_a_style_stays_in_it(self):
-        # Жалоба: выбрал Bloody, дал части свой материал — а он ушёл в базовый.
+        # Жалоба: выбрал Bloody, дал части свой материал - а он ушёл в базовый
         name = self.editor.set_part_material('', [self.parts[0]], '')['created']
         self.assertEqual(self.ps.card_materials(), [self.single, name])
-        # Без своей правки — оригинал стиля исходного, как и в игре.
+        # Без своей правки - оригинал стиля исходного, как и в игре
         self.assertEqual(self.ps.visible_textures()[name], self.blood)
         own = _png(self.tmp.name, "own", (0, 0, 255))
         self.t.set_texture(name, own)
         self.assertEqual(self.t.skin_overrides[1][name], own)
         self.assertEqual(self.ps.scene_textures()[name], own)
-        # Базовый стиль своей правкой стиля часть не трогает.
+        # Базовый стиль своей правкой стиля часть не трогает
         self.t.active_skin = 0
         self.assertNotEqual(self.ps.visible_textures()[name], own)
 
@@ -128,7 +128,7 @@ class StyleTests(unittest.TestCase):
         self.assertEqual(self.ps.card_materials(), [])
 
     def test_strokes_in_a_style_do_not_pile_up(self):
-        # Основой склейки в стиле была прошлая склейка: снятый мазок оставался.
+        # Основой склейки в стиле была прошлая склейка: снятый мазок оставался
         name = self.editor.set_part_material('', [self.parts[0], self.parts[1]], '')['created']
         self.editor.set_part_colors('', {self.parts[0]: '#00ff00', self.parts[1]: '#ff00ff'})
         self.editor.set_part_colors('', {self.parts[0]: None})
@@ -149,7 +149,7 @@ class StyleTests(unittest.TestCase):
 
     def test_style_that_keeps_the_source_has_no_part_card(self):
         # Строка стиля оставила исходный: у части там та же базовая, и правке
-        # стиля некуда — карточки в этом стиле нет.
+        # стиля некуда - карточки в этом стиле нет
         name = self.editor.set_part_material('', [self.parts[0]], '')['created']
         self.t.skin_info = {"rows": [["c_x"], ["c_x"]]}
         self.assertNotIn(name, self.ps.card_materials())
@@ -168,6 +168,7 @@ class StyleTests(unittest.TestCase):
         self.assertTrue(_has(main, (255, 0, 255)) and not _has(main, (0, 255, 0)))
 
     def test_build_spec_names_the_style_row(self):
+        from src.app.build_editor import BuildEditor
         from src.app.session import AppSession
 
         name = self.editor.set_part_material('', [self.parts[0]], '')['created']
@@ -175,7 +176,7 @@ class StyleTests(unittest.TestCase):
         self.t.set_texture(name, own)
         s = AppSession.__new__(AppSession)
         s.preview = self.ps
-        spec = s._part_material_specs()[0]
+        spec = BuildEditor(s)._part_material_specs()[0]
         self.assertEqual(spec['style_images'], {"c_x_bloody": own})
         self.assertIsNone(spec['image'])
 
@@ -216,7 +217,7 @@ class WriterTests(unittest.TestCase):
 
 
 class NativeTargetTests(unittest.TestCase):
-    """У модели два родных материала: части c_x можно отдать c_y."""
+    """У модели два родных материала: части c_x можно отдать c_y"""
 
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -239,10 +240,10 @@ class NativeTargetTests(unittest.TestCase):
         self.assertNotIn("c_y", self.t.part_cards)
         self.assertEqual(self.ps.part_material_names(), [])
         self.assertEqual(self.ps.card_materials(), ["c_x", "c_y"])
-        # Вьювер делит меш c_x так же, как для материала части.
+        # Вьювер делит меш c_x так же, как для материала части
         view = self.editor.part_material_view()
         self.assertEqual([p['name'] for p in view["c_x"]['parts']], ["c_y"])
-        # Вернули в общий — картинка c_y осталась его.
+        # Вернули в общий - картинка c_y осталась его
         self.editor.drop_part_material("c_y", "c_x")
         self.assertEqual(self.ps.part_materials, {})
         self.assertEqual(self.t.resolve_card("c_y"), mine)
@@ -266,16 +267,17 @@ class NativeTargetTests(unittest.TestCase):
         self.editor.set_part_material('c_x', [self.parts[0]], 'c_y')
         res = self.editor.set_part_colors('c_x', {self.parts[0]: '#00ff00'})
         self.assertIn("c_y", res.get('error', ''))
-        # Соседняя часть того же материала красится как прежде.
+        # Соседняя часть того же материала красится как прежде
         self.assertNotIn('error', self.editor.set_part_colors('c_x', {self.parts[1]: '#00ff00'}))
 
     def test_build_spec_only_renames(self):
+        from src.app.build_editor import BuildEditor
         from src.app.session import AppSession
 
         self.editor.set_part_material('c_x', [self.parts[0]], 'c_y')
         s = AppSession.__new__(AppSession)
         s.preview = self.ps
-        spec = s._part_material_specs()[0]
+        spec = BuildEditor(s)._part_material_specs()[0]
         self.assertEqual((spec['name'], spec['existing'], spec['image']), ("c_y", True, None))
 
 
@@ -299,7 +301,7 @@ class NativeBuildTests(unittest.TestCase):
 
     def test_native_target_that_has_its_own_part_material(self):
         # c_x отдаёт кусок родному c_y, у c_y свой материал части. Считай c_y
-        # после переименования c_x — номера съехали бы, и его часть пропала.
+        # после переименования c_x - номера съехали бы, и его часть пропала
         with tempfile.TemporaryDirectory() as d:
             with open(os.path.join(d, "ref.smd"), "w") as f:
                 f.write(smd(tri("c_x"), tri("c_x"), tri("c_y"), tri("c_y")))
@@ -325,7 +327,7 @@ class NativeBuildTests(unittest.TestCase):
                 f.write(smd(tri("c_x")))
             kept = pm.specs_for_custom_model([spec], ref, keep_materials=True)
             self.assertEqual(kept[0]["name"], "glass_001")
-            # «Только форма»: её материалы в сборке — один, отдавать нечему.
+            # «Только форма»: её материалы в сборке - один, отдавать нечему
             self.assertEqual(pm.specs_for_custom_model([spec], ref, keep_materials=False), [])
 
     def test_other_class_model_skips_the_whole_source(self):

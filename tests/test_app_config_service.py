@@ -36,7 +36,7 @@ class AppConfigServiceTests(unittest.TestCase):
             self.assertEqual(config["export_folder"], "export")
 
     def test_load_config_with_bom_keeps_settings(self):
-        # Блокнот и PowerShell сохраняют с BOM — настройки не должны слетать.
+        # Блокнот и PowerShell сохраняют с BOM - настройки не должны слетать
         with tempfile.TemporaryDirectory() as tmp:
             config_dir = Path(tmp) / "config"
             config_file = config_dir / "app_config.json"
@@ -50,7 +50,7 @@ class AppConfigServiceTests(unittest.TestCase):
 
     def test_broken_config_is_kept_before_it_gets_overwritten(self):
         # Первая же запись настроек положит на место нечитаемого файла
-        # умолчания — путь к игре и прочее остаются только в копии.
+        # умолчания - путь к игре и прочее остаются только в копии
         with tempfile.TemporaryDirectory() as tmp:
             config_dir = Path(tmp) / "config"
             config_file = config_dir / "app_config.json"
@@ -65,7 +65,7 @@ class AppConfigServiceTests(unittest.TestCase):
 
     def test_locked_config_is_not_overwritten_with_defaults(self):
         # Файл держит антивирус: чтение не удалось, и запись настройки
-        # положила бы на его место умолчания. Отпустили — всё как было.
+        # положила бы на его место умолчания. Отпустили - всё как было
         with tempfile.TemporaryDirectory() as tmp:
             config_dir = Path(tmp) / "config"
             config_file = config_dir / "app_config.json"
@@ -94,7 +94,7 @@ class AppConfigServiceTests(unittest.TestCase):
             self.assertEqual(data["tf2_game_folder"], "C:/TF2")
 
     def test_cache_serves_repeated_reads(self):
-        """Повторный load_config без изменения файла не должен читать диск."""
+        """Повторный load_config без изменения файла не должен читать диск"""
         with tempfile.TemporaryDirectory() as tmp:
             config_dir = Path(tmp) / "config"
             config_file = config_dir / "app_config.json"
@@ -108,7 +108,7 @@ class AppConfigServiceTests(unittest.TestCase):
             self.assertEqual(second["language"], "ru")
 
     def test_mutating_result_does_not_pollute_defaults(self):
-        """Мутация результата не должна менять DEFAULT_CONFIG или кэш."""
+        """Мутация результата не должна менять DEFAULT_CONFIG или кэш"""
         with tempfile.TemporaryDirectory() as tmp:
             config_dir = Path(tmp) / "config"
             config_file = config_dir / "app_config.json"
@@ -123,7 +123,7 @@ class AppConfigServiceTests(unittest.TestCase):
             self.assertNotIn("MUTATED", fresh["last_flags"])
 
     def test_external_file_change_invalidates_cache(self):
-        """Изменение файла на диске (mtime) должно сбрасывать кэш."""
+        """Изменение файла на диске (mtime) должно сбрасывать кэш"""
         import os
         with tempfile.TemporaryDirectory() as tmp:
             config_dir = Path(tmp) / "config"
@@ -140,7 +140,7 @@ class AppConfigServiceTests(unittest.TestCase):
                     self.assertEqual(AppConfig.get("language"), "en")
 
     def test_save_is_atomic_no_tmp_left(self):
-        """После сохранения не должно оставаться временного файла."""
+        """После сохранения не должно оставаться временного файла"""
         with tempfile.TemporaryDirectory() as tmp:
             config_dir = Path(tmp) / "config"
             config_file = config_dir / "app_config.json"
@@ -151,7 +151,7 @@ class AppConfigServiceTests(unittest.TestCase):
             self.assertEqual(leftovers, [])
 
     def test_parallel_set_keeps_every_key(self):
-        """Потоки API пишут разные ключи разом — ни один не теряется."""
+        """Потоки API пишут разные ключи разом - ни один не теряется"""
         import threading
         with tempfile.TemporaryDirectory() as tmp:
             config_dir = Path(tmp) / "config"

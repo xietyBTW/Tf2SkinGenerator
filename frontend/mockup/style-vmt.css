@@ -1,24 +1,24 @@
 /*
- * Карты материала и редактор VMT.
+ * Карты материала и редактор VMT
  *
  * Часть стилей страницы: файлы подключены в index.html в порядке каскада
  * (style.css первым), порядок менять нельзя.
  */
 
-/* ── Карты материала и редактор VMT ────────────────────────────────────
+/* Карты материала и редактор VMT
    По общему языку: ни рамок-карточек, ни заливок. Ряды разделены волосяной
-   линией, включённая карта отмечена инверсией подписи и акцентной чертой —
-   так же, как вкладки и теги в остальном интерфейсе. */
+   линией, включённая карта отмечена инверсией подписи и акцентной чертой -
+   так же, как вкладки и теги в остальном интерфейсе */
 .maps { width: min(980px, 94vw); }
 .vmt  { width: min(860px, 94vw); }
 
-/* Заголовок диалога и предмет, к которому он относится, — в одну строку:
-   правка ВСЕГДА про конкретный материал, и забывать об этом нельзя. */
+/* Заголовок диалога и предмет, к которому он относится, - в одну строку:
+   правка ВСЕГДА про конкретный материал, и забывать об этом нельзя */
 .dlg__head { display: flex; align-items: baseline; gap: 14px; }
 .dlg__mat { color: var(--accent); }
 
 /* Две колонки: слева все карты строкой, справа выбранная целиком. Высота
-   окна постоянная — переключение карт не дёргает его вверх-вниз. */
+   окна постоянная - переключение карт не дёргает его вверх-вниз */
 .maps__split {
   display: grid;
   grid-template-columns: 230px minmax(0, 1fr);
@@ -59,16 +59,16 @@
 .maprow__status.is-warn { color: var(--ink-soft); font-style: italic; }
 
 /* Справа отступ: ручки крайних точек градиента выступают за полосу на
-   половину своей ширины. */
+   половину своей ширины */
 .maps__pane { overflow-y: auto; overflow-x: hidden; padding: 14px 10px 14px 18px; }
 /* По центру, а не по базовой линии: у галочки текста нет, и по линии
-   она сползала ниже подписи. */
+   она сползала ниже подписи */
 .mappane__head { display: flex; align-items: center; gap: 12px; margin-bottom: 10px; }
 .mappane__title { margin: 0; font-size: 14px; flex: 1; }
 .mappane__on { flex: none; }
 .mappane__body { display: flex; flex-direction: column; gap: 14px; transition: opacity var(--dur); }
 /* Выключенная карта видна, но приглушена: настраивать её можно, любая правка
-   её и включает. */
+   её и включает */
 .mappane__body.is-off { opacity: .55; }
 .mappane__tip { padding-left: 0; }
 .mappane__row { display: flex; align-items: center; gap: 12px; }
@@ -77,7 +77,7 @@
 .mappane__auto { display: flex; flex-direction: column; gap: 10px; }
 .mappane__file { display: flex; align-items: center; gap: 12px; min-width: 0; }
 
-/* Поле файла: превью картинки и кнопки; картинку можно бросить на поле. */
+/* Поле файла: превью картинки и кнопки, картинку можно бросить на поле */
 .mappane__drop {
   display: flex;
   align-items: center;
@@ -109,22 +109,22 @@
 .mapcard__cell:has(input:disabled) .label { color: var(--ink-mute); }
 .mapcard__cell[hidden] { display: none; }
 .mappane__settings { display: flex; flex-direction: column; gap: 12px; }
-/* Пояснение о последствиях выбора — акцентной чертой, как предупреждение. */
+/* Пояснение о последствиях выбора - акцентной чертой, как предупреждение */
 .mappane__warn { padding-left: 10px; border-left: 2px solid var(--accent); color: var(--ink-soft); }
-/* Превью свечения: текстура на свету, в темноте и шар затухания. */
+/* Превью свечения: текстура на свету, в темноте и шар затухания */
 .glow { display: flex; flex-direction: column; gap: 8px; padding-top: 12px; border-top: 1px solid var(--hairline); }
 .glow__row { display: flex; gap: 14px; align-items: flex-start; flex-wrap: wrap; }
 .glow__row[hidden], .glow .lwarp__fig[hidden] { display: none; }
 .glow__img { width: 150px; height: auto; max-height: 150px; object-fit: contain;
              border: 1px solid var(--hairline); image-rendering: auto; }
-/* Конструктор блика: ряды точек и направление. */
+/* Конструктор блика: ряды точек и направление */
 .lwarp__custom { display: flex; flex-direction: column; gap: 8px; }
 .lwarp__custom[hidden], .lwarp__angle[hidden], .lwarp__rowhead[hidden] { display: none; }
 .lwarp__rowhead { margin: 4px 0 0; }
 .lwarp__angleseg { flex: none; width: 200px; }
 .lwarp__angle .input--num { width: 64px; }
 .pwarp__texture.is-draggable { cursor: crosshair; touch-action: none; }
-/* Сам градиент блика: 64×64 превью, растянутое без сглаживания. */
+/* Сам градиент блика: 64×64 превью, растянутое без сглаживания */
 .pwarp__texture {
   width: 120px;
   height: 120px;
@@ -148,14 +148,14 @@
   color: var(--ink-soft);
 }
 
-/* Конструктор lightwarp. */
+/* Конструктор lightwarp */
 .lwarp { display: flex; flex-direction: column; gap: 10px; }
 .lwarp[hidden] { display: none; }
 .lwarp__preset { width: 100%; }
 .lwarp__preset .select { flex: 1; min-width: 0; }
 .lwarp__range { width: 84px; }
 .lwarp__value { min-width: 3.2em; font-size: 11px; color: var(--ink-soft); }
-/* Не тронуто — как у материала, в VMT не пишется. */
+/* Не тронуто - как у материала, в VMT не пишется */
 .lwarp__value.is-default { color: var(--ink-mute); font-style: italic; }
 .lwarp__color {
   width: 22px;
@@ -169,7 +169,7 @@
 .lwarp__spheres { flex: none; display: flex; gap: 10px; }
 .lwarp__fig { margin: 0; display: flex; flex-direction: column; align-items: center; gap: 4px; }
 .lwarp__sphere { width: 120px; height: 120px; }
-/* Ползунки в две колонки: в одну они тянули окно вниз. */
+/* Ползунки в две колонки: в одну они тянули окно вниз */
 .lwarp__grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 18px; }
 @media (max-width: 720px) {
   .maps__split { grid-template-columns: 1fr; height: auto; }
@@ -189,7 +189,7 @@
 .lwarp__preset .textbtn[hidden] { display: none; }
 .lwarp__graph { width: 100%; height: 64px; border: 1px solid var(--hairline); }
 
-/* Редактор цветных точек: полоса, ручки под ней. */
+/* Редактор цветных точек: полоса, ручки под ней */
 .lwarp__grad { display: flex; flex-direction: column; gap: 6px; }
 .lwarp__grad[hidden] { display: none; }
 .lwarp__bar {
@@ -213,11 +213,11 @@
 .lwarp__stop.is-on { outline: 2px solid var(--accent); outline-offset: 1px; }
 .lwarp__stop:focus-visible { outline: 2px solid var(--accent); }
 
-/* ── Редактор VMT ──────────────────────────────────────────────────────
-   Текст здесь — главная масса на экране, поэтому у него своя поверхность
-   и моноширинный набор; всё остальное отступает в подписи. */
+/* Редактор VMT
+   Текст здесь - главная масса на экране, поэтому у него своя поверхность
+   и моноширинный набор, всё остальное отступает в подписи */
 /* Поле и зеркало обязаны совпадать по метрике до пикселя, иначе подсветка
-   уедет от текста. Общие свойства заданы один раз на оба. */
+   уедет от текста. Общие свойства заданы один раз на оба */
 .vmt__wrap {
   position: relative;
   height: 52vh;
@@ -242,13 +242,13 @@
 }
 
 .vmt__hl { color: var(--ink-soft); pointer-events: none; }
-/* Наведение на $параметр — единственное, ради чего зеркало ловит мышь. */
+/* Наведение на $параметр - единственное, ради чего зеркало ловит мышь */
 .vmt__hl .vmt-par { color: var(--accent); pointer-events: auto; cursor: help; }
 .vmt__hl .vmt-str { color: var(--ink); }
 .vmt__hl .vmt-com { color: var(--ink-mute); font-style: italic; }
 
-/* Сам текст прозрачен: его видно через зеркало. Каретка и выделение —
-   свои, иначе печатать было бы вслепую. */
+/* Сам текст прозрачен: его видно через зеркало. Каретка и выделение -
+   свои, иначе печатать было бы вслепую */
 .vmt__text {
   background: none;
   color: transparent;
@@ -259,8 +259,8 @@
 .vmt__text:focus { outline: none; }
 .vmt__wrap:focus-within { border-color: var(--accent); }
 
-/* Текст и справочник рядом: справочник — колонка справа, текст не теряет
-   высоты. С открытым справочником окно шире, чтобы текст не сжимался. */
+/* Текст и справочник рядом: справочник - колонка справа, текст не теряет
+   высоты. С открытым справочником окно шире, чтобы текст не сжимался */
 .vmt.has-ref { width: min(1240px, 96vw); }
 .vmt__main { display: flex; gap: 16px; }
 .vmt__main .vmt__wrap { flex: 1; min-width: 0; }
@@ -290,14 +290,14 @@
 .vmt__refname { display: block; font-size: 12px; color: var(--ink); }
 .vmt__refdoc { display: block; margin: 2px 0 0; font-size: 11px; line-height: 1.45; color: var(--ink-mute); }
 #vmt-help.is-active { color: var(--accent); }
-/* Узкое окно: справочник под текстом, иначе колонка сплющила бы сам VMT. */
+/* Узкое окно: справочник под текстом, иначе колонка сплющила бы сам VMT */
 @media (max-width: 900px) {
   .vmt__main { flex-direction: column; }
   .vmt__main .vmt__wrap { flex: none; height: 36vh; }
   .vmt__ref { width: auto; height: 30vh; }
 }
 
-/* Подсказка у курсора: имя параметра и что он делает. */
+/* Подсказка у курсора: имя параметра и что он делает */
 .vmt__tip {
   position: fixed;
   z-index: 40;
@@ -316,16 +316,16 @@
 }
 .vmt__tip b { color: var(--accent); font-weight: 500; }
 
-/* «Готовые эффекты»: категории слева, пункты или форма справа. Высота своя —
+/* «Готовые эффекты»: категории слева, пункты или форма справа. Высота своя -
    длинное меню с пояснениями тянулось через весь экран. Popover (верхний
-   слой над модальным окном), место задаёт vmt-effects.js. */
+   слой над модальным окном), место задаёт vmt-effects.js */
 .fxpick {
   position: fixed;
   inset: auto;
   margin: 0;
   padding: 0;
   width: min(620px, calc(100vw - 16px));
-  height: min(430px, calc(100vh - 16px));   /* форма оболочки — целиком */
+  height: min(430px, calc(100vh - 16px));   /* форма оболочки - целиком */
   border: 1px solid var(--hairline-strong);
   background: var(--overlay);
   color: inherit;
@@ -378,7 +378,7 @@
 .fxpick__field { display: flex; flex-direction: column; gap: 7px; }
 .fxpick__label { color: var(--ink-mute); }
 .fxpick__ctl { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
-/* Свой цвет — кнопка с подписью и кодом, отдельно от готовых плашек. */
+/* Свой цвет - кнопка с подписью и кодом, отдельно от готовых плашек */
 .fxpick__own {
   display: inline-flex;
   align-items: center;
@@ -407,7 +407,7 @@
 
 
 
-/* Поле без зеркала (QC): подсветки нет, значит текст рисует оно само. */
+/* Поле без зеркала (QC): подсветки нет, значит текст рисует оно само */
 .vmt__text--plain { color: var(--ink); caret-color: var(--accent); }
 .vmt__text--plain::selection { background: var(--hairline-strong); color: var(--ink); }
 

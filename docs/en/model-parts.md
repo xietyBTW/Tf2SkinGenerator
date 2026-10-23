@@ -15,7 +15,7 @@ You can also drop an image straight onto the model. The app highlights the piece
 Three things appear over the 3D view:
 
 - **The tool column** on the right edge: icons for the tools, the current color, and buttons for the whole job. Next to it a small panel shows the options of the selected tool. The arrow at the top of the column folds it away.
-- **The parts list** on the left: one numbered chip per part. Hovering a chip lights up its piece on the model. You can drag the list by its title, resize it from the bottom right corner, and double-click the title to put it back.
+- **The parts list** on the left: one numbered chip per part. Hovering a chip lights up its piece on the model. <kbd>Ctrl</kbd>+click a chip or a part on the model to keep only that part in view, with the rest of the model see-through; <kbd>Esc</kbd> or another <kbd>Ctrl</kbd>+click brings it all back. You can drag the list by its title, resize it from the bottom right corner, and double-click the title to put it back.
 - **A hint** at the bottom of the view that says what the current tool will do.
 
 ![Painting by parts on the Scattergun: the parts are painted in random colors](../img/en/model-parts.webp)

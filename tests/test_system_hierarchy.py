@@ -1,9 +1,9 @@
-"""Свёртка списка систем PCF в дерево «родитель → дети».
+"""Свёртка списка систем PCF в дерево «родитель -> дети»
 
-В большом файле определений сотни, а осмысленных эффектов — десятки:
+В большом файле определений сотни, а осмысленных эффектов - десятки:
 остальное служебные держатели и спавнеры, висящие детьми. Дерево должно
 показывать вершины, переживать ссылки на несуществующие системы, повторное
-использование одного ребёнка несколькими родителями и циклы.
+использование одного ребёнка несколькими родителями и циклы
 """
 
 from src.services.particle_editor_service import (
@@ -12,7 +12,7 @@ from src.services.particle_editor_service import (
 
 
 def _mk(**parents):
-    """{'a': ['b', 'c']} → словарь систем в формате systems_json."""
+    """{'a': ['b', 'c']} -> словарь систем в формате systems_json"""
     return {name: {"attrs": {},
                    "children": [{"childName": c} for c in kids]}
             for name, kids in parents.items()}
@@ -38,7 +38,7 @@ def test_depth_is_kept():
 
 
 def test_shared_child_appears_under_every_parent():
-    """В PCF ребёнок — ссылка по имени, а не владение: дублирование честное."""
+    """В PCF ребёнок - ссылка по имени, а не владение: дублирование честное"""
     systems = _mk(one=["shared"], two=["shared"], shared=[])
     tree = dict(system_hierarchy(systems))
     assert sorted(tree) == ["one", "two"]
@@ -47,7 +47,7 @@ def test_shared_child_appears_under_every_parent():
 
 
 def test_cycle_keeps_both_visible():
-    """Взаимный цикл: корня нет, но из списка ничего пропасть не должно."""
+    """Взаимный цикл: корня нет, но из списка ничего пропасть не должно"""
     systems = _mk(a=["b"], b=["a"])
     tree = system_hierarchy(systems)
     assert set(flatten_hierarchy(tree)) == {"a", "b"}

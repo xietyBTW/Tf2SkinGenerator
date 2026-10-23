@@ -1,4 +1,4 @@
-"""Шапки и косметика: поиск, фильтры, карточка шапки."""
+"""Шапки и косметика: поиск, фильтры, карточка шапки"""
 
 from __future__ import annotations
 
@@ -8,27 +8,25 @@ from typing import Dict, List, Optional
 from src.app.api._common import _lang, _t, endpoint
 
 
-# ═══════════════════════════════════════════════════════════════════════════ #
 # Шапки и косметика
-# ═══════════════════════════════════════════════════════════════════════════ #
 
 #: Категории, которые можно скрыть: медали и шапки, которые игра рисует только
-#: в Хэллоуин. Значение живёт в общем конфиге (`hats_hidden_tags`); прежние
-#: «holiday», «smissmas», «summer» там игнорируются.
+#: в Хэллоуин. Значение живёт в общем конфиге (`hats_hidden_tags`), прежние
+#: «holiday», «smissmas», «summer» там игнорируются
 HAT_TAGS = ('medals', 'halloween')
 
 def _model_file_name(mdl_path: str) -> str:
-    """Имя файла модели без пути и расширения — подпись карточки косметики."""
+    """Имя файла модели без пути и расширения - подпись карточки косметики"""
     return mdl_path.replace(chr(92), "/").rsplit("/", 1)[-1].removesuffix(".mdl")
 
 
 @endpoint
 def hat_filters(lang: str = '') -> List[dict]:
     """
-    Какие категории косметики можно скрыть и что скрыто сейчас.
+    Какие категории косметики можно скрыть и что скрыто сейчас
 
     Имя короткое, подсказка полная: в ряду фильтров «Скрыть сезонные
-    (Christmas и др.)» не помещается, а на кнопке нужно одно слово.
+    (Christmas и др.)» не помещается, а на кнопке нужно одно слово
     """
     from src.app.session import session
     from src.data.hats_parser import parse_hats
@@ -36,8 +34,8 @@ def hat_filters(lang: str = '') -> List[dict]:
     lang = _lang(lang)
     t = _t(lang)
     hidden = hidden_hat_tags()
-    # Число на кнопке объясняет её лучше подсказки: «Хэллоуин 473» — сразу
-    # видно, что и сколько она прячет. Список в памяти, подсчёт дешёвый.
+    # Число на кнопке объясняет её лучше подсказки: «Хэллоуин 473» - сразу
+    # видно, что и сколько она прячет. Список в памяти, подсчёт дешёвый
     counts: Dict[str, int] = {}
     paths = session().tf2_paths()
     for h in ([] if 'error' in paths else parse_hats(paths['root'], lang)):
@@ -53,7 +51,7 @@ def hat_filters(lang: str = '') -> List[dict]:
 
 
 def hidden_hat_tags() -> List[str]:
-    """Скрытые категории из общего конфига приложения."""
+    """Скрытые категории из общего конфига приложения"""
     from src.config.app_config import AppConfig
 
     saved = AppConfig.load_config().get('hats_hidden_tags') or []
@@ -63,10 +61,10 @@ def hidden_hat_tags() -> List[str]:
 @endpoint
 def set_hat_filter(tag: str, hidden: bool) -> List[dict]:
     """
-    Прячет или возвращает категорию косметики.
+    Прячет или возвращает категорию косметики
 
     Пишем в тот же ключ конфига, что и панель шапок: настройка у приложения и
-    веб-интерфейса общая, иначе они разошлись бы по показанному списку.
+    веб-интерфейса общая, иначе они разошлись бы по показанному списку
     """
     from src.config.app_config import AppConfig
 
@@ -83,19 +81,19 @@ def hats(query: str = '', tf2_class: Optional[str] = None,
          region: str = '', collection: str = '',
          lang: str = '') -> Dict[str, object]:
     """
-    Косметика TF2 из items_game.txt: {items, regions, collections, suggest}.
+    Косметика TF2 из items_game.txt: {items, regions, collections, suggest}
 
-    Скрытые категории берём из конфига (`hats_hidden_tags`) — так же, как
+    Скрытые категории берём из конфига (`hats_hidden_tags`) - так же, как
     панель шапок. Отдаём ВСЁ, что прошло фильтры: косметики 9504, и отрисовка
-    полного списка стоит 56 мс — обрезать было незачем, а обрезанный список
-    молча врал, что предмета в игре нет.
+    полного списка стоит 56 мс - обрезать было незачем, а обрезанный список
+    молча врал, что предмета в игре нет
 
     Поиск ранжирует: имя целиком, с начала, по началам слов, подстрока;
-    ищет и по английскому имени, когда интерфейс русский. `regions` — фасет
+    ищет и по английскому имени, когда интерфейс русский. `regions` - фасет
     «куда надевается» с числами под текущим запросом и классом (без своего
-    фильтра, иначе из «Лица» нельзя было бы уйти). `collections` — то же для
-    коллекций игры, новые сверху. `suggest` — похожие имена, когда ничего не
-    нашлось.
+    фильтра, иначе из «Лица» нельзя было бы уйти). `collections` - то же для
+    коллекций игры, новые сверху. `suggest` - похожие имена, когда ничего не
+    нашлось
     """
     from src.app.session import session
     from src.data.hats_parser import REGION_ORDER, parse_hats
@@ -109,7 +107,7 @@ def hats(query: str = '', tf2_class: Optional[str] = None,
     hidden = set(hidden_hat_tags())
     region = (region or '').strip().lower()
     collection = (collection or '').strip()
-    # {ключ: [номер, название, число]} — фасет коллекций.
+    # {ключ: [номер, название, число]} - фасет коллекций
     col_counts: Dict[str, list] = {}
     words = _hat_plain(str(query)).split()
     english = _english_names(paths['root']) if words and lang != 'en' else {}
@@ -128,7 +126,7 @@ def hats(query: str = '', tf2_class: Optional[str] = None,
         if rank is None:
             continue
         # Каждый фасет считается под ЧУЖИМ фильтром, но не под своим: иначе
-        # из выбранной коллекции нельзя было бы увидеть соседние.
+        # из выбранной коллекции нельзя было бы увидеть соседние
         in_region = not region or h.region == region
         in_collection = not collection or h.collection == collection
         if in_collection:
@@ -152,15 +150,15 @@ def hats(query: str = '', tf2_class: Optional[str] = None,
 
 
 def _hat_plain(text: str) -> str:
-    """Строка для сравнения: регистр, ё и знаки не считаются, слова — через
-    пробел («Газиров-очки» → «газиров очки», чтобы «очки» было началом слова)."""
+    """Строка для сравнения: регистр, ё и знаки не считаются, слова - через
+    пробел («Газиров-очки» -> «газиров очки», чтобы «очки» было началом слова)"""
     return ' '.join(re.sub(r'[^0-9a-zA-Zа-яёА-ЯЁ]+', ' ', text or '')
                     .lower().replace('ё', 'е').split())
 
 
 def _hat_rank(h, words: List[str], english: str) -> Optional[int]:
-    """0 — имя целиком, 1 — с начала, 2 — по началам слов, 3 — подстрока
-    где угодно (в имени, внутреннем имени, классах); None — мимо."""
+    """0 - имя целиком, 1 - с начала, 2 - по началам слов, 3 - подстрока
+    где угодно (в имени, внутреннем имени, классах); None - мимо"""
     if not words:
         return 0
     q = ' '.join(words)
@@ -180,8 +178,8 @@ def _hat_rank(h, words: List[str], english: str) -> Optional[int]:
 
 def _hat_suggest(words: List[str], names: List[str],
                  english: Dict[str, str]) -> List[str]:
-    """Похожие имена: «Fedra» → «Fancy Fedora». По сжатому виду, показываем
-    как пишут."""
+    """Похожие имена: «Fedra» -> «Fancy Fedora». По сжатому виду, показываем
+    как пишут"""
     import difflib
 
     vocab = {_hat_plain(n): n for n in [*names, *english.values()] if n}
@@ -189,7 +187,7 @@ def _hat_suggest(words: List[str], names: List[str],
     close = difflib.get_close_matches(q, list(vocab), n=3, cutoff=0.6)
     if close:
         return [vocab[c] for c in close]
-    # По одному слову против слов имён: «fedra» — «fedora» из «Fancy Fedora».
+    # По одному слову против слов имён: «fedra» - «fedora» из «Fancy Fedora»
     owner: Dict[str, str] = {}
     for plain, name in vocab.items():
         for w in plain.split():
@@ -203,7 +201,7 @@ def _hat_suggest(words: List[str], names: List[str],
 
 
 def _english_names(root: str) -> Dict[str, str]:
-    """{defindex: английское имя} — чтобы русский интерфейс находил «glasses»."""
+    """{defindex: английское имя} - чтобы русский интерфейс находил «glasses»"""
     from src.data.hats_parser import parse_hats
     return {h.defindex: h.name for h in parse_hats(root, 'en')}
 
@@ -211,11 +209,11 @@ def _english_names(root: str) -> Dict[str, str]:
 @endpoint
 def hat_item(key: str = '', lang: str = '') -> Dict[str, object]:
     """
-    Предмет косметики по ключу — как строка `hats()`, но мимо фильтров.
+    Предмет косметики по ключу - как строка `hats()`, но мимо фильтров
 
     Нужен сохранённой работе: у стилевой шапки без списка стилей нечем
-    переключить стиль. Ключом бывает и модель стиля или класса — так писались
-    старые работы.
+    переключить стиль. Ключом бывает и модель стиля или класса - так писались
+    старые работы
     """
     from src.app.session import session
     from src.data.hats_parser import parse_hats
@@ -235,7 +233,7 @@ def hat_item(key: str = '', lang: str = '') -> Dict[str, object]:
 
 
 def _hat_row(h, t) -> Dict[str, object]:
-    """Строка каталога косметики."""
+    """Строка каталога косметики"""
     return {
         'key': h.mdl_path,
         'name': h.name,
@@ -243,18 +241,18 @@ def _hat_row(h, t) -> Dict[str, object]:
         'type': 'hat',
         'mode': 'hat',
         'icon': h.icon,
-        # Имя файла модели — то же, что у оружия показано ключом
+        # Имя файла модели - то же, что у оружия показано ключом
         # (c_scattergun). Целиком путь в подпись не влезает: у косметики
         # он вида models/workshop/player/items/demo/…
         'label': _model_file_name(h.mdl_path),
         # Мультиклассовая шапка: у каждого класса СВОЯ модель. Сборке нужны
-        # все выбранные, а превью — одна конкретная: путь с %s ей не годится.
+        # все выбранные, а превью - одна конкретная: путь с %s ей не годится
         'per_class': dict(h.per_class_models or {}),
         'slot': h.slot,
         # Модельные стили шапки: у каждого СВОЯ геометрия (у «Только
-        # камень» нет оправы). Отдаём их с моделями — выбор стиля меняет и
+        # камень» нет оправы). Отдаём их с моделями - выбор стиля меняет и
         # показ, и то, что уйдёт в сборку. Числа мало: по нему стиль не
-        # загрузить.
+        # загрузить
         'styles': [
             {'name': (st.get('name')
                       or t.get('hat_style_n', 'Style {n}').format(n=i + 1)),

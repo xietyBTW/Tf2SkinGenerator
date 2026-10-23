@@ -19,7 +19,7 @@ class ExceptionsTests(unittest.TestCase):
         self.assertEqual(str(err), "custom message")
 
     def test_required_file_missing_is_builtin_file_not_found(self):
-        """except FileNotFoundError должен ловить кастомный тип."""
+        """except FileNotFoundError должен ловить кастомный тип"""
         err = RequiredFileMissingError("path.txt")
         self.assertIsInstance(err, FileNotFoundError)
         self.assertIsInstance(err, TF2SkinGeneratorError)

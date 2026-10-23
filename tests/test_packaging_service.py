@@ -1,10 +1,9 @@
 """
-Упаковка VPK: что происходит, когда готовый файл занят.
+Упаковка VPK: что происходит, когда готовый файл занят
 
 Повторная сборка поверх мода, который сейчас держит запущенная игра (или
-GCFScape, или проводник с превью), — обычное дело. Раньше отсюда улетал сырой
-WinError 32, из которого не следует, что делать; проверяем, что теперь это
-понятная ошибка со ссылкой на файл.
+GCFScape, или проводник с превью), - обычное дело. Проверяем, что вместо
+сырого WinError 32 приходит понятная ошибка со ссылкой на файл
 """
 
 import tempfile
@@ -45,7 +44,7 @@ class PackDirectoryLockedTests(unittest.TestCase):
             export.mkdir()
             busy = export / "out.vpk"
             busy.write_bytes(b"old")
-            # Windows не даёт удалить открытый файл — ровно это и делает игра.
+            # Windows не даёт удалить открытый файл - ровно это и делает игра
             with open(busy, "rb"):
                 with self.assertRaises(FileLockedError) as caught:
                     self._pack(base, export)
@@ -64,7 +63,7 @@ class PackDirectoryLockedTests(unittest.TestCase):
 
 class PackDirectoryLongPathTests(unittest.TestCase):
     """vpk.exe падает на пути длиннее 260 символов с обрезанным именем файла,
-    из которого причину не понять, — говорим её до запуска."""
+    из которого причину не понять, - говорим её до запуска"""
 
     def test_too_long_path_is_named_before_vpk_runs(self):
         from src.shared.error_classifier import classify

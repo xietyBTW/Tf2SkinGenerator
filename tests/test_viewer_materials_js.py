@@ -1,12 +1,12 @@
 """
-Сборка материала во вьювере (viewer_materials.js) через Node.
+Сборка материала во вьювере (viewer_materials.js) через Node
 
 Ошибка здесь не видна ни глазами в коде, ни тестами Python: стекло просто
 снова станет серым пластиком, как было до того, как превью научили читать VMT.
-Блика и отражений в материале нет намеренно — без маски из текстуры они
-покрывают модель белёсой плёнкой (см. vmt_render.py).
+Блика и отражений в материале нет намеренно - без маски из текстуры они
+покрывают модель белёсой плёнкой (см. vmt_render.py)
 
-Тест пропускается, если node недоступен.
+Тест пропускается, если node недоступен
 """
 
 import json
@@ -22,7 +22,7 @@ pytestmark = pytest.mark.skipif(
     shutil.which("node") is None or not MODULE.exists(),
     reason="node недоступен или viewer_materials.js не найден")
 
-# Заглушка THREE: материал просто запоминает, с чем его создали.
+# Заглушка THREE: материал просто запоминает, с чем его создали
 STUB = """
 const THREE = {
   DoubleSide: 'double', FrontSide: 'front',
@@ -68,7 +68,7 @@ def test_material_without_hints_is_the_plain_old_one():
 
 
 def test_additive_glass_blends_and_keeps_both_faces():
-    """Стекло банки: $additive + $nocull."""
+    """Стекло банки: $additive + $nocull"""
     m = _material({"blend": "add", "twoSided": True})
     assert m["blending"] == "additive"
     assert m["transparent"] is True
@@ -77,19 +77,19 @@ def test_additive_glass_blends_and_keeps_both_faces():
 
 
 def test_no_shine_is_ever_added():
-    """Блик без маски покрывал модель «серебряной оболочкой» — его нет."""
+    """Блик без маски покрывал модель «серебряной оболочкой» - его нет"""
     for hint in ({"blend": "opaque"}, {"blend": "add"}, {"blend": "alpha"}):
         assert _material(hint)["extra"] == []
 
 
 def test_transparent_without_nocull_is_single_sided():
-    """Изнанка прозрачной грани смешивалась бы сама с собой дважды."""
+    """Изнанка прозрачной грани смешивалась бы сама с собой дважды"""
     assert _material({"blend": "add"})["side"] == "front"
     assert _material({"blend": "alpha"})["side"] == "front"
 
 
 def test_opaque_material_stays_double_sided():
-    """У декомпилированных моделей встречаются вывернутые нормали."""
+    """У декомпилированных моделей встречаются вывернутые нормали"""
     assert _material({"blend": "opaque"})["side"] == "double"
 
 
@@ -104,16 +104,16 @@ def test_cutout_writes_depth():
     m = _material({"blend": "cutout", "alphaTest": 0.8})
     assert m["alphaTest"] == 0.8
     assert m["transparent"] is False
-    assert "depthWrite" not in m          # не трогаем — three.js пишет глубину
+    assert "depthWrite" not in m          # не трогаем - three.js пишет глубину
 
 
 def test_material_keeps_its_name():
-    """По имени вьювер находит меш при следующей смене текстуры."""
+    """По имени вьювер находит меш при следующей смене текстуры"""
     assert _material({"blend": "add"})["name"] == "mat"
 
 
 def test_hint_lookup_is_case_insensitive():
-    """Имена материалов в QC у Valve гуляют по регистру."""
+    """Имена материалов в QC у Valve гуляют по регистру"""
     got = _run("""
       return { found: !!hintFor({'c_glass': {blend: 'add'}}, 'C_Glass'),
                missing: hintFor({'c_glass': {}}, 'other') };
@@ -123,7 +123,7 @@ def test_hint_lookup_is_case_insensitive():
 
 
 def test_params_are_a_pure_function():
-    """materialParams не зависит от THREE — её можно проверять отдельно."""
+    """materialParams не зависит от THREE - её можно проверять отдельно"""
     got = _run("""
       return { add:  materialParams({blend: 'add'}),
                none: materialParams(null) };

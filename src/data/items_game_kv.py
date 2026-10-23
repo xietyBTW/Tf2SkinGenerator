@@ -1,19 +1,19 @@
 """
-Примитивы разбора items_game.txt (формат Valve KeyValues).
+Примитивы разбора items_game.txt (формат Valve KeyValues)
 
 Файл на 8 МБ описывает все предметы игры и читается уже двумя потребителями:
 шапками ([hats_parser]) и анимациями вьюмодели ([viewmodel_anims]). Общее у них
-— именно разбор: найти секцию нужного уровня, отсчитать блок по скобкам, взять
-плоское значение.
+- именно разбор: найти секцию нужного уровня, отсчитать блок по скобкам, взять
+плоское значение
 
-Отдельная тема — `prefab`. Значительная часть предметов не объявляет свои
+Отдельная тема - `prefab`. Значительная часть предметов не объявляет свои
 свойства, а наследует их: у стокового оружия и `model_player`, и `item_class`
 живут в prefab-блоке, а не в самом предмете. Наследование бывает многоуровневым
 и с несколькими prefab через пробел, поэтому его разрешает `ItemsGame.inherited`,
-а не вызывающий код.
+а не вызывающий код
 
-Модуль без Qt: на вход — текст файла (`ItemsGame.parse`) или его путь
-(`load` — один разбор на процесс, его делят все потребители).
+На вход - текст файла (`ItemsGame.parse`) или его путь
+(`load` - один разбор на процесс, его делят все потребители)
 """
 
 from __future__ import annotations
@@ -28,18 +28,18 @@ from src.shared.logging_config import get_logger
 
 logger = get_logger(__name__)
 
-#: {путь: ((mtime, размер), разбор)} — см. `load`.
+#: {путь: ((mtime, размер), разбор)} - см. `load`
 _loaded: Dict[str, Tuple[tuple, "ItemsGame"]] = {}
 _load_lock = threading.Lock()
 
-#: Ограничитель глубины наследования prefab — защита от циклов в чужом файле.
+#: Ограничитель глубины наследования prefab - защита от циклов в чужом файле
 MAX_PREFAB_DEPTH = 8
 
 
 def skip_to_close_brace(content: str, pos: int) -> int:
     """
     Начиная с pos (на символе '{'), возвращает позицию ПОСЛЕ закрывающей '}'.
-    Корректно обрабатывает вложенные блоки, строки в кавычках и комментарии.
+    Корректно обрабатывает вложенные блоки, строки в кавычках и комментарии
     """
     depth = 0
     i = pos
@@ -73,10 +73,10 @@ def skip_to_close_brace(content: str, pos: int) -> int:
 
 
 def flat_value(block: str, key: str) -> Optional[str]:
-    """Значение "key" "value" (не вложенное) из блока.
+    """Значение "key" "value" (не вложенное) из блока
 
     Пробела между ключом и значением может и не быть: у Valve бывает слитно
-    (`"item_type_name""#TF_Wearable_Hat"` — 34 раза в items_game).
+    (`"item_type_name""#TF_Wearable_Hat"` - 34 раза в items_game)
     """
     m = re.search(rf'"{re.escape(key)}"\s*"([^"]*)"', block, re.IGNORECASE)
     return m.group(1) if m else None
@@ -84,13 +84,13 @@ def flat_value(block: str, key: str) -> Optional[str]:
 
 def find_section(content: str, name: str) -> int:
     """
-    Позиция '{' секции `name` — прямого потомка корневого "items_game".
+    Позиция '{' секции `name` - прямого потомка корневого "items_game"
 
     Ищет именно на первом уровне вложенности: секции с теми же именами
-    встречаются и глубже, и наивный `find` берёт не ту.
+    встречаются и глубже, и наивный `find` берёт не ту
 
     Returns:
-        Позиция '{' или -1.
+        Позиция '{' или -1
     """
     root_idx = content.find('"items_game"')
     if root_idx == -1:
@@ -122,7 +122,7 @@ def find_section(content: str, name: str) -> int:
                     pos += 1
                 if pos < n and content[pos] == '{':
                     return pos
-                # После ключа нет '{' — это значение, а не секция.
+                # После ключа нет '{' - это значение, а не секция
         elif c == '{':
             depth += 1
             pos += 1
@@ -138,7 +138,7 @@ def find_section(content: str, name: str) -> int:
 
 
 def iter_blocks(content: str, section_brace: int) -> Iterator[Tuple[str, str]]:
-    """(ключ, текст блока) для прямых потомков секции, открытой в section_brace."""
+    """(ключ, текст блока) для прямых потомков секции, открытой в section_brace"""
     if section_brace < 0:
         return
     pos, n = section_brace + 1, len(content)
@@ -170,7 +170,7 @@ def iter_blocks(content: str, section_brace: int) -> Iterator[Tuple[str, str]]:
 
 @dataclass
 class ItemsGame:
-    """Разобранный items_game.txt: блоки предметов и prefab для наследования."""
+    """Разобранный items_game.txt: блоки предметов и prefab для наследования"""
 
     items: List[Tuple[str, str]]
     prefabs: Dict[str, str]
@@ -185,15 +185,15 @@ class ItemsGame:
     @classmethod
     def load(cls, path) -> Optional["ItemsGame"]:
         """
-        Разбор items_game.txt по пути — один на процесс, пока файл тот же.
+        Разбор items_game.txt по пути - один на процесс, пока файл тот же
 
         Его читают краски, иконки каталога, анимации вьюмодели, стоковое
         оружие и модели War Paint. При старте каждый разбирал 8 МБ сам, а
-        иконки каталога — ещё и по нескольку раз разом: они приходят
+        иконки каталога - ещё и по нескольку раз разом: они приходят
         параллельно. Это секунды процессора под GIL, и окно замирало (его
-        обработчик сообщений — на Python, см. frontend/titlebar.py). Под
+        обработчик сообщений - на Python, см. frontend/titlebar.py). Под
         замком второй поток дожидается первого, а не разбирает заново.
-        Разбор только читают — делить его можно.
+        Разбор только читают - делить его можно
         """
         path = str(path)
         try:
@@ -216,26 +216,26 @@ class ItemsGame:
             return game
 
     def inherited(self, block: str, key: str) -> Optional[str]:
-        """Плоское значение с учётом цепочки prefab. Своё значение сильнее."""
+        """Плоское значение с учётом цепочки prefab. Своё значение сильнее"""
         return self._inherited(block, key, 0)
 
     def inherited_block(self, block: str, key: str) -> Optional[str]:
-        """Текст вложенного блока "key" { … } с учётом цепочки prefab.
+        """Текст вложенного блока "key" { … } с учётом цепочки prefab
 
         Нужно для `model_player_per_class`: у части оружия (Хандзо, Ускоритель)
-        модели объявлены не одним путём, а картой «класс → модель».
+        модели объявлены не одним путём, а картой «класс -> модель»
         """
         return self._inherited_block(block, key, 0)
 
     def inherited_match(self, block: str, pattern: re.Pattern) -> Optional[str]:
-        """Первая группа регулярки с учётом цепочки prefab.
+        """Первая группа регулярки с учётом цепочки prefab
 
         Нужно там, где ключ не фиксирован: `model_player`, `model_player_per_class`
-        и т. п. описывают одно и то же и подхватываются одним шаблоном.
+        и т. п. описывают одно и то же и подхватываются одним шаблоном
         """
         return self._inherited_match(block, pattern, 0)
 
-    # ── Внутреннее ────────────────────────────────────────────────────────── #
+    # Внутреннее
 
     def _inherited(self, block: str, key: str, depth: int) -> Optional[str]:
         own = flat_value(block, key)

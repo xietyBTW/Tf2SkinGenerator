@@ -1,20 +1,18 @@
 """
-Получение декомпилированной модели: кэш → VPK → Crowbar.
+Получение декомпилированной модели: кэш -> VPK -> Crowbar
 
 Один и тот же путь «найти MDL в VPK, распаковать набор файлов, прогнать через
 Crowbar, положить в кэш» нужен 3D-превью, определению скинов и превью
-вьюмодели. Раньше он был скопирован в каждый воркер отдельно — вместе с
-проверками отмены, чисткой temp-папок и порядком «сначала кэш».
+вьюмодели, вместе с проверками отмены, чисткой temp-папок и порядком
+«сначала кэш»
 
 Что здесь НЕ решается: какой именно MDL искать. Список путей-кандидатов у
 каждого вызывающего свой (шапки раскрываются по классам, персонажи идут прямым
-путём, оружие — через ExtractModelService), и он остаётся снаружи. Сервис
-получает готовый список и берёт первый существующий.
+путём, оружие - через ExtractModelService), и он остаётся снаружи. Сервис
+получает готовый список и берёт первый существующий
 
 Прогресс отдаётся стадиями (`Stage`), а не текстом: сервис не знает языка
-интерфейса, а вызывающий уже имеет свои переводы.
-
-Модуль без Qt.
+интерфейса, а вызывающий уже имеет свои переводы
 """
 
 from __future__ import annotations
@@ -37,29 +35,29 @@ logger = get_logger(__name__)
 
 
 class Stage(Enum):
-    """Долгий шаг, о котором стоит сказать пользователю."""
+    """Долгий шаг, о котором стоит сказать пользователю"""
     EXTRACTING = "extracting"
     DECOMPILING = "decompiling"
 
 
 class DecompileError(Exception):
-    """Декомпиляция невозможна: нет VPK, нет Crowbar, Crowbar упал.
+    """Декомпиляция невозможна: нет VPK, нет Crowbar, Crowbar упал
 
-    Отсутствие самой модели в VPK ошибкой НЕ считается — это обычный «нечего
-    показывать», и `ensure_decompiled` возвращает на него None.
+    Отсутствие самой модели в VPK ошибкой НЕ считается - это обычный «нечего
+    показывать», и `ensure_decompiled` возвращает на него None
     """
 
 
 @dataclass(frozen=True)
 class Decompiled:
-    """Результат: папка с QC и SMD."""
+    """Результат: папка с QC и SMD"""
 
     directory: str
     #: Путь MDL внутри VPK, который реально нашёлся (может отличаться от первого
-    #: кандидата — например у шапки, лежащей в workshop/).
+    #: кандидата - например у шапки, лежащей в workshop/)
     mdl_rel: str
-    #: True — папка живёт в кэше и переживёт процесс. False — temp-папка,
-    #: которую сохранить не удалось; вызывающий волен удалить её после себя.
+    #: True - папка живёт в кэше и переживёт процесс. False - temp-папка,
+    #: которую сохранить не удалось, вызывающий волен удалить её после себя
     cached: bool
 
 
@@ -72,21 +70,21 @@ def ensure_decompiled(
     on_progress: Optional[Callable[[Stage], None]] = None,
 ) -> Optional[Decompiled]:
     """
-    Папка с декомпилированной моделью — из кэша или после Crowbar.
+    Папка с декомпилированной моделью - из кэша или после Crowbar
 
     Args:
         weapon_key:     Ключ записи кэша и метка для логов. Для общих ресурсов
                         (руки, анимации классов) годится синтетический ключ.
-        misc_vpk_path:  tf2_misc_dir.vpk — из него извлекается модель.
+        misc_vpk_path:  tf2_misc_dir.vpk - из него извлекается модель.
         mdl_candidates: Пути MDL внутри VPK в порядке приоритета.
-        cancelled:      Проверка отмены; вызывается между долгими шагами.
-        on_progress:    Уведомление о стадии перед долгим шагом.
+        cancelled:      Проверка отмены, вызывается между долгими шагами.
+        on_progress:    Уведомление о стадии перед долгим шагом
 
     Returns:
-        Decompiled, либо None — если модель не нашлась в VPK или работу отменили.
+        Decompiled, либо None - если модель не нашлась в VPK или работу отменили
 
     Raises:
-        DecompileError: нет VPK, нет Crowbar или Crowbar завершился с ошибкой.
+        DecompileError: нет VPK, нет Crowbar или Crowbar завершился с ошибкой
     """
     stop = cancelled or (lambda: False)
 
@@ -101,12 +99,12 @@ def ensure_decompiled(
     if not os.path.exists(crowbar):
         raise DecompileError(f"Crowbar not found: {crowbar}")
 
-    # ── Кэш: проверяем КАЖДОГО кандидата ─────────────────────────────────── #
+    # Кэш: проверяем КАЖДОГО кандидата
     # Ключ кэша включает путь MDL, а сохраняется запись под тем путём, который
     # реально нашёлся. Проверка только первого кандидата означала бы вечный
     # промах для всего, что лежит не по своему прямому пути (шапки в workshop/,
     # мультиклассовые модели): такие модели декомпилировались заново каждый раз.
-    # Промах стоит один stat(), так что перебор здесь бесплатный.
+    # Промах стоит один stat(), так что перебор здесь бесплатный
     for candidate in mdl_candidates:
         hit = decompile_cache.get_cached_decompile(
             weapon_key, misc_vpk_path, candidate
@@ -126,10 +124,10 @@ def ensure_decompiled(
         )
         return None
 
-    # Одна распаковка на модель. Превью и поиск стилей открывают её разом —
-    # было два Crowbar на одну модель одновременно; второй ждёт первого и
+    # Одна распаковка на модель. Превью и поиск стилей открывают её разом -
+    # было два Crowbar на одну модель одновременно, второй ждёт первого и
     # берёт готовое. Та же модель под другим ключом (модель класса у тела,
-    # у насмешки и у шапки «На модели») копируется, а не распаковывается.
+    # у насмешки и у шапки «На модели») копируется, а не распаковывается
     lock = _model_lock(misc_vpk_path, found_rel)
     while not lock.acquire(timeout=0.25):
         if stop():
@@ -142,7 +140,7 @@ def ensure_decompiled(
         copied = (decompile_cache.save_to_cache(weapon_key, misc_vpk_path, found_rel, same)
                   if same else None)
         if copied:
-            logger.info(f"[decomp] {weapon_key}: та же модель уже распакована — копия")
+            logger.info(f"[decomp] {weapon_key}: та же модель уже распакована - копия")
             return Decompiled(directory=copied, mdl_rel=found_rel, cached=True)
         return _extract_and_decompile(
             weapon_key, misc_vpk_path, found_rel, crowbar, stop, progress
@@ -151,7 +149,31 @@ def ensure_decompiled(
         lock.release()
 
 
-#: {(VPK, модель): замок} — см. ensure_decompiled.
+def decompile_into(
+    weapon_key: str,
+    misc_vpk_path: str,
+    mdl_candidates: Sequence[str],
+    target_dir: str,
+    **kwargs,
+) -> Optional[str]:
+    """
+    `ensure_decompiled` + своя копия в target_dir: сборка и экспорт правят
+    SMD/QC на месте, а запись кэша должна остаться как её отдал Crowbar
+
+    Returns:
+        Путь к QC в target_dir, либо None (как у ensure_decompiled)
+    """
+    found = ensure_decompiled(weapon_key, misc_vpk_path, mdl_candidates, **kwargs)
+    if found is None:
+        return None
+    try:
+        return decompile_cache.restore_from_cache(found.directory, target_dir)
+    finally:
+        if not found.cached:
+            shutil.rmtree(found.directory, ignore_errors=True)
+
+
+#: {(VPK, модель): замок} - см. ensure_decompiled
 _MODEL_LOCKS: dict = {}
 _MODEL_LOCKS_GUARD = threading.Lock()
 
@@ -167,7 +189,7 @@ def _first_existing(
     candidates: Sequence[str],
     stop: Callable[[], bool],
 ) -> Optional[str]:
-    """Первый кандидат, который есть в VPK. None — ни одного (или отмена)."""
+    """Первый кандидат, который есть в VPK. None - ни одного (или отмена)"""
     for path in candidates:
         if stop():
             return None
@@ -188,7 +210,7 @@ def _extract_and_decompile(
     stop: Callable[[], bool],
     progress: Callable[[Stage], None],
 ) -> Optional[Decompiled]:
-    """Распаковка набора файлов модели + Crowbar + сохранение в кэш."""
+    """Распаковка набора файлов модели + Crowbar + сохранение в кэш"""
     mdl_dir: Optional[str] = None
     decomp_dir: Optional[str] = None
     cached_dir: Optional[str] = None
@@ -229,6 +251,6 @@ def _extract_and_decompile(
         if mdl_dir:
             shutil.rmtree(mdl_dir, ignore_errors=True)
         # temp-папку убираем только когда её содержимое уже лежит в кэше:
-        # иначе вызывающий продолжает читать SMD именно из неё.
+        # иначе вызывающий продолжает читать SMD именно из неё
         if decomp_dir and cached_dir:
             shutil.rmtree(decomp_dir, ignore_errors=True)

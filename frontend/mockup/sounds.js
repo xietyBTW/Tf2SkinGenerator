@@ -1,18 +1,19 @@
-// Страница звуков: какая запись что играет и чем её заменить.
+// Страница звуков: какая запись что играет и чем её заменить
 //
 // Звук в игре зовут не файлом, а именем записи (`Weapon_Shotgun.Single`), и
 // заменяется он подстановкой своего файла по тому же пути внутри `sound/`.
 // Поэтому строка списка - это запись: имя, событие, предмет и файлы. Файлов у
 // записи бывает несколько (игра берёт случайный), и заменяются они все разом -
-// иначе свой звук слышно через раз.
+// иначе свой звук слышно через раз
 //
 // Разбор скрипта и сборка живут в Python (data/sound_catalog, services/
-// sound_build_service). Здесь только показ и выбор.
+// sound_build_service). Здесь только показ и выбор
 
 import * as api from './api.js';
 import { toGameWav } from './audio.js';
 import { chooseFile } from './util.js';
 import { t } from './i18n.js';
+import { flash, staggerIn } from './motion.js';
 
 const els = {
   box: document.getElementById('sounds'),
@@ -37,61 +38,61 @@ const els = {
 
 //: Фильтры страницы. Ключи - те же, что у `api.sounds`; пустая строка -
 //: «все». Раздел - ось главная: у оружия и реплик разные события и разные
-//: говорящие, поэтому смена раздела сбрасывает остальное.
+//: говорящие, поэтому смена раздела сбрасывает остальное
 const sel = { section: 'weapon', who: '', group: '', variant: '', fmt: '',
               own: false, query: '' };
 //: Фасеты колонки, кроме раздела: подпись и что стоит за ключом. У оружия и
 //: реплик группы - события («Выстрел», «Смерть»), у игрока и мира - типы
-//: звуков («Шаги», «Музыка»), и подпись говорит то, что в списке.
+//: звуков («Шаги», «Музыка»), и подпись говорит то, что в списке
 const FACETS = [
   ['who', 'Класс'], ['group', 'Событие'], ['variant', 'Вариант'],
   ['fmt', 'Формат'],
 ];
 const GROUP_TITLE = { player: 'Тип', world: 'Тип' };
-//: Имя фасета на странице → имя в ответе Python. Разошлись в одном месте:
-//: `format` - зарезервированное слово в старых движках.
+//: Имя фасета на странице -> имя в ответе Python. Разошлись в одном месте:
+//: `format` - зарезервированное слово в старых движках
 const FACET_KEY = { fmt: 'format' };
 let rows = [];
 let total = 0;
 let ready = false;
 //: Последний ответ про фильтры: колонку перерисовываем и без запроса -
-//: когда меняется число своих звуков.
+//: когда меняется число своих звуков
 let lastFacets = null;
 let lastAll = null;
 //: Сколько своих звуков выбрано ВСЕГО. Считать по видимым строкам нельзя: их
 //: не больше четырёхсот, и выбранное пропадало из счёта от смены фильтра.
 //: `pickedTotal` - записей, затронутых заменами (это же число у фасета
-//: «Заменённые»), `pickedFiles` - файлов игры под замену (это содержимое VPK).
+//: «Заменённые»), `pickedFiles` - файлов игры под замену (это содержимое VPK)
 let pickedTotal = 0;
 let pickedFiles = 0;
 //: Строка под клавиатурным курсором: стрелки ходят по списку, пробел играет,
-//: Enter просит свой файл.
+//: Enter просит свой файл
 let cursor = -1;
 //: Отложенный перезапрос: список перерисовывается целиком, и делать это на
-//: каждую букву - четыреста узлов на нажатие.
+//: каждую букву - четыреста узлов на нажатие
 let typing = null;
-//: Один проигрыватель на страницу: два звука разом - это каша, а не проверка.
+//: Один проигрыватель на страницу: два звука разом - это каша, а не проверка
 const player = els.audio;
-//: Что играет сейчас - по нему подсвечивается строка списка.
+//: Что играет сейчас - по нему подсвечивается строка списка
 let playingKey = '';
 //: Пока полосу тянут, время в неё не пишем: иначе ползунок вырывается из-под
-//: пальца на каждом кадре звука.
+//: пальца на каждом кадре звука
 let seeking = false;
 //: Номер последнего запроса списка. Фильтры и поиск шлют их подряд, а отвечает
-//: Python не по порядку: без этого ответ на «a» мог лечь поверх ответа на «ab».
+//: Python не по порядку: без этого ответ на «a» мог лечь поверх ответа на «ab»
 let turn = 0;
 
-/** Открывает раздел: подписки один раз, список каждый вход. */
+/** Открывает раздел: подписки один раз, список каждый вход */
 export async function openSounds() {
   els.box.hidden = false;
   if (!ready) {
     ready = true;
     // Первый вход разбирает все звуковые скрипты игры - десять тысяч записей,
-    // пара секунд. Пустой список без единого слова выглядит поломкой.
+    // пара секунд. Пустой список без единого слова выглядит поломкой
     busy('Читаю звуки игры…');
     // Громкость - из общего конфига. Своим запросом, а не через applyLook:
     // раздел грузится по требованию (`import()` в catalog.js), и тянуть его
-    // в стартовый набор модулей ради одного числа не стоит.
+    // в стартовый набор модулей ради одного числа не стоит
     setVolume((await api.settings()).values.sound_volume);
     els.query.addEventListener('input', () => {
       sel.query = els.query.value.trim();
@@ -110,12 +111,12 @@ export async function openSounds() {
   await reload();
 }
 
-/** Кружок вместо списка: страница занята. Пустой текст - вернуть список. */
+/** Кружок вместо списка: страница занята. Пустой текст - вернуть список */
 function busy(text) {
   els.loadingText.textContent = text;
   els.loading.hidden = !text;
   els.list.hidden = Boolean(text);
-  // Счётчик относится к списку, которого сейчас нет.
+  // Счётчик относится к списку, которого сейчас нет
   if (text) els.count.hidden = true;
 }
 
@@ -124,7 +125,7 @@ function onTab(e) {
   if (!btn || btn.dataset.key === sel.section) return;
   sel.section = btn.dataset.key;
   // События прошлого раздела в новом не живут: у оружия не бывает боли, у
-  // реплик - перезарядки. Поиск и «заменённые» - общие, их оставляем.
+  // реплик - перезарядки. Поиск и «заменённые» - общие, их оставляем
   Object.assign(sel, { who: '', group: '', variant: '', fmt: '' });
   reload();
 }
@@ -139,7 +140,7 @@ function onFacet(e) {
 }
 
 /**
- * Разделы в шапке и колонка фасетов - по ответу Python.
+ * Разделы в шапке и колонка фасетов - по ответу Python
  *
  * Перерисовываем целиком: значения и счётчики зависят от остальных
  * фильтров, и держать их в узлах значит гнаться за ответом. Фасет с одним
@@ -168,8 +169,8 @@ function showFilters(facets, all) {
                                 sel[facet] === o.key)),
     ]));
   }
-  // Свои звуки - не свойство записи, а её состояние; но искать их по списку
-  // из десяти тысяч без такого фильтра нечем.
+  // Свои звуки - не свойство записи, а её состояние, но искать их по списку
+  // из десяти тысяч без такого фильтра нечем
   if (pickedTotal || sel.own) {
     blocks.push(block('Свои', [
       option('own', 'own', 'Заменённые', pickedTotal, sel.own),
@@ -179,9 +180,9 @@ function showFilters(facets, all) {
 }
 
 /**
- * Куда уйти, если здесь пусто: разделы, где запрос что-то нашёл.
+ * Куда уйти, если здесь пусто: разделы, где запрос что-то нашёл
  *
- * Шаги лежат в «Мире», а ищут их в «Игроке»; насмешки - и в «Репликах», и в
+ * Шаги лежат в «Мире», а ищут их в «Игроке», насмешки - и в «Репликах», и в
  * «Игроке». Вкладка с числом это уже говорит, но тихо - здесь то же самое
  * словами и кнопкой, прямо там, куда смотрит человек.
  */
@@ -206,7 +207,7 @@ function elsewhere(sections) {
   return out;
 }
 
-/** Опечатка: «scatergun» - предлагаем «scattergun» кнопкой в строку поиска. */
+/** Опечатка: «scatergun» - предлагаем «scattergun» кнопкой в строку поиска */
 function maybe(words) {
   if (!words.length) return [];
   const out = [document.createTextNode(' - возможно: ')];
@@ -254,16 +255,16 @@ function count(n) {
   return b;
 }
 
-/** Ставит громкость и ползунок под неё. */
+/** Ставит громкость и ползунок под неё */
 function setVolume(percent) {
   const n = Number(percent);
   // Значения нет - полная громкость: молчащий плеер читается как поломка,
-  // а не как настройка, и человек полезет искать её причину в звуке.
+  // а не как настройка, и человек полезет искать её причину в звуке
   els.vol.value = String(Number.isFinite(n) ? Math.min(100, Math.max(0, n)) : 100);
   player.volume = Number(els.vol.value) / 100;
 }
 
-/** Свой пульт вместо браузерного: движок тот же <audio>, вид наш. */
+/** Свой пульт вместо браузерного: движок тот же <audio>, вид наш */
 function bindPlayer() {
   els.play.addEventListener('click', () => {
     if (!player.src) return;
@@ -283,7 +284,7 @@ function bindPlayer() {
   });
   // Запоминаем на ОТПУСКАНИИ (`change`), а не на каждом шаге ползунка: одно
   // движение мыши даёт полсотни `input`, и конфиг переписывался бы полсотни
-  // раз. Громкость общая с окном настроек - она в том же конфиге.
+  // раз. Громкость общая с окном настроек - она в том же конфиге
   els.vol.addEventListener('change',
     () => api.setUiState('sound_volume', Number(els.vol.value)));
   player.addEventListener('timeupdate', tick);
@@ -303,8 +304,11 @@ function tick() {
     showTime(player.currentTime, total);
   }
   // Заполненную часть полосы рисует градиент: у input type=range своего
-  // «пройденного» куска нет ни в одном браузере.
+  // «пройденного» куска нет ни в одном браузере
   els.seek.style.setProperty('--done', `${share() * 100}%`);
+  // Та же доля - полосой по строке, которая звучит: видно, сколько осталось,
+  // и не глядя на пульт внизу
+  els.list.querySelector('.snd.is-playing')?.style.setProperty('--snd-p', share());
 }
 
 function showTime(now, total) {
@@ -317,7 +321,7 @@ function clock(sec) {
   return `${Math.floor(whole / 60)}:${String(whole % 60).padStart(2, '0')}`;
 }
 
-/** Состояние кнопки и подсветка строки, которая звучит. */
+/** Состояние кнопки и подсветка строки, которая звучит */
 function showPlaying() {
   const on = !player.paused && !player.ended;
   els.play.classList.toggle('is-playing', on);
@@ -334,12 +338,12 @@ export function closeSounds() {
   player.pause();
 }
 
-/** Запрашивает список заново: с начала, если `offset` не задан. */
+/** Запрашивает список заново: с начала, если `offset` не задан */
 async function reload(offset = 0) {
   const mine = ++turn;
   // Отбор по десяти тысячам записей - сорок миллисекунд, и мигать словом
   // «ищу» на каждый чих незачем. Показываем, только если задумались.
-  // Первый вход уже показал «Читаю звуки игры…» - его не перебиваем.
+  // Первый вход уже показал «Читаю звуки игры…» - его не перебиваем
   const wait = setTimeout(() => { if (els.loading.hidden) busy('Ищу…'); }, 250);
   const res = await api.sounds({ ...sel, offset });
   clearTimeout(wait);
@@ -352,7 +356,7 @@ async function reload(offset = 0) {
   [lastFacets, lastAll] = [res.facets, res.all];
   showFilters(res.facets, res.all);
   // Пустой список сам по себе ничего не объясняет: непонятно, сузил ли ты
-  // фильтр до нуля или раздел не прочитался вовсе.
+  // фильтр до нуля или раздел не прочитался вовсе
   if (!res.loaded) {
     els.count.textContent = 'Раздел пуст: звуковые скрипты игры не прочитались';
   } else if (!total) {
@@ -370,8 +374,10 @@ async function reload(offset = 0) {
     els.list.querySelector('.sounds__more')?.remove();
   }
   rows.push(...res.rows);
-  els.list.append(...res.rows.map(card));
-  // Хвост: сколько ещё за кадром и кнопка за следующей порцией.
+  const added = res.rows.map(card);
+  els.list.append(...added);
+  staggerIn(added);
+  // Хвост: сколько ещё за кадром и кнопка за следующей порцией
   if (rows.length < total) {
     const more = document.createElement('div');
     more.className = 'sounds__more';
@@ -389,7 +395,7 @@ async function reload(offset = 0) {
   showPicked();
 }
 
-/** Строка списка. Ключ записи держим в data-* - подпись переводится. */
+/** Строка списка. Ключ записи держим в data-* - подпись переводится */
 function card(row) {
   const box = document.createElement('div');
   box.className = 'snd';
@@ -403,7 +409,7 @@ function card(row) {
   box.innerHTML = `
     <img class="snd__icon" alt="" loading="lazy">
     <div class="snd__what">
-      <span><b class="snd__title"></b><span class="snd__mvm" hidden>MvM</span><span class="snd__own" hidden>Заменён</span><span class="snd__own snd__part" hidden>Частично</span></span>
+      <span><i class="snd__eq" aria-hidden="true"><i></i><i></i><i></i></i><b class="snd__title"></b><span class="snd__mvm" hidden>MvM</span><span class="snd__own" hidden>Заменён</span><span class="snd__own snd__part" hidden>Частично</span></span>
       <span class="snd__name mono"></span>
     </div>
     <span class="snd__group"></span>
@@ -417,7 +423,7 @@ function card(row) {
     </div>`;
   const icon = box.querySelector('.snd__icon');
   // Своей картинки может не быть у всей игры - тогда прячем, а не показываем
-  // сломанный значок.
+  // сломанный значок
   if (row.icon) icon.src = api.iconUrl(row.icon);
   else icon.hidden = true;
   icon.addEventListener('error', () => { icon.hidden = true; });
@@ -425,17 +431,17 @@ function card(row) {
   box.querySelector('.snd__mvm').hidden = !row.mvm;
   box.querySelector('.snd__name').textContent = row.name;
   // В столбце - группа записи: событие и так стоит в имени строкой ниже, а
-  // в списке «все события» группа говорит, что это за звук.
+  // в списке «все события» группа говорит, что это за звук
   box.querySelector('.snd__group').textContent = row.group_name;
   const cell = box.querySelector('.snd__file');
   cell.prepend(files);
   // Общий файл: игра подменяет файл, и заменив его здесь, человек заменил
   // его и у остальных записей. Скрывать это нельзя - скажем числом, а кто
-  // именно, покажет раскрытие.
+  // именно, покажет раскрытие
   const shared = cell.querySelector('.snd__shared');
   shared.hidden = !row.shared_count;
   if (row.shared_count) shared.textContent = `общий для ${row.shared_count}`;
-  // Разворывать есть что, если файлов несколько или файл общий.
+  // Разворывать есть что, если файлов несколько или файл общий
   cell.disabled = !(many || row.shared_count);
   cell.classList.toggle('is-many', many || Boolean(row.shared_count));
   markOwn(box, row);
@@ -443,7 +449,7 @@ function card(row) {
 }
 
 /**
- * Отмечает строку как заменённую: полоска, слово и две кнопки.
+ * Отмечает строку как заменённую: полоска, слово и две кнопки
  *
  * Заменённую запись надо с чем-то сравнивать: «Прослушать» играет свой файл, и
  * без «Оригинала» исходный звук становится недоступен. Заменена часть файлов
@@ -451,6 +457,8 @@ function card(row) {
  */
 function markOwn(box, { own, partial }) {
   const any = Boolean(own || partial);
+  // Замена только что легла - строка вспыхивает (при первой отрисовке нет)
+  if (box.classList.contains('is-own') !== any) flash(box);
   box.classList.toggle('is-own', any);
   for (const act of ['drop', 'orig']) {
     box.querySelector(`[data-act="${act}"]`).hidden = !any;
@@ -489,7 +497,7 @@ async function onClick(e) {
   if (!row) return;
   setCursor(rows.indexOf(row));
   if (!btn) {
-    // Щелчок по пустому месту строки - берём клавиатуру себе.
+    // Щелчок по пустому месту строки - берём клавиатуру себе
     els.list.focus();
     return;
   }
@@ -502,13 +510,13 @@ async function onClick(e) {
   return ownFor(row);
 }
 
-/** Просит свой файл на запись: из диалога или уже брошенный на строку. */
+/** Просит свой файл на запись: из диалога или уже брошенный на строку */
 async function ownFor(row, dropped = null) {
   const file = await pickSound(row.waves, dropped);
   if (file) await setOwn(row, await api.upload(file));
 }
 
-/** Бросить файл на строку - то же, что «Свой файл», без диалога. */
+/** Бросить файл на строку - то же, что «Свой файл», без диалога */
 function bindDrop() {
   const target = (e) => e.target.closest('.snd__file-row, .snd');
   let lit = null;
@@ -544,7 +552,7 @@ function bindDrop() {
 }
 
 /** Клавиатура: стрелки - по строкам, пробел - играть, Enter - свой файл,
- *  Delete - убрать. Из поиска стрелка вниз уводит в список. */
+ *  Delete - убрать. Из поиска стрелка вниз уводит в список */
 function bindKeys() {
   els.query.addEventListener('keydown', (e) => {
     if (e.key !== 'ArrowDown' || !rows.length) return;
@@ -553,7 +561,7 @@ function bindKeys() {
     setCursor(0);
   });
   els.list.addEventListener('keydown', (e) => {
-    // Кнопки внутри строк живут своей клавиатурой: пробел на них - нажатие.
+    // Кнопки внутри строк живут своей клавиатурой: пробел на них - нажатие
     if (e.target !== els.list) return;
     const row = rows[cursor];
     const acts = {
@@ -586,12 +594,12 @@ function setCursor(index) {
 }
 
 /**
- * Спрашивает свой файл и приводит его к тому, что игра здесь играет.
+ * Спрашивает свой файл и приводит его к тому, что игра здесь играет
  *
  * Читалку движок выбирает по расширению из записи, а не по содержимому файла:
  * WAV под именем `.mp3` - это тишина. В WAV браузер переводит что угодно
  * (см. audio.js), обратно в MP3 - ничего, поэтому записи с MP3 берут только
- * готовый MP3.
+ * готовый MP3
  *
  * Возвращает null, если человек передумал или файл не разобрать.
  */
@@ -605,7 +613,7 @@ async function pickSound(waves, given = null) {
     return null;
   }
   // Приводим ВСЕГДА, даже готовый WAV: 48 кГц, 24 бита и стерео игра молча не
-  // проигрывает, и на глаз такой файл от годного не отличить.
+  // проигрывает, и на глаз такой файл от годного не отличить
   els.note.textContent = 'Перекодирую звук…';
   try {
     return await toGameWav(file);
@@ -615,14 +623,14 @@ async function pickSound(waves, given = null) {
   }
 }
 
-/** Свой файл, если он выбран, иначе игровой. `game` - всегда игровой. */
+/** Свой файл, если он выбран, иначе игровой. `game` - всегда игровой */
 function play(row, game = false) {
   const wave = row.waves[0];
   playFile(row, wave, game ? '' : (row.own_waves[wave] || ''));
 }
 
 /**
- * Жалоба на формат - но только настоящая.
+ * Жалоба на формат - но только настоящая
  *
  * Смена `src` обрывает предыдущий `play()` отказом AbortError, и по двум
  * быстрым нажатиям страница ругалась на совершенно исправный звук. Формат
@@ -635,7 +643,7 @@ function cannotPlay(err) {
 }
 
 /**
- * Раскрывает файлы записи.
+ * Раскрывает файлы записи
  *
  * У 1274 записей файлов несколько: игра берёт случайный, чтобы звук не
  * приедался. Обычно это варианты одного и того же (`ric1…ric5`), но иногда -
@@ -650,7 +658,7 @@ function toggleFiles(row, box) {
   const list = document.createElement('div');
   list.className = 'snd__files';
   // Как игра играет запись: свой файл зазвучит с теми же каналом,
-  // громкостью и уровнем, и знать их полезно до того, как он зазвучал.
+  // громкостью и уровнем, и знать их полезно до того, как он зазвучал
   const props = [row.channel, row.level,
                  row.volume && `volume ${row.volume}`,
                  row.pitch && `pitch ${row.pitch}`].filter(Boolean);
@@ -676,8 +684,8 @@ function toggleFiles(row, box) {
         <button class="textbtn textbtn--sm" data-file="drop">Убрать</button>
       </div>`;
     one.querySelector('.snd__file-name').textContent = wave;
-    // Дубль, свёрнутый в запись, - под именем записи игры; общий файл - с
-    // теми, у кого он ещё стоит.
+    // Дубль, свёрнутый в запись, - под именем записи игры, общий файл - с
+    // теми, у кого он ещё стоит
     const notes = [];
     if (row.takes[i] && row.takes[i] !== row.name) notes.push(row.takes[i]);
     if (row.shared[wave]) notes.push(`также у: ${row.shared[wave].join(', ')}`);
@@ -704,7 +712,7 @@ async function onFile(e, row) {
   const act = btn.dataset.file;
 
   if (act === 'play') {
-    // Свой файл этого варианта, если он выбран, иначе игровой.
+    // Свой файл этого варианта, если он выбран, иначе игровой
     const own = row.own_waves[wave] || '';
     return playFile(row, wave, own);
   }
@@ -717,7 +725,7 @@ async function onFile(e, row) {
   return setFile(row, one, wave, null);
 }
 
-/** Свой файл на ОДИН файл записи: из диалога или брошенный на строку. */
+/** Свой файл на ОДИН файл записи: из диалога или брошенный на строку */
 async function ownForFile(row, one, wave, dropped = null) {
   const file = await pickSound([wave], dropped);
   if (!file) return;
@@ -738,7 +746,7 @@ async function setFile(row, one, wave, path) {
   refreshIfOwnFilter();
 }
 
-/** Ставит на проигрывание один файл: свой, если он выбран, иначе игровой. */
+/** Ставит на проигрывание один файл: свой, если он выбран, иначе игровой */
 function playFile(row, wave, own) {
   player.pause();
   playingKey = row.name;
@@ -747,7 +755,7 @@ function playFile(row, wave, own) {
   player.play().catch(cannotPlay);
 }
 
-/** Кладёт игровой звук в папку экспорта: чтобы переделать, его надо достать. */
+/** Кладёт игровой звук в папку экспорта: чтобы переделать, его надо достать */
 async function save(row) {
   const res = await api.saveSound(row.name);
   if (res.error) {
@@ -755,7 +763,7 @@ async function save(row) {
     return;
   }
   // У записи бывает несколько файлов - игра берёт случайный, и переделывать
-  // обычно надо все.
+  // обычно надо все
   els.note.textContent = res.files > 1
     ? `Сохранено файлов: ${res.files}, рядом с ${res.path}`
     : `Сохранено: ${res.path}`;
@@ -772,7 +780,7 @@ async function setOwn(row, path) {
   applyStates(res.affected);
   showPicked();
   // У части записей файлы разных форматов вперемешку: свой ложится только
-  // на совпавшие, и про остальные надо сказать, а не молчать.
+  // на совпавшие, и про остальные надо сказать, а не молчать
   if (res.skipped) {
     els.note.textContent =
       `Файлов другого формата осталось игровыми: ${res.skipped}`;
@@ -785,22 +793,22 @@ function showPicked() {
     ? `Своих файлов: ${pickedFiles}` : 'Своих звуков нет';
   els.build.disabled = !pickedFiles;
   els.clear.hidden = !pickedFiles;
-  // Счётчик «заменённых» в колонке - тот же pickedTotal.
+  // Счётчик «заменённых» в колонке - тот же pickedTotal
   if (lastFacets) showFilters(lastFacets, lastAll);
 }
 
-/** Снять все свои звуки разом - без перебора по строкам. */
+/** Снять все свои звуки разом - без перебора по строкам */
 async function clearAll() {
   const res = await api.clearSounds();
   pickedTotal = res.total;
   pickedFiles = res.files;
   showPicked();
-  // Состояние строк проще перечитать, чем гасить по одной.
+  // Состояние строк проще перечитать, чем гасить по одной
   reload();
 }
 
 /** После выбора или снятия своего файла под фильтром «заменённые» список
- *  устарел: снятая строка в нём уже не живёт. */
+ *  устарел: снятая строка в нём уже не живёт */
 function refreshIfOwnFilter() {
   if (sel.own) reload();
 }

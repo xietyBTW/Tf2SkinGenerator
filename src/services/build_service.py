@@ -59,10 +59,10 @@ class BuildService:
                     flags=flags,
                     vtf_options=vtf_options,
                 )
-            # ── Режимы «только VTF» (скины эффектов смерти) ──────────────────
-            # Кладём лишь текстуру по игровому пути — игровой VMT (с особым
+            # Режимы «только VTF» (скины эффектов смерти)
+            # Кладём лишь текстуру по игровому пути - игровой VMT (с особым
             # шейдером/прокси) сам её подхватит. Свой VMT тут НЕ пишем, иначе
-            # сломаем эффект (cloak/цвет/scroll).
+            # сломаем эффект (cloak/цвет/scroll)
             from src.data.weapons import VTF_ONLY_SPECIAL_MODES
             if mode in VTF_ONLY_SPECIAL_MODES:
                 success_msg = t.get('special_mode_success', 'Special mode textures created successfully')
@@ -83,7 +83,7 @@ class BuildService:
                 vmt_to_delete = vmt_filename_without_ext
             elif mode != "critHIT" and mod_data_vmt_path.exists():
                 # critHIT намеренно исключён: его VMT генерируется из шаблона
-                # (VMTService._create_special_template), а не копируется из tools.
+                # (VMTService._create_special_template), а не копируется из tools
                 copy_file_safe(mod_data_vmt_path, vmt_path)
                 logger.info(f"Использован VMT файл из mod_data: {mod_data_vmt_path} -> {vmt_path}")
             else:
@@ -99,14 +99,14 @@ class BuildService:
                 VMTService.update_vmt_bumpmap_path(str(vmt_path), normal_cdmaterials_path, normal_texture_filename)
                 logger.info(f"Обновлен VMT файл для добавления $bumpmap: {normal_texture_filename}")
                 if animated_fps:
-                    # Бамп многокадровый (гифка + normal) — тот же fps, что у базы.
+                    # Бамп многокадровый (гифка + normal) - тот же fps, что у базы
                     VMTService.enable_animated_bumpmap(str(vmt_path), animated_fps)
             if mode == "critHIT":
                 pcf_filename = "crit.pcf"
                 mod_data_pcf_path = mod_data_base / pcf_filename
-                # Файла Valve нет в репозитории: если его ещё нет в mod_data —
+                # Файла Valve нет в репозитории: если его ещё нет в mod_data -
                 # генерируем цветной crit.pcf из стокового particles/crit.pcf
-                # установленной у пользователя TF2 (см. CritPcfService).
+                # установленной у пользователя TF2 (см. CritPcfService)
                 if not mod_data_pcf_path.exists():
                     try:
                         from src.services.crit_pcf_service import CritPcfService

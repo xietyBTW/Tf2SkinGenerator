@@ -2,10 +2,10 @@
 Парсер шапок/косметики из items_game.txt (TF2).
 
 Парсит:
-  {tf2_root}/tf/scripts/items/items_game.txt  — данные предметов + MDL-пути
-  {tf2_root}/tf/resource/tf_english.txt       — локализованные названия
+  {tf2_root}/tf/scripts/items/items_game.txt  - данные предметов + MDL-пути
+  {tf2_root}/tf/resource/tf_english.txt       - локализованные названия
 
-Результат кэшируется в cache/ (имя файла — в _cache_file) и инвалидируется
+Результат кэшируется в cache/ (имя файла - в _cache_file) и инвалидируется
 по mtime. Кэш свой на каждый язык: имена в нём уже локализованы.
 """
 
@@ -26,20 +26,20 @@ from src.shared.paths import data_dir
 
 logger = logging.getLogger(__name__)
 
-# ── Пути ─────────────────────────────────────────────────────────────────── #
+# Пути
 
-# v8: добавлено поле icon (image_inventory) — иконка предмета из рюкзака.
+# v8: добавлено поле icon (image_inventory) - иконка предмета из рюкзака.
 # v9: %s раскрывается токеном КЛАССА ИЗ ПУТЕЙ («demo», а не «demoman»).
-# v10: regions — equip_region с учётом prefab (фасет «куда надевается»).
+# v10: regions - equip_region с учётом prefab (фасет «куда надевается»).
 # v11: holiday с учётом prefab.
-# v12: collection — коллекция игры (фильтр каталога).
+# v12: collection - коллекция игры (фильтр каталога).
 # v13: убран event (сезон): фильтр прячет только хэллоуинские по ограничению.
 # Смена версии форсирует одноразовый перепарс старого кэша.
 _CACHE_VERSION = "v14"  # v14: что шапка прячет у персонажа (hidden_bodygroups)
 _CACHE_DIR = data_dir() / "cache"
 
 #: Как называется файл локализации у языка приложения. Один словарь на модуль:
-#: по нему и читают tf_*.txt, и разводят кэши — иначе первый разобранный язык
+#: по нему и читают tf_*.txt, и разводят кэши - иначе первый разобранный язык
 #: становился единственным, и переключение в настройках ничего не меняло.
 _LANG_FILES = {"en": "english", "ru": "russian"}
 
@@ -62,7 +62,7 @@ _SLOT_COSMETIC = {"head", "misc", "hat", "secondary", "tertiary", "utility", "ac
 #: Как класс называется В ПУТЯХ К МОДЕЛЯМ. Совпадает с именем класса везде,
 #: кроме подрывника: файлы у него `..._demo.mdl` (в игре 910 таких моделей и ни
 #: одной `_demoman`). Раскрывая %s именем класса, мы получали несуществующий
-#: путь — и подрывник молча оставался без шапки в собранном моде.
+#: путь - и подрывник молча оставался без шапки в собранном моде.
 _MODEL_CLASS_TOKEN = {"demoman": "demo"}
 
 
@@ -70,17 +70,17 @@ def _model_token(class_name: str) -> str:
     return _MODEL_CLASS_TOKEN.get(class_name.lower(), class_name)
 
 
-# ── Структура предмета ────────────────────────────────────────────────────── #
+# Структура предмета
 
 @dataclass
 class HatItem:
     defindex: str
     name: str           # локализованное отображаемое имя
     internal_name: str  # поле "name" из items_game.txt
-    mdl_path: str       # models/player/items/... (primary — для превью/одиночной сборки)
+    mdl_path: str       # models/player/items/... (primary - для превью/одиночной сборки)
     classes: List[str]  # классы, которые могут носить
     slot: str           # head / misc / etc.
-    # Карта класс → mdl-путь для мультиклассовых шапок (разные модели на класс,
+    # Карта класс -> mdl-путь для мультиклассовых шапок (разные модели на класс,
     # либо %s-шаблон, раскрытый по классам). Пустой dict = одна общая модель.
     per_class_models: Dict[str, str] = field(default_factory=dict)
     # Модельные стили из items_game (styles { N { model_player(_per_class) } }):
@@ -90,37 +90,37 @@ class HatItem:
     styles: List[dict] = field(default_factory=list)
     # Токен типа предмета ("item_type_name"), напр. "#TF_Wearable_CommunityMedal".
     item_type: str = ""
-    # "prefab" из блока — у турнирных медалей это "tournament_medal" (сам
+    # "prefab" из блока - у турнирных медалей это "tournament_medal" (сам
     # item_type_name наследуется от prefab и в блоке отсутствует).
     prefab: str = ""
     # Токен "item_name", напр. "#TF_TournamentMedal_AFC_Div1_1st".
     item_name_token: str = ""
     # Праздничное ограничение ("holiday_restriction"), напр.
-    # "halloween_or_fullmoon" / "christmas" — по нему фильтруем сезонное.
+    # "halloween_or_fullmoon" / "christmas" - по нему фильтруем сезонное.
     holiday: str = ""
     # Коллекция игры (item_collections): ключ, название из локализации и
-    # порядковый номер в items_game — он же хронология выпуска. Пусто / -1 —
+    # порядковый номер в items_game - он же хронология выпуска. Пусто / -1 -
     # предмет ни в одну не входит (всё, что старше 2015 года).
     collection: str = ""
     collection_name: str = ""
     collection_rank: int = -1
-    # "image_inventory" — иконка рюкзака без расширения, напр.
+    # "image_inventory" - иконка рюкзака без расширения, напр.
     # "backpack/player/items/soldier/soldier_officer". Пусто = не объявлена,
     # тогда иконку ищут по имени модели (см. services/backpack_icons).
     icon: str = ""
     # Области экипировки ("equip_region"/"equip_regions", с учётом prefab):
-    # hat, beard, glasses, shirt… — в игре их 67. Пусто = не объявлены (у
+    # hat, beard, glasses, shirt… - в игре их 67. Пусто = не объявлены (у
     # медалей и старых предметов их нет и в prefab).
     regions: List[str] = field(default_factory=list)
     # Что шапка прячет у персонажа: "visuals" { "player_bodygroups" { … } }
-    # (с учётом prefab) — {бодигруппа: вариант}. Каска солдата — это его
+    # (с учётом prefab) - {бодигруппа: вариант}. Каска солдата - это его
     # бодигруппа "hat", и шапка на голову переключает её в пустой вариант,
     # иначе каска торчала бы сквозь шапку. Пусто = ничего не прячет.
     hidden_bodygroups: Dict[str, int] = field(default_factory=dict)
 
     @property
     def region(self) -> str:
-        """Куда надевается — одной из пяти групп (см. REGION_GROUPS)."""
+        """Куда надевается - одной из пяти групп (см. REGION_GROUPS)."""
         if self.is_medal:
             return 'medal'
         groups = {region_group(r) for r in self.regions}
@@ -160,9 +160,9 @@ class HatItem:
         # Фильтр по классу
         if class_filter and class_filter != "all":
             wanted = class_filter.lower().replace("_", "-")
-            # Предметы без ограничений (classes == [] или все 9 классов) —
+            # Предметы без ограничений (classes == [] или все 9 классов) -
             # это и есть «All-Class»: под фильтром класса их быть не должно,
-            # а под своим собственным — только они.
+            # а под своим собственным - только они.
             all_class = not self.classes or len(self.classes) >= 9
             if wanted == "all-class":
                 return all_class and self._matches_query(query_words)
@@ -182,7 +182,7 @@ class HatItem:
         return all(w in searchable for w in query_words)
 
     def relevance(self, query_words: List[str]) -> int:
-        """Оценка релевантности (меньше — выше в списке)."""
+        """Оценка релевантности (меньше - выше в списке)."""
         name_lower = self.name.lower()
         q = " ".join(query_words)
         if name_lower == q:
@@ -194,10 +194,10 @@ class HatItem:
         return 3
 
 
-# ── Куда надевается ───────────────────────────────────────────────────────── #
+# Куда надевается
 
-#: Порядок групп в фасете; он же — приоритет, когда у предмета областей
-#: несколько (шлем с очками — голова).
+#: Порядок групп в фасете; он же - приоритет, когда у предмета областей
+#: несколько (шлем с очками - голова).
 REGION_ORDER = ('head', 'face', 'body', 'medal', 'other')
 
 _HEAD = {'hat', 'whole_head', 'head_skin', 'ears', 'sniper_headband'}
@@ -232,7 +232,7 @@ def _extract_regions(block: str, game: items_game_kv.ItemsGame) -> List[str]:
     return sorted(out)
 
 
-# ── Низкоуровневые хелперы парсера KV ─────────────────────────────────────── #
+# Низкоуровневые хелперы парсера KV
 
 # Разбор самого формата KeyValues живёт в items_game_kv: тот же файл читают
 # анимации вьюмодели, и две копии скобочного парсера расходились бы молча.
@@ -274,7 +274,7 @@ def _extract_per_class_model(block: str) -> Optional[str]:
 
 def _extract_per_class_models(block: str) -> Dict[str, str]:
     """
-    Извлекает ВСЕ пары класс→MDL из блока model_player_per_class { ... }.
+    Извлекает ВСЕ пары класс->MDL из блока model_player_per_class { ... }.
 
     Возвращает {класс: нормализованный_путь} только для известных классов TF2.
     """
@@ -300,7 +300,7 @@ def _extract_style_models(block: str, classes: List[str],
     Извлекает МОДЕЛЬНЫЕ стили из блока styles { "N" { ... } }.
 
     Берём только стили, задающие свою модель (model_player / model_player_per_class).
-    Скиновые стили ("skin" "N") пропускаем — они меняют скин, а не геометрию.
+    Скиновые стили ("skin" "N") пропускаем - они меняют скин, а не геометрию.
 
     Returns:
         [{'name': str, 'per_class_models': {class: mdl}}] в порядке индексов стилей.
@@ -321,7 +321,7 @@ def _extract_style_models(block: str, classes: List[str],
         e = _skip_to_close_brace(sub, b)
         styleblk = sub[b:e]
 
-        # Модели стиля: per-class → карта; иначе flat model_player (общая/%s).
+        # Модели стиля: per-class -> карта; иначе flat model_player (общая/%s).
         pcm = _extract_per_class_models(styleblk)
         if not pcm:
             flat = _flat_value(styleblk, "model_player")
@@ -333,7 +333,7 @@ def _extract_style_models(block: str, classes: List[str],
                 else:
                     pcm = {c: flat for c in target}   # одна общая модель на все классы
         if not pcm:
-            continue   # скиновый стиль — без своей модели, пропускаем
+            continue   # скиновый стиль - без своей модели, пропускаем
 
         token = _flat_value(styleblk, "name")
         name = None
@@ -367,11 +367,11 @@ def _bodygroup_pairs(block: Optional[str]) -> Dict[str, int]:
 
 
 def _find_items_section(content: str) -> int:
-    """Позиция '{' секции "items" — прямого потомка "items_game" (или -1)."""
+    """Позиция '{' секции "items" - прямого потомка "items_game" (или -1)."""
     return items_game_kv.find_section(content, "items")
 
 
-# ── Коллекция предмета ──────────────────────────────────────────────────────── #
+# Коллекция предмета
 
 def _item_collections(content: str,
                       localization: Dict[str, str]) -> Dict[str, tuple]:
@@ -399,7 +399,7 @@ def _collection_fields(found: Optional[tuple]) -> dict:
     return {"collection": key, "collection_name": name, "collection_rank": rank}
 
 
-# ── Парсинг items_game.txt ─────────────────────────────────────────────────── #
+# Парсинг items_game.txt
 
 def _parse_items_game(filepath: str,
                       localization: Dict[str, str],
@@ -461,7 +461,7 @@ def _parse_items_game(filepath: str,
         if content[pos] == '}':
             break
 
-        # Читаем ключ (defindex) — должен быть в кавычках
+        # Читаем ключ (defindex) - должен быть в кавычках
         if content[pos] != '"':
             pos += 1
             continue
@@ -495,19 +495,19 @@ def _parse_items_game(filepath: str,
         if not has_model_ref and "tf_wearable" not in block:
             continue
 
-        # Если item_class явно указан и это не tf_wearable — точно не косметика.
-        # Если item_class не указан (унаследован через prefab) — продолжаем проверку.
+        # Если item_class явно указан и это не tf_wearable - точно не косметика.
+        # Если item_class не указан (унаследован через prefab) - продолжаем проверку.
         item_class = _flat_value(block, "item_class")
         if item_class and item_class.lower() != "tf_wearable":
             skipped_class += 1
             continue
 
-        # ── MDL-путь ─────────────────────────────────────────────────────── #
-        # Приоритет: model_player → model_player_per_class → model_world
+        # MDL-путь
+        # Приоритет: model_player -> model_player_per_class -> model_world
         mdl_path = _flat_value(block, "model_player")
 
         # TF2 использует %s как плейсхолдер для имени класса (напр. ghostly_gibus_%s.mdl).
-        # Сохраняем %s как есть — vpk_service раскрывает его в пути для каждого класса при сборке.
+        # Сохраняем %s как есть - vpk_service раскрывает его в пути для каждого класса при сборке.
 
         if not mdl_path:
             mdl_path = _extract_per_class_model(block)
@@ -535,7 +535,7 @@ def _parse_items_game(filepath: str,
             skipped_slot += 1
             continue
 
-        # Кейсы/ящики/крафт-инструменты — это НЕ носибельные предметы (их открывают,
+        # Кейсы/ящики/крафт-инструменты - это НЕ носибельные предметы (их открывают,
         # а не носят). Признаки: prefab с «case»/«crate», блок "tool" { … } или
         # модель в crafting/. Прячем их из списка шапок.
         prefab = (_flat_value(block, "prefab") or "").lower()
@@ -566,9 +566,9 @@ def _parse_items_game(filepath: str,
 
         # Пер-классовые модели (мультиклассовые шапки).
         # %s в пути (mdl_path уже раскрыт из model_player ИЛИ из basename внутри
-        # model_player_per_class) → all-class шаблон: раскрываем по классам.
-        # Если used_by_classes пуст — значит все 9 классов.
-        # Иначе — явные пары класс→MDL из model_player_per_class.
+        # model_player_per_class) -> all-class шаблон: раскрываем по классам.
+        # Если used_by_classes пуст - значит все 9 классов.
+        # Иначе - явные пары класс->MDL из model_player_per_class.
         per_class_models: Dict[str, str] = {}
         if "%s" in mdl_path:
             target_classes = classes if classes else list(_CLASS_NAMES)
@@ -587,7 +587,7 @@ def _parse_items_game(filepath: str,
         # Метки для фильтрации: тип предмета (медали) и сезонность (Halloween).
         item_type = _flat_value(block, "item_type_name") or ""
         prefab = _flat_value(block, "prefab") or ""
-        # С prefab: у хэллоуинских 2011–2014 ограничение живёт в prefab
+        # С prefab: у хэллоуинских 2011-2014 ограничение живёт в prefab
         # («halloween2013»), и в блоке его видно у одной шапки из пяти.
         holiday = game.inherited(block, "holiday_restriction") or ""
         icon = _flat_value(block, "image_inventory") or ""
@@ -629,10 +629,10 @@ def _parse_items_game(filepath: str,
     return results
 
 
-# ── Парсинг локализации ───────────────────────────────────────────────────── #
+# Парсинг локализации
 
 #: Строка локализации: ключ и значение, кавычки внутри значения экранированы.
-#: Наивное `"([^"]*)"` обрывалось на первой же такой кавычке — «"Рыцарь
+#: Наивное `"([^"]*)"` обрывалось на первой же такой кавычке - «"Рыцарь
 #: Туфорта"» превращался в одинокий слеш, а разбор дальше съезжал на строку.
 #: Якорь на начало строки не даёт значению перескочить перевод строки.
 _LOC_LINE = re.compile(r'^\s*"((?:[^"\\]|\\.)+)"\s+"((?:[^"\\]|\\.)*)"', re.M)
@@ -656,7 +656,7 @@ def _clean_display(value: str) -> str:
 
 #: Разобранные файлы локализации: {(путь, mtime): токены}. Файл на три
 #: мегабайта разбирается треть секунды, а просят его и каталог шапок, и
-#: насмешки, и звуки — каждый на своём языке и каждый заново. Ключ с mtime:
+#: насмешки, и звуки - каждый на своём языке и каждый заново. Ключ с mtime:
 #: обновление игры подменяет файл, и старый разбор не переживёт его.
 _LOC_CACHE: Dict[tuple, Dict[str, str]] = {}
 #: Первые запросы приходят разом (прогрев красок, каталог, насмешки): без
@@ -669,8 +669,8 @@ def parse_localization(tf2_root: str, lang: str = "english",
     """
     Парсит tf_english.txt (или {stem}_{lang}.txt) и возвращает {token: display_name}.
 
-    stem — у названий War Paint свой файл, `tf_proto_obj_defs_{lang}.txt`.
-    Словарь общий на всех, кто его попросил, — не менять на месте.
+    stem - у названий War Paint свой файл, `tf_proto_obj_defs_{lang}.txt`.
+    Словарь общий на всех, кто его попросил, - не менять на месте.
     """
     lang_file = Path(tf2_root) / "tf" / "resource" / f"{stem}_{lang}.txt"
     if not lang_file.exists():
@@ -684,7 +684,7 @@ def parse_localization(tf2_root: str, lang: str = "english",
         cached = _LOC_CACHE.get(key)
         if cached is None:
             cached = _read_localization(lang_file)
-            if cached:                  # не прочитался — попробуем в другой раз
+            if cached:                  # не прочитался - попробуем в другой раз
                 _LOC_CACHE[key] = cached
         return cached
 
@@ -709,20 +709,20 @@ def _read_localization(lang_file: Path) -> Dict[str, str]:
     return tokens
 
 
-# ── Кэш ──────────────────────────────────────────────────────────────────── #
+# Кэш
 
 def _cache_valid(tf2_root: str, language: str = "en") -> bool:
     """Проверяет, актуален ли кэш (не устарел по mtime и не пустой)."""
     cache = _cache_file(language)
     if not cache.exists():
         return False
-    # Пустой кэш считается невалидным — принудительно перепарсим
+    # Пустой кэш считается невалидным - принудительно перепарсим
     try:
         if cache.stat().st_size < 10:
             return False
         data = json.loads(cache.read_text(encoding="utf-8"))
         if not data:   # пустой список
-            logger.warning("Кэш пустой — будет перепарсен")
+            logger.warning("Кэш пустой - будет перепарсен")
             return False
     except Exception:
         return False
@@ -783,7 +783,7 @@ def _drop_old_caches() -> None:
             pass
 
 
-# ── Публичный API ─────────────────────────────────────────────────────────── #
+# Публичный API
 
 def parse_hats(
     tf2_root: str,
@@ -794,8 +794,8 @@ def parse_hats(
     """
     Возвращает список всех косметических предметов TF2 с MDL-путями.
     """
-    # Список в памяти: кэш на диске читался и проверялся на каждый вызов —
-    # 120 мс на букву запроса. Ключ — mtime файла кэша: перепарс его меняет.
+    # Список в памяти: кэш на диске читался и проверялся на каждый вызов -
+    # 120 мс на букву запроса. Ключ - mtime файла кэша: перепарс его меняет.
     memo_key = (tf2_root, language)
     cache = _cache_file(language)
     stamp = cache.stat().st_mtime if cache.exists() else 0
@@ -832,11 +832,11 @@ def parse_hats(
     _save_cache(items, language)
 
     if progress_cb:
-        progress_cb(100, f"Done — {len(items)} cosmetics found")
+        progress_cb(100, f"Done - {len(items)} cosmetics found")
 
     _MEMO[memo_key] = (cache.stat().st_mtime if cache.exists() else 0, items)
     return items
 
 
-#: {(корень игры, язык): (mtime кэша, список)} — см. parse_hats.
+#: {(корень игры, язык): (mtime кэша, список)} - см. parse_hats.
 _MEMO: Dict[tuple, tuple] = {}

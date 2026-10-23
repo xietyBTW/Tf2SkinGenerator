@@ -1,7 +1,7 @@
 """Свои настройки карт (MATERIAL_MAPS[…]["settings"]): отражение, свечение,
-края блика. Пустое — как у материала, в VMT не пишется.
+края блика. Пустое - как у материала, в VMT не пишется
 
-Факты: вики Valve ($envmap, $selfillum, $phong) и материалы TF2.
+Факты: вики Valve ($envmap, $selfillum, $phong) и материалы TF2
 """
 import tempfile
 import unittest
@@ -38,12 +38,12 @@ class MapSettingsTests(unittest.TestCase):
             'derive': True, 'env_cubemap': 'specular', 'env_tint': '#ff8000',
             'env_strength': '50'}}))
         self.assertEqual(doc.path('$envmap'), 'cubemaps/cubemap_specular001')
-        # Игра возведёт в 2.2: 0.5^(1/2.2) ≈ 0.73 — в итоге половина отражения.
+        # Игра возведёт в 2.2: 0.5^(1/2.2) ≈ 0.73 - в итоге половина отражения
         self.assertEqual(doc.get('$envmaptint'), '[0.730 0.366 0.000]')
 
     def test_reflection_tint_is_linear_on_phong(self):
         # Phong-материал берёт $envmaptint как есть (skin_dx9_helper.cpp):
-        # цвет палитры в линейный, сила без степени.
+        # цвет палитры в линейный, сила без степени
         self.vmt.write_text(GOLD_VMT.replace('"$envmap"', '"$phong" "1"\n\t"$envmap"'),
                             encoding='utf-8')
         doc = vmt_parse.parse(self.apply({'envmapmask': {
@@ -52,7 +52,7 @@ class MapSettingsTests(unittest.TestCase):
 
     def test_tint_follows_phong_turned_on_later(self):
         # Контур свечения при $detail включает phong уже после отражения:
-        # цвет всё равно в линейном виде.
+        # цвет всё равно в линейном виде
         self.vmt.write_text(GOLD_VMT.replace('"$envmap"', '"$bumpmap" "models/w/m9_n"\n'
                                              '\t"$detail" "models/w/d"\n\t"$envmap"'),
                             encoding='utf-8')
@@ -63,7 +63,7 @@ class MapSettingsTests(unittest.TestCase):
         self.assertEqual(doc.get('$envmaptint'), '[0.216 0.216 0.216]')
 
     def test_native_tint_linearised_when_build_turns_phong_on(self):
-        # [.1 .1 .1] без phong движок возводил в 2.2; с phong берёт как есть.
+        # [.1 .1 .1] без phong движок возводил в 2.2; с phong берёт как есть
         doc = vmt_parse.parse(self.apply({'envmapmask': {'derive': True, 'env_fresnel': '60'}}))
         self.assertEqual(doc.get('$envmaptint'), '[0.006 0.006 0.006]')
 
@@ -84,9 +84,9 @@ class MapSettingsTests(unittest.TestCase):
         self.assertIsNotNone(proxies.block('Equals'))            # родной цел
         self.assertEqual(proxies.block('Sine').get('sineperiod'), '0.6')
         self.assertEqual(proxies.block('Sine').get('sinemin'), '0.2')
-        # Наш Multiply — последним: он и решает итог каждый кадр.
+        # Наш Multiply - последним: он и решает итог каждый кадр
         self.assertLess(text.index('"Equals"'), text.index('"Multiply"'))
-        # Повторная сборка не копит прокси.
+        # Повторная сборка не копит прокси
         text = self.apply({'selfillum': {'derive': True, 'glow_color': '#00ff00',
                                          'glow_pulse': 'fast'}})
         self.assertEqual(text.count('"Multiply"'), 1)
@@ -120,7 +120,7 @@ class MapSettingsTests(unittest.TestCase):
     def test_strength_without_colour_keeps_gold_hue(self):
         doc = vmt_parse.parse(self.apply({'envmapmask': {'derive': True,
                                                          'env_strength': '200'}}))
-        # [.1 .1 .1] материала × 2^(1/2.2): оттенок свой, только сильнее.
+        # [.1 .1 .1] материала × 2^(1/2.2): оттенок свой, только сильнее
         self.assertEqual(doc.get('$envmaptint'), '[0.137 0.137 0.137]')
 
     def test_fresnel_skipped_with_separate_mask(self):
@@ -133,7 +133,7 @@ class MapSettingsTests(unittest.TestCase):
     def test_glow_edge_needs_normal(self):
         self.write('"VertexLitGeneric"\n{\n\t"$basetexture" "models/w/m9"\n}\n')
         doc = vmt_parse.parse(self.apply({'selfillum': {'derive': True, 'glow_edge': 'on'}}))
-        self.assertIsNone(doc.get('$selfillumfresnel'))       # нет нормали — не пишем впустую
+        self.assertIsNone(doc.get('$selfillumfresnel'))       # нет нормали - не пишем впустую
 
     def test_glow_edge_on_blue_follows_red_normal(self):
         self.write('"VertexLitGeneric"\n{\n\t"$basetexture" "models/w/m9_blue"\n}\n')
@@ -151,8 +151,8 @@ class MapSettingsTests(unittest.TestCase):
         self.assertIn('tf2sg glow', vmt_effects._strip_marked_proxies(text))
 
     def test_glow_colour_is_linear(self):
-        # $selfillumtint движок берёт без перевода из гаммы — серый из палитры
-        # (128) пишется линейным 0.216, иначе свечение выходило светлее.
+        # $selfillumtint движок берёт без перевода из гаммы - серый из палитры
+        # (128) пишется линейным 0.216, иначе свечение выходило светлее
         doc = vmt_parse.parse(self.apply({'selfillum': {'derive': True,
                                                         'glow_color': '#808080'}}))
         self.assertEqual(doc.get('$selfillumtint'), '[0.216 0.216 0.216]')

@@ -1,8 +1,8 @@
 """
-Правка VMT во все материалы предмета (без шестерёнки).
+Правка VMT во все материалы предмета (без шестерёнки)
 
 Остальным материалам уходит не текст, а разбор правки: эффекты собираются
-в каждом заново, ключи - без путей текстур, ключи вложенных блоков не трогаются.
+в каждом заново, ключи - без путей текстур, ключи вложенных блоков не трогаются
 """
 
 import unittest
@@ -46,7 +46,7 @@ class PlanTests(unittest.TestCase):
         self.assertEqual(keys["$phongboost"][1], '"2"')
         self.assertEqual(keys["$rimlight"][1], '"1"')
         self.assertNotIn("$phong", keys)
-        # Ключ во вложенном блоке - не корень, его правка не трогает.
+        # Ключ во вложенном блоке - не корень, его правка не трогает
         self.assertIn('\t\t"$phongboost" "9"', text)
 
     def test_effect_is_rebuilt_from_the_other_materials_text(self):
@@ -84,7 +84,7 @@ class PlanTests(unittest.TestCase):
 
 
 class SaveAllTests(unittest.TestCase):
-    """Сохранение без шестерёнки: какие материалы и как получают правку."""
+    """Сохранение без шестерёнки: какие материалы и как получают правку"""
 
     def setUp(self):
         self.store = {"a": GAME, "b": OTHER, "c": OTHER.replace("weapons/b", "weapons/c")}

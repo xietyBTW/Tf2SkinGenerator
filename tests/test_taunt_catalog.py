@@ -1,10 +1,10 @@
 """
-Список насмешек с реквизитом из items_game.
+Список насмешек с реквизитом из items_game
 
 Руками таких таблиц не держат: в игре их девяносто с лишним, и каждое
 обновление приносит новые. Здесь проверяются правила разбора, на которых
 список стоит: какой блок читать, какую модель считать главной и откуда брать
-имя с иконкой.
+имя с иконкой
 """
 
 from __future__ import annotations
@@ -16,8 +16,8 @@ from pathlib import Path
 from src.data import taunt_catalog
 
 #: Два предмета: всеклассовая насмешка с моделью на каждый класс и одноклассовая.
-#: В первом нарочно лежит `model_player_per_class` — блок с такими же строками
-#: `"класс" "модель"`, но не про реквизит.
+#: В первом нарочно лежит `model_player_per_class` - блок с такими же строками
+#: `"класс" "модель"`, но не про реквизит
 ITEMS_GAME = '''
 "items_game"
 {
@@ -99,25 +99,25 @@ class LoadTests(unittest.TestCase):
             hats.parse_localization = was
 
     def test_only_items_with_a_prop_get_in(self):
-        """У шапки блока насмешки нет — ей в этом списке не место."""
+        """У шапки блока насмешки нет - ей в этом списке не место"""
         self.assertEqual(sorted(self._load()), ['matchbox', 'riff', 'solo'])
 
     def test_key_and_path_come_from_the_scouts_model(self):
-        """У всеклассовой насмешки девять моделей, разница только в размере.
+        """У всеклассовой насмешки девять моделей, разница только в размере
 
         Разведчик есть у каждой такой, и ключ выходит тот же, что был выверен
-        руками (`taunt_cheers_scout`, `brutal_guitar`).
+        руками (`taunt_cheers_scout`, `brutal_guitar`)
         """
         self.assertEqual(self._load()['riff']['mdl_path'],
                          'models/workshop/taunts/riff/riff.mdl')
 
     def test_model_outside_the_prop_block_is_not_taken(self):
-        """`model_player_per_class` — это косметика предмета, а не реквизит."""
+        """`model_player_per_class` - это косметика предмета, а не реквизит"""
         paths = {row['mdl_path'] for row in self._load().values()}
         self.assertTrue(all('НЕ_РЕКВИЗИТ' not in p for p in paths))
 
     def test_name_loses_the_taunt_prefix(self):
-        """«Насмешка: Тестовый рифф» — приставка занимает пол-карточки."""
+        """«Насмешка: Тестовый рифф» - приставка занимает пол-карточки"""
         self.assertEqual(self._load()['riff']['ru'], 'Тестовый рифф')
 
     def test_name_without_a_prefix_is_left_alone(self):
@@ -128,12 +128,12 @@ class LoadTests(unittest.TestCase):
                          'backpack/workshop/taunts/riff')
 
     def test_weapon_taunt_prop_does_not_take_the_weapon_icon(self):
-        """Коробок Thermal Thruster: иконка предмета рисует ранец, не коробок."""
+        """Коробок Thermal Thruster: иконка предмета рисует ранец, не коробок"""
         self.assertEqual(self._load()['matchbox']['icon'], '')
 
 
 class MergeTests(unittest.TestCase):
-    """Влитие в общие таблицы: своё имя не терять, чужое добавить."""
+    """Влитие в общие таблицы: своё имя не терять, чужое добавить"""
 
     FOUND = {
         'riff': {'ru': 'Тестовый рифф', 'en': 'Test Riff',
@@ -164,10 +164,10 @@ class MergeTests(unittest.TestCase):
         return added, taunt_props.TAUNT_PROPS, weapons.WEAPON_MDL_PATHS
 
     def test_hand_written_name_survives_but_the_icon_is_taken(self):
-        """Свои имена переведены руками и короче официальных.
+        """Свои имена переведены руками и короче официальных
 
         А иконки у ручной таблицы не было вовсе: карточкам рисовали обложку из
-        текстуры модели, и у пачки денег выходило зелёное пятно.
+        текстуры модели, и у пачки денег выходило зелёное пятно
         """
         from src.data.taunt_props import TAUNT_PROPS
 
@@ -180,7 +180,7 @@ class MergeTests(unittest.TestCase):
         self.assertEqual(table['riff']['icon'], 'backpack/riff')
 
     def test_new_prop_reaches_the_table_of_models(self):
-        """Без этого сборка не найдёт MDL: путь ищут по общей таблице оружия."""
+        """Без этого сборка не найдёт MDL: путь ищут по общей таблице оружия"""
         _, _, mdl_paths = self._merge()
         self.assertEqual(mdl_paths['solo'], 'models/solo.mdl')
 

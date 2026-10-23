@@ -1,4 +1,4 @@
-"""Стоковое снаряжение класса для сцены «На модели» — из items_game."""
+"""Стоковое снаряжение класса для сцены «На модели» - из items_game"""
 
 from src.data import stock_loadout
 
@@ -74,8 +74,8 @@ def _root(tmp_path):
 
 
 def test_anim_slot_and_prefab_model(tmp_path):
-    # Гранатомёт демомана — основное оружие, но стойка вспомогательного;
-    # модель — из prefab.
+    # Гранатомёт демомана - основное оружие, но стойка вспомогательного;
+    # модель - из prefab
     [w] = stock_loadout.loadout("demoman", _root(tmp_path))
     assert (w.slot, w.anim) == ("primary", "SECONDARY")
     assert w.model.endswith("c_grenadelauncher.mdl")
@@ -85,6 +85,6 @@ def test_empty_hands_and_building_only_for_spy(tmp_path):
     root = _root(tmp_path)
     [fists] = stock_loadout.loadout("heavy", root)
     assert fists.slot == "melee" and fists.model is None
-    # Ящик инженера — не слот раскладки; сапёр шпиона — второй слот.
+    # Ящик инженера - не слот раскладки, сапёр шпиона - второй слот
     assert stock_loadout.loadout("engineer", root) == []
     assert [w.slot for w in stock_loadout.loadout("spy", root)] == ["secondary", "building"]

@@ -1,14 +1,13 @@
 """
-Сохранённые работы — отдельный список, а не наложение на каталог.
+Сохранённые работы - отдельный список, а не наложение на каталог
 
-Раньше открытие «Обреза» из списка оружия молча возвращало ПРОШЛУЮ работу над
-ним: человек выбирал игровой предмет, а получал свой, и вернуться к игровому
-мог только через «Забыть правки». Теперь список оружия показывает игру, а
-работы живут в разделе «Кастомный мод» — сюда и приходит `restore`.
+Список оружия показывает игру, а работы живут в разделе «Кастомный мод» -
+сюда и приходит `restore`. Иначе «Обрез» из списка оружия молча открывался бы
+прошлой работой над ним
 
-И попадают туда не все: автосохранение пишет черновик на каждое движение, так
-что «просто потыкал» становилось модом. В библиотеке видно только то, что
-человек сохранил сам — метка `kept`.
+И попадают туда не все: автосохранение пишет черновик на каждое движение, и
+«просто потыкал» не должно становиться модом. В библиотеке видно только то, что
+человек сохранил сам - метка `kept`
 """
 
 from __future__ import annotations
@@ -41,14 +40,14 @@ class ListSavedTests(unittest.TestCase):
             root = Path(tmp)
             self._folder(root, 'hat__demo', 1000.0)
             self._folder(root, 'c_scattergun__c_scattergun', 2000.0)
-            # Остаток прерванной записи: папка есть, работы нет.
+            # Остаток прерванной записи: папка есть, работы нет
             self._folder(root, 'c_knife__c_knife', 0.0, edits=False)
             with mock.patch.object(work_store, 'WORK_DIR', root):
                 keys = [w['key'] for w in work_store.list_saved()]
             self.assertEqual(keys, ['c_scattergun__c_scattergun', 'hat__demo'])
 
     def test_delete_from_the_library_card(self):
-        """Крестик на карточке работы: только сохранённая и только по имени."""
+        """Крестик на карточке работы: только сохранённая и только по имени"""
         from src.app.api import saved_works
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -63,7 +62,7 @@ class ListSavedTests(unittest.TestCase):
             self.assertTrue((root / 'c_knife__c_knife').exists())
 
     def test_draft_nobody_saved_stays_out_of_the_library(self):
-        """Открыл предмет, что-то тронул — это ещё не мод."""
+        """Открыл предмет, что-то тронул - это ещё не мод"""
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
             self._folder(root, 'c_knife__c_knife', 3000.0, kept=False)
@@ -87,7 +86,7 @@ class ListSavedTests(unittest.TestCase):
                 self.assertEqual(work_store.list_saved(), [])
 
     def test_keep_without_a_draft_saves_nothing(self):
-        """Метка при пустой папке сделала бы работу-призрак в библиотеке."""
+        """Метка при пустой папке сделала бы работу-призрак в библиотеке"""
         with TemporaryDirectory() as tmp:
             with mock.patch.object(work_store, 'WORK_DIR', Path(tmp)):
                 self.assertFalse(work_store.keep('hat__demo'))
@@ -121,7 +120,7 @@ class WorksApiTests(unittest.TestCase):
 
 
 class _Preview:
-    """Ровно то, что keeper спрашивает у превью."""
+    """Ровно то, что keeper спрашивает у превью"""
 
     def __init__(self, edits):
         self.edits = edits
@@ -138,7 +137,7 @@ class _Preview:
 
 
 class KeeperTests(unittest.TestCase):
-    """Выключатель молчаливой записи не должен запрещать нажатую кнопку."""
+    """Выключатель молчаливой записи не должен запрещать нажатую кнопку"""
 
     def setUp(self):
         self.tmp = TemporaryDirectory()
@@ -171,10 +170,10 @@ class KeeperTests(unittest.TestCase):
 
 
 class ForgetDraftsTests(unittest.TestCase):
-    """Уборка черновиков: до неё добраться было нечем.
+    """Уборка черновиков: до неё добраться было нечем
 
     Черновик пишется молча на каждое движение, в библиотеке его нет намеренно,
-    и удалить его можно было только заново открыв тот же предмет.
+    и удалить его можно было только заново открыв тот же предмет
     """
 
     def setUp(self):
@@ -215,20 +214,20 @@ class ForgetDraftsTests(unittest.TestCase):
         self.assertEqual([w['key'] for w in work_store.list_drafts()], ['b__b'])
 
     def test_a_saved_work_cannot_be_deleted_as_a_draft(self):
-        """Список присылает страница — опечатка в нём не должна стоить работы."""
+        """Список присылает страница - опечатка в нём не должна стоить работы"""
         self._work('hat__demo', kept=True)
         res = self._session().forget_drafts(['hat__demo'])
         self.assertEqual(res['removed'], 0)
         self.assertTrue(work_store.has('hat__demo'))
 
     def test_empty_selection_deletes_nothing(self):
-        """«Снял все отметки» — это не «удали всё»."""
+        """«Снял все отметки» - это не «удали всё»"""
         self._work('a__a')
         self.assertEqual(self._session().forget_drafts([])['removed'], 0)
         self.assertTrue(work_store.has('a__a'))
 
     def test_the_open_item_loses_its_edits_too(self):
-        """Иначе автосохранение перепишет черновик на следующей же правке."""
+        """Иначе автосохранение перепишет черновик на следующей же правке"""
         key = 'scout_c_scattergun__c_scattergun'
         self._work(key)
         app = self._session(key)
@@ -242,10 +241,10 @@ class ForgetDraftsTests(unittest.TestCase):
 
 
 class RealEditsTests(unittest.TestCase):
-    """Что именно делает предмет «правленым».
+    """Что именно делает предмет «правленым»
 
     Признак один на сеанс и на диск: пока их было два, приложение предлагало
-    вернуть правки предмету, в котором человек ничего не менял.
+    вернуть правки предмету, в котором человек ничего не менял
     """
 
     def setUp(self):
@@ -257,13 +256,13 @@ class RealEditsTests(unittest.TestCase):
         self.addCleanup(self.tmp.cleanup)
 
     def test_empty_wrappers_are_not_edits(self):
-        """Словари команд заводятся сами и пустыми доезжают до диска."""
+        """Словари команд заводятся сами и пустыми доезжают до диска"""
         from src.domain.preview.session import has_real_edits
         self.assertFalse(has_real_edits({'textures': {'red': {}, 'blu': {}},
                                          'part_colors': {'weapon': {}}}))
 
     def test_build_settings_alone_are_not_edits(self):
-        """Размер и формат VTF текстуру не меняют — «вернуть» там нечего."""
+        """Размер и формат VTF текстуру не меняют - «вернуть» там нечего"""
         from src.domain.preview.session import has_real_edits
         self.assertFalse(has_real_edits(
             {'texture_overrides': {'scattergun': {'size': [1024, 1024]}}}))
@@ -280,7 +279,7 @@ class RealEditsTests(unittest.TestCase):
 
 
 class WorkNamesTests(unittest.TestCase):
-    """Как работа подписана в библиотеке и чем открывается."""
+    """Как работа подписана в библиотеке и чем открывается"""
 
     def _rows(self, item: dict) -> dict:
         from src.app import api
@@ -293,19 +292,19 @@ class WorkNamesTests(unittest.TestCase):
             return api._named(rows, 'ru')[0]
 
     def test_hat_work_is_named_by_the_catalogue(self):
-        """Раньше карточка была подписана слагом пути к модели."""
+        """Раньше карточка была подписана слагом пути к модели"""
         row = self._rows({'mode': 'hat',
                           'key': 'models/player/items/scout/hat.mdl',
                           'per_class': {'scout': 'a.mdl'}})
         self.assertEqual(row['name'], 'Шапка')
-        # Иконка объявлена в items_game: по имени модели её не найти.
+        # Иконка объявлена в items_game: по имени модели её не найти
         self.assertEqual(row['item_icon'], 'backpack/hat')
         self.assertEqual(row['item_key'], 'models/player/items/scout/hat.mdl')
         self.assertEqual(row['per_class'], {'scout': 'a.mdl'})
         self.assertEqual(row['work_mode'], 'hat')
 
     def test_unknown_hat_falls_back_to_the_model_file(self):
-        """Предмета в игре нет — имя файла честнее полного пути."""
+        """Предмета в игре нет - имя файла честнее полного пути"""
         row = self._rows({'mode': 'hat', 'key': 'models/player/items/x/lost.mdl'})
         self.assertEqual(row['name'], 'lost')
 
@@ -320,7 +319,7 @@ class WorkNamesTests(unittest.TestCase):
 
 
 class RestoreIsAskedForTests(unittest.TestCase):
-    """Умолчание здесь и есть поведение каталога — оно обязано быть «нет»."""
+    """Умолчание здесь и есть поведение каталога - оно обязано быть «нет»"""
 
     def test_load_preview_does_not_restore_by_default(self):
         from src.app.session import AppSession
@@ -332,9 +331,9 @@ class RestoreIsAskedForTests(unittest.TestCase):
 
 
 class CustomModelComesBackTests(unittest.TestCase):
-    """Работа помнит свою модель — вернуться она должна В КАДР, а не только в
+    """Работа помнит свою модель - вернуться она должна В КАДР, а не только в
     сборку: текстура под чужую геометрию ложилась на игровую, и на экране
-    было не то, что уйдёт в мод."""
+    было не то, что уйдёт в мод"""
 
     def setUp(self):
         from src.app.session import AppSession
@@ -348,7 +347,7 @@ class CustomModelComesBackTests(unittest.TestCase):
         self.session._mode = 'scout_c_scattergun'
         self.session.preview.weapon_key = 'c_scattergun'
         self.events = self.session.subscribe()
-        # Конвертация SMD и воркеры — не предмет проверки.
+        # Конвертация SMD и воркеры - не предмет проверки
         patches = [
             mock.patch.object(self.session.custom_model, '_custom_model_obj',
                               return_value=(self.obj, ['own_mat'])),
@@ -396,7 +395,7 @@ class CustomModelComesBackTests(unittest.TestCase):
         with mock.patch.object(work_keeper, 'forget'):
             self.session.forget_work()
         self.assertIsNone(self.session.preview.custom_smd_path)
-        # Игровая модель грузится заново — своя не остаётся в кадре.
+        # Игровая модель грузится заново - своя не остаётся в кадре
         self.session.controller.load_game_model.assert_called_once()
 
 

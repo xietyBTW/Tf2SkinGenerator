@@ -1,9 +1,9 @@
-"""Осмотр VPK: распаковка → сбор InspectedMod → прогон проверок.
+"""Осмотр VPK: распаковка -> сбор InspectedMod -> прогон проверок
 
 `build_inspected_mod(root)` работает с УЖЕ распакованной папкой и полностью
-юнит-тестируем. `inspect_vpk(path)` — обёртка: распаковывает VPK во временную
+юнит-тестируем. `inspect_vpk(path)` - обёртка: распаковывает VPK во временную
 папку (через существующий CustomVPKService), собирает слепок, гоняет проверки,
-чистит за собой.
+чистит за собой
 """
 
 from __future__ import annotations
@@ -28,7 +28,7 @@ _VTX_SUFFIXES = (".dx90.vtx", ".dx80.vtx", ".sw.vtx", ".vtx")
 
 
 def build_inspected_mod(root: Path) -> InspectedMod:
-    """Собирает слепок мода из распакованной директории `root`."""
+    """Собирает слепок мода из распакованной директории `root`"""
     root = Path(root)
     mod = InspectedMod(root=root)
 
@@ -57,7 +57,7 @@ def build_inspected_mod(root: Path) -> InspectedMod:
             if size is not None:
                 mod.vtf_sizes[key] = size
             else:
-                mod.bad_vtf.add(key)   # заголовок не прочитался → битый/пустой VTF
+                mod.bad_vtf.add(key)   # заголовок не прочитался -> битый/пустой VTF
         elif ext == ".mdl":
             mod.mdls.append(_build_mdl_info(path, root, rel))
 
@@ -75,11 +75,11 @@ def _build_mdl_info(path: Path, root: Path, rel: str) -> MdlInfo:
 
 
 def _gather_other_mod_paths(inspected_vpk: str) -> set:
-    """Собирает пути файлов из ДРУГИХ модов в tf/custom (для поиска конфликтов).
+    """Собирает пути файлов из ДРУГИХ модов в tf/custom (для поиска конфликтов)
 
-    Best-effort: если путь к TF2 не задан, папки нет или что-то не открылось —
+    Best-effort: если путь к TF2 не задан, папки нет или что-то не открылось -
     возвращаем пусто (проверка конфликтов просто не сработает). Многотомные VPK
-    (`_NNN.vpk`) пропускаем — их читает `_dir.vpk`. Себя исключаем."""
+    (`_NNN.vpk`) пропускаем - их читает `_dir.vpk`. Себя исключаем"""
     import re
 
     paths: set = set()
@@ -108,14 +108,14 @@ def _gather_other_mod_paths(inspected_vpk: str) -> set:
 
     for entry in custom.glob("*.vpk"):
         if part_re.search(entry.name):
-            continue                      # том многотомного VPK — пропускаем
+            continue                      # том многотомного VPK - пропускаем
         try:
             if os.path.realpath(str(entry)) == self_real:
                 continue                  # это осматриваемый мод
             pak = vpklib.open(str(entry))
             for f in pak:
                 paths.add(f.replace("\\", "/").lower())
-        except Exception:                 # noqa: BLE001 — один битый мод не мешает
+        except Exception:                 # noqa: BLE001 - один битый мод не мешает
             continue
         if len(paths) > 400_000:          # разумный предел памяти
             break
@@ -123,28 +123,28 @@ def _gather_other_mod_paths(inspected_vpk: str) -> set:
 
 
 def _game_file_lookup():
-    """Проверка «файл есть в самой игре» по её VPK (TF2 и смонтированный HL2).
+    """Проверка «файл есть в самой игре» по её VPK (TF2 и смонтированный HL2)
 
     Best-effort, как и поиск конфликтов: без пути к игре отвечает «нет»,
     архив, который не открылся, пропускается. Каталоги берутся из общего
-    кэша — повторная проверка их не разбирает заново."""
+    кэша - повторная проверка их не разбирает заново"""
     try:
         from src.config.app_config import AppConfig
         from src.services.tf2_paths import TF2Paths
         from src.services.vtf_preview_service import open_vpks
 
-        # Те же четыре архива контента игры, что читают небеса.
+        # Те же четыре архива контента игры, что читают небеса
         paks = open_vpks(TF2Paths.skybox_vpks(AppConfig.get_tf2_game_folder() or ""))
-    except Exception:                             # noqa: BLE001 — путь задаёт пользователь
+    except Exception:                             # noqa: BLE001 - путь задаёт пользователь
         paks = []
     # По словарю каталога: у VPK нет __contains__, и `in` по нему самому
-    # перебирал бы все сто с лишним тысяч путей на каждую проверку.
+    # перебирал бы все сто с лишним тысяч путей на каждую проверку
     return lambda rel: any(rel in pak.tree for pak in paks)
 
 
 def inspect_vpk(vpk_path: str, language: str = "en") -> DiagnosticReport:
-    """Полный осмотр VPK-файла. Возвращает DiagnosticReport (никогда не бросает —
-    ошибку распаковки оформляет как ERROR-находку)."""
+    """Полный осмотр VPK-файла. Возвращает DiagnosticReport (никогда не бросает -
+    ошибку распаковки оформляет как ERROR-находку)"""
     report = DiagnosticReport()
     ru = (language == "ru")
 
@@ -179,7 +179,7 @@ def inspect_vpk(vpk_path: str, language: str = "en") -> DiagnosticReport:
         mod.game_has = _game_file_lookup()
         report.extend(run_all_checks(mod, language))
         return report
-    except Exception as e:                       # noqa: BLE001 — диагностика не должна падать
+    except Exception as e:                       # noqa: BLE001 - диагностика не должна падать
         logger.error(f"Диагностика VPK упала: {e}", exc_info=True)
         report.add(Finding(
             Severity.ERROR, "diag.crashed",

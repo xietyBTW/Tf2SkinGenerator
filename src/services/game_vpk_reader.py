@@ -1,15 +1,13 @@
 """
-Кэширующий читатель игровых VPK (tf2_textures_dir.vpk / tf2_misc_dir.vpk).
+Кэширующий читатель игровых VPK (tf2_textures_dir.vpk / tf2_misc_dir.vpk)
 
-Зачем: ``vpk.open()`` парсит весь индекс архива (десятки тысяч записей —
-особенно tf2_textures_dir.vpk). Раньше воркеры предпросмотра открывали одни и
-те же VPK по 5–9 раз за прогон (в каждом методе свой ``vpk.open``). Этот класс
-берёт хэндлы из общего кэша (:mod:`src.services.vpk_cache`), так что каталог
-каждого VPK разбирается один раз за запуск и переиспользуется и здесь, и в
-TF2VPKExtractService (раньше у них были отдельные кэши).
+Зачем: ``vpk.open()`` парсит весь индекс архива (десятки тысяч записей -
+особенно tf2_textures_dir.vpk). Этот класс берёт хэндлы из общего кэша
+(:mod:`src.services.vpk_cache`), так что каталог каждого VPK разбирается один
+раз за запуск и переиспользуется и здесь, и в TF2VPKExtractService
 
-Плюс централизует типовую цепочку «найти VMT → распарсить $basetexture →
-найти VTF», которая дублировалась в preview-воркерах и сервисах извлечения.
+Плюс централизует типовую цепочку «найти VMT -> распарсить $basetexture ->
+найти VTF», которая дублировалась в preview-воркерах и сервисах извлечения
 
 Использование:
     with GameVpkReader([textures_vpk, misc_vpk]) as reader:
@@ -29,7 +27,7 @@ from src.shared.logging_config import get_logger
 logger = get_logger(__name__)
 
 # Подмены workshop-путей: одна и та же текстура может лежать под
-# models/player/items ИЛИ models/workshop[_partner]/player/items.
+# models/player/items ИЛИ models/workshop[_partner]/player/items
 _WORKSHOP_SWAPS = [
     ("materials/models/player/items",
      "materials/models/workshop_partner/player/items"),
@@ -44,19 +42,19 @@ _WORKSHOP_SWAPS = [
 
 
 class GameVpkReader:
-    """Открывает игровые VPK один раз и переиспользует хэндлы."""
+    """Открывает игровые VPK один раз и переиспользует хэндлы"""
 
     def __init__(self, vpk_paths: List[Optional[str]]):
-        # Сохраняем порядок (он задаёт приоритет при дублях ключей в разных VPK).
+        # Сохраняем порядок (он задаёт приоритет при дублях ключей в разных VPK)
         self._paths = [p for p in vpk_paths if p]
         self._paks: Optional[list] = None
 
     @property
     def paks(self) -> list:
-        """Лениво берёт каждый существующий VPK из общего кэша.
+        """Лениво берёт каждый существующий VPK из общего кэша
 
-        Хэндлы принадлежат vpk_cache (общий кэш) — здесь только
-        собираем список в нужном порядке приоритета.
+        Хэндлы принадлежат vpk_cache (общий кэш) - здесь только
+        собираем список в нужном порядке приоритета
         """
         if self._paks is None:
             from src.services.vpk_cache import open_vpk_cached
@@ -73,7 +71,7 @@ class GameVpkReader:
         return self._paks
 
     def read(self, internal_path: str) -> Optional[bytes]:
-        """Читает файл по внутреннему пути из первого VPK, где он есть."""
+        """Читает файл по внутреннему пути из первого VPK, где он есть"""
         for pak in self.paks:
             try:
                 return pak[internal_path].read()
@@ -86,13 +84,13 @@ class GameVpkReader:
     @staticmethod
     def find_vmt_in_pak(pak, cdmaterials: List[str], mat_name: str) -> Optional[Tuple[str, str]]:
         """
-        Ищет VMT материала в ОДНОМ открытом pak (cdmaterials × workshop-подмены).
+        Ищет VMT материала в ОДНОМ открытом pak (cdmaterials × workshop-подмены)
 
         Пропускает VMT, в пути/контенте которых есть «backpack» (иконки
-        инвентаря, не модельные текстуры).
+        инвентаря, не модельные текстуры)
 
         Returns:
-            (vmt_path, vmt_content) или None.
+            (vmt_path, vmt_content) или None
         """
         candidates: List[str] = []
         for cdmat in cdmaterials:
@@ -120,7 +118,7 @@ class GameVpkReader:
         return None
 
     def find_vmt(self, cdmaterials: List[str], mat_name: str) -> Optional[Tuple[str, str]]:
-        """Ищет VMT по всем открытым pak (порядок paks = приоритет)."""
+        """Ищет VMT по всем открытым pak (порядок paks = приоритет)"""
         for pak in self.paks:
             result = self.find_vmt_in_pak(pak, cdmaterials, mat_name)
             if result:
@@ -131,13 +129,13 @@ class GameVpkReader:
     def parse_basetexture(vmt_content: str) -> Optional[str]:
         """
         Извлекает $baseTexture из VMT (ключ с кавычками/без, значение с/без кавычек).
-        Возвращает путь относительно materials/ (прямые слеши, lowercase) или None.
+        Возвращает путь относительно materials/ (прямые слеши, lowercase) или None
         """
         return vmt_parse.basetexture(vmt_content)
 
     @staticmethod
     def find_vtf_in_pak(pak, basetexture: str) -> Optional[bytes]:
-        """Находит VTF в ОДНОМ pak по значению $baseTexture (путь относительно materials/)."""
+        """Находит VTF в ОДНОМ pak по значению $baseTexture (путь относительно materials/)"""
         if not basetexture:
             return None
         path = basetexture.replace("\\", "/").lower().strip("/")
@@ -145,7 +143,7 @@ class GameVpkReader:
             path = "materials/" + path
         # В VMT встречается ИСХОДНОЕ расширение: у праздничного Правосудия и
         # Уберпилы Valve оставила `$baseTexture "..._xmas.psd"`. Движок читает
-        # такой путь без расширения, и мы тоже — иначе текстуры у них нет.
+        # такой путь без расширения, и мы тоже - иначе текстуры у них нет
         stem, dot, ext = path.rpartition(".")
         if dot and "/" not in ext:
             path = stem
@@ -158,7 +156,7 @@ class GameVpkReader:
             return None
 
     def find_vtf_for_basetexture(self, basetexture: str) -> Optional[bytes]:
-        """Находит VTF по значению $baseTexture во всех открытых pak."""
+        """Находит VTF по значению $baseTexture во всех открытых pak"""
         for pak in self.paks:
             data = self.find_vtf_in_pak(pak, basetexture)
             if data is not None:
@@ -166,11 +164,11 @@ class GameVpkReader:
         return None
 
     def close(self) -> None:
-        """Сбрасывает локальную ссылку на список pak.
+        """Сбрасывает локальную ссылку на список pak
 
-        Хэндлы НЕ закрываем — ими владеет общий кэш (vpk_cache), их
+        Хэндлы НЕ закрываем - ими владеет общий кэш (vpk_cache), их
         переиспользуют все последующие читатели и извлечения. Следующий
-        доступ к ``paks`` перечитает их из кэша.
+        доступ к ``paks`` перечитает их из кэша
         """
         self._paks = None
 

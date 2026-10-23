@@ -1,5 +1,5 @@
 """
-Обновление приложения: проверка, скачивание, установка.
+Обновление приложения: проверка, скачивание, установка
 
 Механика намеренно опирается на то, что уже есть, и не тянет в проект новый
 фреймворк:
@@ -7,20 +7,20 @@
   проверка     GitHub Releases API отдаёт последний релиз. Версии сравниваем
                семантически, без внешних зависимостей.
   скачивание   тот самый Setup.exe, что лежит в релизе. GitHub отдаёт для
-               каждого файла поле `digest` — SHA-256; сверяем по нему, чтобы
+               каждого файла поле `digest` - SHA-256; сверяем по нему, чтобы
                оборванная закачка не поехала в установку.
   установка    Setup.exe запускается тихо и делает всё сам: закрывает
                приложение, заменяет файлы, ставит ярлыки, чинит запись в
                «Программах и компонентах». Своего кода подмены файлов у нас
-               нет и не надо.
+               нет и не надо
 
 Что даёт `digest`: он приходит по тому же TLS-соединению, что и сам файл,
 поэтому это проверка ЦЕЛОСТНОСТИ (обрыв, битый прокси, кэш), а не подпись.
-Защита от подмены самого релиза — это подпись кода у Setup.exe; она ставится
-при сборке, здесь её проверяет Windows.
+Защита от подмены самого релиза - это подпись кода у Setup.exe; она ставится
+при сборке, здесь её проверяет Windows
 
 Данные человека при обновлении не страдают: они лежат отдельно от папки
-установки (см. src/shared/paths.py).
+установки (см. src/shared/paths.py)
 """
 
 from __future__ import annotations
@@ -51,33 +51,33 @@ _API_URL = (
 _TIMEOUT = 8  # секунды
 
 #: Какой файл релиза ставим. Установщик, а не zip: он умеет закрыть работающее
-#: приложение, обновить ярлыки и запись в «Программах и компонентах» — всё то,
-#: что при ручной распаковке zip делать некому.
+#: приложение, обновить ярлыки и запись в «Программах и компонентах» - всё то,
+#: что при ручной распаковке zip делать некому
 ASSET_NAME = "Tf2SkinGenerator-Setup.exe"
 
 #: Тихая установка. /SILENT (а не /VERYSILENT) намеренно: человек видит полоску
-#: и понимает, что происходит. /NOCANCEL — чтобы не бросить обновление на
-#: середине замены файлов. /RESTARTAPPLICATIONS — ещё и метка «запущен
+#: и понимает, что происходит. /NOCANCEL - чтобы не бросить обновление на
+#: середине замены файлов. /RESTARTAPPLICATIONS - ещё и метка «запущен
 #: обновлением»: по ней установщик поднимает программу после установки
 #: (StartedByUpdater в installer/*-bundle.iss). Без неё обновлённое приложение
-#: не запустится.
+#: не запустится
 _SETUP_FLAGS = ("/SILENT", "/NOCANCEL", "/RESTARTAPPLICATIONS")
 
-#: Портативная копия — та же сборка из zip, без установки. Признак — файл с
+#: Портативная копия - та же сборка из zip, без установки. Признак - файл с
 #: этим именем рядом с .exe (кладёт build-release.ps1 в zip, установщик его
 #: не трогает). Обновляется она тем же Setup.exe в портативном режиме: он
-#: подменяет файлы в ЭТОЙ папке и не оставляет следов — ни ярлыков, ни
+#: подменяет файлы в ЭТОЙ папке и не оставляет следов - ни ярлыков, ни
 #: записи в «Программах и компонентах», ни деинсталлятора (см. /PORTABLE в
-#: installer/Tf2SkinGenerator-bundle.iss).
+#: installer/Tf2SkinGenerator-bundle.iss)
 PORTABLE_MARKER = "PORTABLE"
 
 #: Сколько ждать перед запуском установщика. Приложение за это время успевает
-#: закрыться и отпустить мьютекс и свои файлы — иначе Setup упрётся в занятые
-#: .exe и .dll (см. AppMutex в installer/*.iss).
+#: закрыться и отпустить мьютекс и свои файлы - иначе Setup упрётся в занятые
+#: .exe и .dll (см. AppMutex в installer/*.iss)
 #:
 #: Пауза делается через `ping -n`, а не через `timeout`: у отвязанного процесса
 #: нет консоли, а timeout.exe в таком окружении отказывается работать («Input
-#: redirection is not supported»). ping ждёт одинаково в любом.
+#: redirection is not supported»). ping ждёт одинаково в любом
 _HANDOFF_DELAY_SEC = 3
 
 _CHUNK = 64 * 1024
@@ -87,7 +87,7 @@ def _parse_version(tag: str) -> Tuple[int, int, int]:
     """
     Преобразует строку тега/версии в кортеж (major, minor, patch).
     Нечисловые префиксы ('v', 'V') удаляются. Неполные версии дополняются нулями.
-    Возвращает (0, 0, 0) если распарсить не удалось.
+    Возвращает (0, 0, 0) если распарсить не удалось
     """
     clean = re.sub(r"^[vV]", "", tag.strip())
     parts = clean.split(".")
@@ -101,12 +101,12 @@ def _parse_version(tag: str) -> Tuple[int, int, int]:
 
 
 def _is_newer(remote: str, local: str) -> bool:
-    """Возвращает True если remote > local."""
+    """Возвращает True если remote > local"""
     return _parse_version(remote) > _parse_version(local)
 
 
 def _fetch_release() -> Optional[dict]:
-    """Последний релиз как есть, или None (сеть, черновик, пре-релиз)."""
+    """Последний релиз как есть, или None (сеть, черновик, пре-релиз)"""
     try:
         req = urllib.request.Request(
             _API_URL,
@@ -118,10 +118,10 @@ def _fetch_release() -> Optional[dict]:
         with urllib.request.urlopen(req, timeout=_TIMEOUT) as resp:
             data = json.loads(resp.read().decode("utf-8"))
     except urllib.error.URLError as exc:
-        logger.debug(f"Проверка обновлений: нет доступа к сети — {exc}")
+        logger.debug(f"Проверка обновлений: нет доступа к сети - {exc}")
         return None
     except Exception as exc:                                  # noqa: BLE001
-        logger.debug(f"Проверка обновлений: неожиданная ошибка — {exc}")
+        logger.debug(f"Проверка обновлений: неожиданная ошибка - {exc}")
         return None
 
     if data.get("draft") or data.get("prerelease"):
@@ -134,7 +134,7 @@ def _fetch_release() -> Optional[dict]:
 def fetch_latest_release() -> Optional[Tuple[str, str]]:
     """
     Синхронно запрашивает GitHub API и возвращает (tag_name, html_url)
-    или None при ошибке / если версия актуальна.
+    или None при ошибке / если версия актуальна
     """
     data = _fetch_release()
     if data is None:
@@ -146,17 +146,17 @@ def fetch_latest_release() -> Optional[Tuple[str, str]]:
 
 
 def _digest_of(asset: dict) -> str:
-    """SHA-256 файла из ответа GitHub. Формат бывает и 'sha256:<hex>', и голым."""
+    """SHA-256 файла из ответа GitHub. Формат бывает и 'sha256:<hex>', и голым"""
     raw = (asset.get("digest") or "").strip().lower()
     return raw.split(":", 1)[1] if raw.startswith("sha256:") else raw
 
 
 def check_for_update() -> Dict[str, object]:
     """
-    Что показывать в интерфейсе: есть ли новая версия и чем её ставить.
+    Что показывать в интерфейсе: есть ли новая версия и чем её ставить
 
-    Всегда возвращает словарь — «нет обновления» и «не дозвонились» страница
-    показывает по-разному, поэтому молчаливого None здесь быть не должно.
+    Всегда возвращает словарь - «нет обновления» и «не дозвонились» страница
+    показывает по-разному, поэтому молчаливого None здесь быть не должно
     """
     result: Dict[str, object] = {
         "current": __version__,
@@ -182,7 +182,7 @@ def check_for_update() -> Dict[str, object]:
     asset = next((a for a in data.get("assets") or []
                   if a.get("name") == ASSET_NAME), None)
     if asset is None:
-        # Релиз есть, установщика в нём нет — предлагаем открыть страницу.
+        # Релиз есть, установщика в нём нет - предлагаем открыть страницу
         logger.info(f"В релизе {tag} нет {ASSET_NAME}: ставить нечем")
         return result
 
@@ -191,7 +191,7 @@ def check_for_update() -> Dict[str, object]:
     result["asset_size"] = int(asset.get("size") or 0)
     result["asset_digest"] = _digest_of(asset)
     # Ставить умеет только собранное приложение: из репозитория обновляются
-    # через git, и запуск Setup.exe поверх исходников был бы бессмыслицей.
+    # через git, и запуск Setup.exe поверх исходников был бы бессмыслицей
     result["can_install"] = bool(result["asset_url"]) and is_frozen()
     return result
 
@@ -204,14 +204,14 @@ def download_update(
     cancelled: Optional[Callable[[], bool]] = None,
 ) -> Path:
     """
-    Качает установщик во временную папку и проверяет SHA-256.
+    Качает установщик во временную папку и проверяет SHA-256
 
     Возвращает путь к файлу. Бросает RuntimeError, если хэш или размер не
-    сошлись — ставить недокачанный установщик нельзя ни при каких условиях.
+    сошлись - ставить недокачанный установщик нельзя ни при каких условиях
     """
     out_dir = Path(tempfile.gettempdir()) / "tf2sg_update"
     out_dir.mkdir(parents=True, exist_ok=True)
-    # .part, пока качается: прерванный файл не должен выглядеть готовым.
+    # .part, пока качается: прерванный файл не должен выглядеть готовым
     part = out_dir / (ASSET_NAME + ".part")
     dest = out_dir / ASSET_NAME
 
@@ -249,7 +249,7 @@ def download_update(
 
 
 def portable_dir() -> Optional[Path]:
-    """Папка портативной копии, если приложение запущено из неё."""
+    """Папка портативной копии, если приложение запущено из неё"""
     if not is_frozen():
         return None
     root = install_dir()
@@ -258,10 +258,10 @@ def portable_dir() -> Optional[Path]:
 
 def setup_arguments(portable: Optional[Path] = None) -> str:
     """
-    Аргументы Setup.exe: обычное тихое обновление либо портативное — в ту же
+    Аргументы Setup.exe: обычное тихое обновление либо портативное - в ту же
     папку. /MERGETASKS снимает задачи явно: UsePreviousTasks у Inno читает их
     из реестра установленной копии, и ярлык на рабочем столе мог бы
-    перекинуться на портативную.
+    перекинуться на портативную
     """
     if portable is None:
         return " ".join(_SETUP_FLAGS)
@@ -272,13 +272,13 @@ def setup_arguments(portable: Optional[Path] = None) -> str:
 
 def install_update(setup_path: str) -> None:
     """
-    Запускает установщик отдельным процессом и оставляет его работать.
+    Запускает установщик отдельным процессом и оставляет его работать
 
     Ждём перед запуском: Windows не даст заменить .exe и .dll работающего
     приложения, поэтому сначала должны закрыться мы. Отсюда `cmd /c timeout &
-    setup` — процесс отвязан от нашего (DETACHED_PROCESS) и переживёт выход.
+    setup` - процесс отвязан от нашего (DETACHED_PROCESS) и переживёт выход
 
-    Вызывающий обязан после этого завершить приложение (см. api.install_update).
+    Вызывающий обязан после этого завершить приложение (см. api.install_update)
     """
     setup = Path(setup_path)
     if not setup.is_file():
@@ -289,9 +289,9 @@ def install_update(setup_path: str) -> None:
     # Команда передаётся ОДНОЙ СТРОКОЙ, а не списком. Список Python собирает
     # через list2cmdline, и тот экранирует наши кавычки обратными слэшами:
     # cmd получает «break > \"C:\...\"» и отвечает «синтаксическая ошибка в
-    # имени файла». Ошибки при этом не видно — Popen отработал, процесс
+    # имени файла». Ошибки при этом не видно - Popen отработал, процесс
     # запустился, установщик не запустился НИКОГДА. Со строкой Windows отдаёт
-    # командную строку в CreateProcess как есть.
+    # командную строку в CreateProcess как есть
     portable = portable_dir()
     command = (f'cmd /c ping -n {_HANDOFF_DELAY_SEC + 1} 127.0.0.1 >nul & '
                f'"{setup}" {setup_arguments(portable)}')
@@ -306,11 +306,11 @@ def install_update(setup_path: str) -> None:
 
 class UpdateChecker(BaseWorker):
     """
-    Фоновый поток для проверки обновлений.
+    Фоновый поток для проверки обновлений
 
     Signals:
-        update_available(tag: str, url: str)  — новая версия найдена
-        check_done()                           — проверка завершена (успешно или нет)
+        update_available(tag: str, url: str)  - новая версия найдена
+        check_done()                           - проверка завершена (успешно или нет)
     """
 
     update_available: Signal = Signal(str, str)

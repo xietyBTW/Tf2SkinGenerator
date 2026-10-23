@@ -1,11 +1,11 @@
-"""Оригинал VMT из игры не должен удваивать строки при извлечении."""
+"""Оригинал VMT из игры не должен удваивать строки при извлечении"""
 
 from tests.fake_vpk import fake_reader, vmt
 
 
 def test_extracted_vmt_keeps_single_line_breaks(tmp_path, monkeypatch):
     # В игре VMT лежат с CRLF. Запись в текстовом режиме на Windows давала
-    # CR CR LF, и редактор показывал каждый файл через строку.
+    # CR CR LF, и редактор показывал каждый файл через строку
     from src.services import game_vpk_reader, vmt_source_service
 
     monkeypatch.chdir(tmp_path)

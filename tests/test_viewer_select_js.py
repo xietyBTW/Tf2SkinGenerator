@@ -1,8 +1,8 @@
 """
 Выделение ножницами (viewer_select.js): детали по острым рёбрам, кисть,
-острова развёртки.
+острова развёртки
 
-Тест пропускается, если node недоступен.
+Тест пропускается, если node недоступен
 """
 
 import json
@@ -18,7 +18,7 @@ pytestmark = pytest.mark.skipif(
     shutil.which("node") is None or not MODULE.exists(),
     reason="node недоступен или viewer_select.js не найден")
 
-#: Куб 2×2×2: 6 граней по 2 треугольника, углы между гранями — 90°.
+#: Куб 2×2×2: 6 граней по 2 треугольника, углы между гранями - 90°
 _CORNERS = [(-1, -1, -1), (1, -1, -1), (1, 1, -1), (-1, 1, -1),
             (-1, -1, 1), (1, -1, 1), (1, 1, 1), (-1, 1, 1)]
 _FACES = [(0, 1, 2, 3), (4, 5, 6, 7), (0, 1, 5, 4),
@@ -28,7 +28,7 @@ _FACES = [(0, 1, 2, 3), (4, 5, 6, 7), (0, 1, 5, 4),
 def _cube():
     positions, uvs = [], []
     for n, (a, b, c, d) in enumerate(_FACES):
-        # Каждой грани — свой квадрат на развёртке: шесть островов.
+        # Каждой грани - свой квадрат на развёртке: шесть островов
         u0 = n * 0.15
         quad = {a: (u0, 0), b: (u0 + 0.1, 0), c: (u0 + 0.1, 0.1), d: (u0, 0.1)}
         for tri in ((a, b, c), (a, c, d)):
@@ -53,7 +53,7 @@ console.log(JSON.stringify(out));
 
 
 def test_a_detail_stops_at_sharp_edges():
-    """Порог 30°: у куба каждая грань — своя деталь (два треугольника)."""
+    """Порог 30°: у куба каждая грань - своя деталь (два треугольника)"""
     got = _run("return sel.withLabel(sel.detailLabels(topo, 30), 0);")
     assert sorted(got) == [0, 1]
 
@@ -64,7 +64,7 @@ def test_a_blunt_threshold_takes_the_whole_piece():
 
 
 def test_the_brush_stays_within_its_radius():
-    # Центр грани z = -1; радиус меньше расстояния до соседних граней.
+    # Центр грани z = -1; радиус меньше расстояния до соседних граней
     got = _run("return sel.brushTriangles(topo, 0, [0, 0, -1], 0.9);")
     assert sorted(got) == [0, 1]
     everything = _run("return sel.brushTriangles(topo, 0, [0, 0, -1], 5);")
@@ -77,8 +77,8 @@ def test_islands_follow_the_uv_layout():
 
 
 def test_the_brush_takes_long_triangles_it_touches():
-    """Бока ствола у моделей TF2 — длинные узкие треугольники: их центр далеко
-    от кисти, а край — под ней. Мерить надо до треугольника, не до центра."""
+    """Бока ствола у моделей TF2 - длинные узкие треугольники: их центр далеко
+    от кисти, а край - под ней. Мерить надо до треугольника, не до центра"""
     script = f"""
 import * as sel from {json.dumps(MODULE.as_uri())};
 // Полоса 20×1 из двух длинных треугольников, кисть у левого конца.

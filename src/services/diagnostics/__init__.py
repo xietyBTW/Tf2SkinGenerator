@@ -1,13 +1,13 @@
 """
 Диагностика модов (VPK): осмотр готового мода на типовые причины поломок
-(фиолетовые текстуры, невидимые модели, конфликты) и подсказки по починке.
+(фиолетовые текстуры, невидимые модели, конфликты) и подсказки по починке
 
 Публичный API:
     from src.services.diagnostics import inspect_vpk, DiagnosticReport, Severity
 
-Пакет НЕ зависит от Qt — вся логика чистая и юнит-тестируемая. UI (вкладка
-«Диагностика») лежит отдельно в src/ui/diagnostics_panel.py, а фоновый прогон —
-в src/services/diagnostics_worker.py.
+Пакет НЕ зависит от Qt - вся логика чистая и юнит-тестируемая. UI (вкладка
+«Диагностика») лежит отдельно в src/ui/diagnostics_panel.py, а фоновый прогон -
+в src/services/diagnostics_worker.py
 """
 
 from src.services.diagnostics.models import (

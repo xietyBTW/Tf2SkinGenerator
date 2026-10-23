@@ -1,5 +1,5 @@
 /*
- * Поля редактора: ползунок, число, цвет, атрибут экспертного режима.
+ * Поля редактора: ползунок, число, цвет, атрибут экспертного режима
  *
  * Крутилки описаны в Python (services/simple_params) - здесь только поля и
  * отправка значений. Список параметров, границы и подписи приходят готовыми:
@@ -8,7 +8,7 @@
 
 import * as api from '../api.js';
 import { curveFraction, curveValue } from '../curve.js';
-import { say, particles, withParticles } from '../stage.js';
+import { say, sayError, particles, withParticles } from '../stage.js';
 import { pSystem, pcfNodes, setDiff } from './state.js';
 import { showParams } from './params.js';
 import { fillTree, setTitle } from './tree.js';
@@ -29,14 +29,14 @@ export function sliderField(value, param, onLive, onDone) {
     const v = curveValue(param, Number(r.value) / 1000);
     return param.decimals ? Number(v.toFixed(param.decimals)) : Math.round(v);
   };
-  // Пока тянут - только показываем; в Python уходит отпускание, иначе одно
-  // перетаскивание давало бы сотню правок файла.
+  // Пока тянут - только показываем, в Python уходит отпускание, иначе одно
+  // перетаскивание давало бы сотню правок файла
   r.addEventListener('input', () => onLive(read()));
   r.addEventListener('change', () => onDone(read()));
   return r;
 }
 
-/** Поле одного числа. Возвращает input; onEdit получает уже число. */
+/** Поле одного числа. Возвращает input; onEdit получает уже число */
 export function numberField(value, param, onEdit) {
   const i = document.createElement('input');
   i.className = 'input input--num';
@@ -46,7 +46,7 @@ export function numberField(value, param, onEdit) {
   i.max = param.hard_max;
   i.value = Number(value).toFixed(param.decimals);
   // Пока модуля под параметром нет, поле показывает умолчание Source бледным:
-  // именно его эффект и получит, если правку не тронуть.
+  // именно его эффект и получит, если правку не тронуть
   i.classList.toggle('is-placeholder', param.value === null);
   i.addEventListener('change', () => {
     const v = Math.min(param.hard_max, Math.max(param.hard_min, Number(i.value)));
@@ -57,7 +57,7 @@ export function numberField(value, param, onEdit) {
 }
 
 /**
- * Дорожка и поле на одно значение: тянуть удобнее, вписать точнее.
+ * Дорожка и поле на одно значение: тянуть удобнее, вписать точнее
  *
  * Дорожка ходит по мягким границам, поле принимает и жёсткие - поэтому
  * значение из чужого эффекта (emission_rate под миллион) правится вручную,
@@ -77,7 +77,7 @@ export function pairedField(value, param, onEdit) {
   return wrap;
 }
 
-/** Цвет как #rrggbb; альфу сохраняем - её правит отдельный параметр. */
+/** Цвет как #rrggbb; альфу сохраняем - её правит отдельный параметр */
 export function colorField(rgba, onEdit) {
   const i = document.createElement('input');
   i.type = 'color';
@@ -91,26 +91,26 @@ export function colorField(rgba, onEdit) {
   return i;
 }
 
-/** Отправляет правку и переливает результат в живое превью. */
+/** Отправляет правку и переливает результат в живое превью */
 export async function editParam(param, value) {
   const res = await api.setParticleParam(pSystem, param.key, value);
-  if (res.error) { say(res.error); return; }
+  if (res.error) { sayError(res.error); return; }
   withParticles((w) => w.updateSystems(res.systems, pSystem));
   ensureEffectMaterials();
   setDiff(res.diff);
   fillTree(pcfNodes, pSystem);
   setTitle(pSystem);
   // Значение могло создать модуль - перечитываем, чтобы бледные поля стали
-  // обычными, а соседние крутилки показали то, что теперь в файле.
+  // обычными, а соседние крутилки показали то, что теперь в файле
   await showParams(pSystem);
 }
 
-/** Редактор одного атрибута экспертного режима - по типу из PCF. */
+/** Редактор одного атрибута экспертного режима - по типу из PCF */
 export function attrField(attr, onEdit) {
   const box = document.createElement('div');
   box.className = 'params__in';
 
-  // Атрибут с фиксированным набором значений - список, а не голое число.
+  // Атрибут с фиксированным набором значений - список, а не голое число
   if (attr.enum) {
     const sel = document.createElement('select');
     sel.className = 'input';
@@ -132,7 +132,7 @@ export function attrField(attr, onEdit) {
 
   if (attr.t === 'color') {
     // Цвет и прозрачность - разными полями: альфа в PCF четвёртая компонента,
-    // а <input type="color"> о ней не знает.
+    // а <input type="color"> о ней не знает
     const rgba = attr.v.slice();
     const hex = (n) => Math.max(0, Math.min(255, n | 0)).toString(16).padStart(2, '0');
     const c = document.createElement('input');
@@ -164,7 +164,7 @@ export function attrField(attr, onEdit) {
   }
 
   if (Array.isArray(attr.v)) {
-    // vec2/vec3/vec4 - по полю на компоненту, значение уходит целиком.
+    // vec2/vec3/vec4 - по полю на компоненту, значение уходит целиком
     const vals = attr.v.slice();
     vals.forEach((v, n) => {
       const i = document.createElement('input');
@@ -185,7 +185,7 @@ export function attrField(attr, onEdit) {
   i.type = 'number';
   i.step = attr.t === 'integer' ? '1' : '0.01';
   // В PCF числа float32, и 0.1 приезжает как 0.10000000149011612. Показываем
-  // округлённо: значение в файле не трогаем, пока его не правят.
+  // округлённо: значение в файле не трогаем, пока его не правят
   i.value = attr.t === 'integer' ? attr.v : Number(Number(attr.v).toPrecision(7));
   i.addEventListener('change',
     () => onEdit(attr.t === 'integer' ? parseInt(i.value, 10) : Number(i.value)));
@@ -193,7 +193,7 @@ export function attrField(attr, onEdit) {
   return box;
 }
 
-/** Проверка «умеет ли движок этот модуль», либо null - движок ещё молчит. */
+/** Проверка «умеет ли движок этот модуль», либо null - движок ещё молчит */
 export function supportedModules() {
   const w = particles();
   if (!w || typeof w.implementedModules !== 'function') return null;

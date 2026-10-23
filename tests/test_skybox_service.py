@@ -1,9 +1,9 @@
-"""Тесты SkyboxService: нарезка панорамы, сборка VPK, роутинг сборки.
+"""Тесты SkyboxService: нарезка панорамы, сборка VPK, роутинг сборки
 
 Нарезка фиксируется цветовой панорамой (центры граней = ожидаемые сектора
-долготы/полюса) — это защищает калиброванные FACE_BASES от регрессий.
-Сборка — паттерн test_vpk_service: реальный BuildContext во временной папке,
-патчи TextureService/PackagingService, ассерты по файлам vpkroot.
+долготы/полюса) - это защищает калиброванные FACE_BASES от регрессий.
+Сборка - паттерн test_vpk_service: реальный BuildContext во временной папке,
+патчи TextureService/PackagingService, ассерты по файлам vpkroot
 """
 
 import os
@@ -21,11 +21,11 @@ from src.services.skybox_service import SkyboxService
 
 
 def _make_banded_pano(path: str, w: int = 256, h: int = 128) -> dict:
-    """Панорама с секторами долготы + полюсами. Возвращает ожидаемые цвета.
+    """Панорама с секторами долготы + полюсами. Возвращает ожидаемые цвета
 
     Раскладка по x (формула нарезки: x = (0.5 - lon/2pi)*W):
-      центр (x=W/2)  → ft;  x=W/4 → rt;  x=3W/4 → lf;  края → bk.
-    Верхние/нижние 15% строк — полюса (up/dn).
+      центр (x=W/2)  -> ft;  x=W/4 -> rt;  x=3W/4 -> lf;  края -> bk.
+    Верхние/нижние 15% строк - полюса (up/dn)
     """
     colors = {
         "ft": (220, 200, 40), "lf": (200, 40, 40),
@@ -62,7 +62,7 @@ def _center_color(png_path: str):
 
 class SplitEquirectTests(unittest.TestCase):
     def test_face_centers_match_expected_directions(self):
-        # Фиксирует FACE_BASES: центр каждой грани смотрит в свой сектор.
+        # Фиксирует FACE_BASES: центр каждой грани смотрит в свой сектор
         with tempfile.TemporaryDirectory() as tmp:
             pano = os.path.join(tmp, "pano.png")
             colors = _make_banded_pano(pano)
@@ -86,8 +86,8 @@ class SplitEquirectTests(unittest.TestCase):
                     self.assertEqual(im.size, (48, 48), face)
 
     def test_bk_center_spans_pano_seam_without_artifacts(self):
-        # Центр bk — ровно на шве панорамы (x=0/W): билинейная выборка обязана
-        # заворачиваться, иначе цвет центра исказится.
+        # Центр bk - ровно на шве панорамы (x=0/W): билинейная выборка обязана
+        # заворачиваться, иначе цвет центра исказится
         with tempfile.TemporaryDirectory() as tmp:
             pano = os.path.join(tmp, "pano.png")
             colors = _make_banded_pano(pano)
@@ -97,15 +97,15 @@ class SplitEquirectTests(unittest.TestCase):
                 self.assertLessEqual(abs(g - wnt), 12)
 
     def test_fine_detail_survives_in_linear_light(self):
-        """Мелкие яркие детали (звёзды) не должны гаснуть при нарезке.
+        """Мелкие яркие детали (звёзды) не должны гаснуть при нарезке
 
-        Шахматка 1 px из 255 и 4: физически верное среднее — 0.5 в линейном
+        Шахматка 1 px из 255 и 4: физически верное среднее - 0.5 в линейном
         свете, то есть ~186 в sRGB. Усреднение самих sRGB-значений дало бы ~130
-        (именно так звёзды и «пропадали»).
+        (именно так звёзды и «пропадали»)
 
         Заодно фиксируется суперсэмплинг: без него значение пикселя зависит от
-        того, куда случайно попал единственный отсчёт (разброс в сотню единиц —
-        это и есть «шипение» мелких деталей), с ним грань ровная.
+        того, куда случайно попал единственный отсчёт (разброс в сотню единиц -
+        это и есть «шипение» мелких деталей), с ним грань ровная
         """
         import numpy as np
 
@@ -132,7 +132,7 @@ class SplitEquirectTests(unittest.TestCase):
 
     def test_upscaled_panorama_is_sharpened(self):
         """Панорама меньше граней: суперсэмплинг бессмыслен (деталей нет),
-        зато контраст на границах должен подрасти от нерезкой маски."""
+        зато контраст на границах должен подрасти от нерезкой маски"""
         import numpy as np
 
         with tempfile.TemporaryDirectory() as tmp:
@@ -143,7 +143,7 @@ class SplitEquirectTests(unittest.TestCase):
             Image.fromarray(half).save(pano)
 
             faces = SkyboxService.split_equirect_to_faces(
-                pano, 128, os.path.join(tmp, "o"))   # 128 > 128/4 → апскейл
+                pano, 128, os.path.join(tmp, "o"))   # 128 > 128/4 -> апскейл
             arr = np.asarray(Image.open(faces["ft"]).convert("L"),
                              dtype=np.float32)
             # Нерезкая маска даёт «выброс» ярче исходных 200 у самой границы
@@ -166,13 +166,13 @@ class SplitEquirectTests(unittest.TestCase):
 
 class NormalizeFaceTests(unittest.TestCase):
     def test_half_height_goes_to_top_half_with_clamped_bottom(self):
-        # 2:1 (боковые грани стоковых небес): верхняя половина квадрата —
-        # картинка, нижняя — растянутая нижняя строка (как рендерит движок).
+        # 2:1 (боковые грани стоковых небес): верхняя половина квадрата -
+        # картинка, нижняя - растянутая нижняя строка (как рендерит движок)
         with tempfile.TemporaryDirectory() as tmp:
             src = os.path.join(tmp, "side.png")
             im = Image.new("RGB", (64, 32), (0, 200, 0))
             for x in range(64):
-                im.putpixel((x, 31), (200, 0, 0))   # нижняя строка — красная
+                im.putpixel((x, 31), (200, 0, 0))   # нижняя строка - красная
             im.save(src)
             out = os.path.join(tmp, "sq.png")
             SkyboxService._normalize_face_to_square(src, out, 64)
@@ -192,7 +192,7 @@ class NormalizeFaceTests(unittest.TestCase):
                 self.assertEqual(sq.getpixel((5, 60)), (10, 20, 30))
 
     def test_up_face_2to1_stretches_full_face(self):
-        # Правило «верхняя половина» — только для боковых; up/dn растягиваются.
+        # Правило «верхняя половина» - только для боковых; up/dn растягиваются
         with tempfile.TemporaryDirectory() as tmp:
             src = os.path.join(tmp, "up_src.png")
             im = Image.new("RGB", (64, 32), (0, 200, 0))
@@ -202,8 +202,8 @@ class NormalizeFaceTests(unittest.TestCase):
             out = os.path.join(tmp, "up_sq.png")
             SkyboxService._normalize_face_to_square(src, out, 64, face="up")
             with Image.open(out) as sq:
-                # Низ квадрата — из нижних строк картинки, а не клампа одной
-                # строки на всю половину: середина низа зелёная.
+                # Низ квадрата - из нижних строк картинки, а не клампа одной
+                # строки на всю половину: середина низа зелёная
                 self.assertEqual(sq.getpixel((32, 50)), (0, 200, 0))
 
 
@@ -236,13 +236,13 @@ def _build_request(tmp: str, **overrides) -> BuildRequest:
 
 class BuildSkyboxVpkTests(unittest.TestCase):
     def _run_build(self, request, tmp):
-        """Запускает сборку с патчами; возвращает (ok, msg, снимок vpkroot)."""
+        """Запускает сборку с патчами, возвращает (ok, msg, снимок vpkroot)"""
         captured = {}
         vtf_calls = []
 
         def fake_create_vtf(png_path, out_dir, fmt, flags, options=None):
             stem = Path(png_path).stem
-            # Центр PNG — для проверки «оверрайд бьёт панораму».
+            # Центр PNG - для проверки «оверрайд бьёт панораму»
             center = _center_color(png_path)
             vtf_calls.append(
                 {"stem": stem, "format": fmt, "flags": list(flags),
@@ -295,7 +295,7 @@ class BuildSkyboxVpkTests(unittest.TestCase):
             self.assertIn('"sky"', content)
             self.assertIn('"$basetexture" "skybox/test_skyup"', content)
             self.assertIn('"$nofog" "1"', content)
-            # HDR-клон ссылается на те же общие VTF.
+            # HDR-клон ссылается на те же общие VTF
             self.assertEqual(content, cap["vmt_texts"]["sky_a_01_hdrup.vmt"])
 
     def test_face_override_beats_panorama(self):
@@ -311,7 +311,7 @@ class BuildSkyboxVpkTests(unittest.TestCase):
     def test_forces_clamp_flags_and_format(self):
         with tempfile.TemporaryDirectory() as tmp:
             # Формат вне SKYBOX_ALLOWED_FORMATS и посторонние флаги игнорируются:
-            # CLAMPS/CLAMPT/NOLOD и отсутствие мипов у скайбокса свои.
+            # CLAMPS/CLAMPT/NOLOD и отсутствие мипов у скайбокса свои
             req = _build_request(tmp, format_type="DXT5",
                                  flags=["NOMINMIP", "TRILINEAR"])
             ok, msg, _cap, calls = self._run_build(req, tmp)
@@ -323,8 +323,8 @@ class BuildSkyboxVpkTests(unittest.TestCase):
                 self.assertEqual(c["format"], "DXT1")
 
     def test_pointsample_flag_passes_through(self):
-        """POINTSAMPLE — единственный пользовательский флаг, доезжающий до граней
-        (без него звёзды размываются билинейной фильтрацией при увеличении)."""
+        """POINTSAMPLE - единственный пользовательский флаг, доезжающий до граней
+        (без него звёзды размываются билинейной фильтрацией при увеличении)"""
         with tempfile.TemporaryDirectory() as tmp:
             req = _build_request(tmp, flags=["POINTSAMPLE"])
             ok, msg, _cap, calls = self._run_build(req, tmp)
@@ -385,7 +385,7 @@ class BuildSkyboxVpkTests(unittest.TestCase):
 class BuildRoutingTests(unittest.TestCase):
     def test_build_with_progress_routes_skybox_without_tf2(self):
         # Скайбокс идёт своей веткой ДО _validate_build_params:
-        # ни image_path, ни tf2_root_dir не обязательны.
+        # ни image_path, ни tf2_root_dir не обязательны
         from src.services.vpk_service import VPKService
         req = BuildRequest(mode="skybox", filename="s.vpk",
                            skybox_sky_names=["sky_a_01"])
@@ -403,14 +403,14 @@ if __name__ == "__main__":
 
 
 def _make_animated_pano(path: str, frames: int = 3, w: int = 64, h: int = 32) -> None:
-    """Простая анимированная equirect-панорама (GIF, кадры разного цвета)."""
+    """Простая анимированная equirect-панорама (GIF, кадры разного цвета)"""
     imgs = [Image.new("RGB", (w, h), (40 + i * 30, 60, 90)) for i in range(frames)]
     imgs[0].save(path, save_all=True, append_images=imgs[1:], duration=100, loop=0)
 
 
 class AnimatedSkyboxTests(unittest.TestCase):
     """Анимированные грани: нарезка анимированной панорамы + умный VMT
-    (UnlitGeneric+AnimatedTexture только для анимированных граней)."""
+    (UnlitGeneric+AnimatedTexture только для анимированных граней)"""
 
     def _run_build(self, request, tmp):
         captured = {}
@@ -479,13 +479,13 @@ class AnimatedSkyboxTests(unittest.TestCase):
             self.assertEqual(up, cap["vmt_texts"]["sky_a_01_hdrup.vmt"])
 
     def test_mixed_uses_uniform_unlit_shader(self):
-        """Смешанный скайбокс: анимирована одна грань → ВСЕ грани на UnlitGeneric
-        (единый шейдер, без стыка sky/UnlitGeneric). Статичная грань — БЕЗ
-        анимационных параметров (требование «ничего лишнего не добавляем»)."""
+        """Смешанный скайбокс: анимирована одна грань -> ВСЕ грани на UnlitGeneric
+        (единый шейдер, без стыка sky/UnlitGeneric). Статичная грань - БЕЗ
+        анимационных параметров (требование «ничего лишнего не добавляем»)"""
         with tempfile.TemporaryDirectory() as tmp:
             anim = os.path.join(tmp, "anim_up.gif")
             _make_animated_pano(anim, frames=3)
-            # Статичная панорама (по умолчанию) + анимированный оверрайд только up.
+            # Статичная панорама (по умолчанию) + анимированный оверрайд только up
             req = _build_request(tmp, skybox_face_overrides={"up": anim})
             ok, msg, cap = self._run_build(req, tmp)
             self.assertTrue(ok, msg)
@@ -499,7 +499,7 @@ class AnimatedSkyboxTests(unittest.TestCase):
             self.assertNotIn("$frame", ft)
 
     def test_fully_static_stays_sky_shader(self):
-        """Без анимации — нативный шейдер sky на всех гранях (UnlitGeneric не навязываем)."""
+        """Без анимации - нативный шейдер sky на всех гранях (UnlitGeneric не навязываем)"""
         with tempfile.TemporaryDirectory() as tmp:
             req = _build_request(tmp)   # статичная панорама
             ok, msg, cap = self._run_build(req, tmp)

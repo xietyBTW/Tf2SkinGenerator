@@ -1,7 +1,7 @@
-"""Формат PCF: DMX-атрибуты <-> JSON, элементы модулей, ключ материала.
+"""Формат PCF: DMX-атрибуты <-> JSON, элементы модулей, ключ материала
 
 Общий слой, на котором стоят все соавторы документа: сами они друг о
-друге не знают, а этот модуль знают все."""
+друге не знают, а этот модуль знают все"""
 
 import re
 from typing import Any, Dict, Optional
@@ -18,24 +18,24 @@ except ImportError:
     Attribute = Element = ValueType = None  # type: ignore
 
 
-#: Группы модулей внутри определения системы частиц.
+#: Группы модулей внутри определения системы частиц
 MODULE_GROUPS = (
     "renderers", "operators", "initializers", "emitters", "forces", "constraints",
 )
 
 
-#: Служебные поля — их не показываем и не даём удалять.
+#: Служебные поля - их не показываем и не даём удалять
 SERVICE_ATTRS = ("functionname", "name", "id")
 
 
 def norm_mat(name: str, ext: str = ".vmt") -> str:
-    """Материал → нормализованный rel-путь под materials/ (effects/crit.vmt).
+    """Материал -> нормализованный rel-путь под materials/ (effects/crit.vmt)
 
     Ключ для сопоставления материалов с разным регистром и разделителями.
     Задвоенные разделители схлопываются: в PCF стока встречается
-    `effects\\\\crit` (а у эффекта из мастерской — задвоенные во ВСЕХ
+    `effects\\\\crit` (а у эффекта из мастерской - задвоенные во ВСЕХ
     сегментах), и без этого `effects//crit.vmt` считался бы другим материалом,
-    которого в архиве нет — крит-эффект оставался без текстуры.
+    которого в архиве нет - крит-эффект оставался без текстуры
     """
     n = re.sub(r"[\\/]+", "/", (name or "").strip()).strip("/").lower()
     if not n:
@@ -47,10 +47,10 @@ def norm_mat(name: str, ext: str = ".vmt") -> str:
     return n
 
 
-# ── Конвертация атрибутов DMX → JSON ─────────────────────────────────────── #
+# Конвертация атрибутов DMX -> JSON
 
 def attr_scalar_to_json(attr) -> Any:
-    """Значение скалярного атрибута → JSON-совместимое значение."""
+    """Значение скалярного атрибута -> JSON-совместимое значение"""
     vt = attr.type
     if vt is ValueType.COLOR:
         c = attr.val_color
@@ -67,7 +67,7 @@ def attr_scalar_to_json(attr) -> Any:
 
 
 def attr_to_json(attr) -> Optional[dict]:
-    """Атрибут DMX → {"t": тип, "v": значение} либо None для несериализуемых."""
+    """Атрибут DMX -> {"t": тип, "v": значение} либо None для несериализуемых"""
     vt = attr.type
     if vt in (ValueType.ELEMENT, ValueType.BINARY, ValueType.MATRIX,
               ValueType.QUATERNION):
@@ -92,7 +92,7 @@ def attr_to_json(attr) -> Optional[dict]:
 
 
 def element_attrs_to_json(el) -> Dict[str, dict]:
-    """Все скалярные атрибуты элемента → {имя: {"t","v"}} (модульные группы пропускаются)."""
+    """Все скалярные атрибуты элемента -> {имя: {"t","v"}} (модульные группы пропускаются)"""
     out: Dict[str, dict] = {}
     for key in el.keys():
         if key in MODULE_GROUPS or key == "children":
@@ -104,7 +104,7 @@ def element_attrs_to_json(el) -> Dict[str, dict]:
 
 
 def module_to_json(el) -> dict:
-    """Модуль (оператор/инициализатор/...) → JSON с functionName и атрибутами."""
+    """Модуль (оператор/инициализатор/...) -> JSON с functionName и атрибутами"""
     attrs = element_attrs_to_json(el)
     # srctools хранит имена атрибутов в нижнем регистре
     fn = attrs.get("functionname", {}).get("v") or el.name
@@ -112,7 +112,7 @@ def module_to_json(el) -> dict:
 
 
 def attr_from_json(name: str, tv: dict) -> Optional["Attribute"]:
-    """{"t","v"} из systems_json → Attribute (None — неизвестный тип/битое значение)."""
+    """{"t","v"} из systems_json -> Attribute (None - неизвестный тип/битое значение)"""
     t, v = tv.get("t"), tv.get("v")
     try:
         if t == "color":
@@ -146,10 +146,10 @@ def attr_from_json(name: str, tv: dict) -> Optional["Attribute"]:
 
 
 def copy_module(el) -> "Element":
-    """Отвязанная копия модуля: все атрибуты копируются по значению.
+    """Отвязанная копия модуля: все атрибуты копируются по значению
 
-    Ключ — ОРИГИНАЛЬНОЕ имя атрибута (el.keys() отдаёт casefold-ключи,
-    присваивание по ним затирало бы регистр имён в файле)."""
+    Ключ - ОРИГИНАЛЬНОЕ имя атрибута (el.keys() отдаёт casefold-ключи,
+    присваивание по ним затирало бы регистр имён в файле)"""
     new = Element(el.name, el.type)
     for attr in el.values():
         new[attr.name] = attr.copy()
@@ -157,7 +157,7 @@ def copy_module(el) -> "Element":
 
 
 def module_fn(mod) -> str:
-    """functionName модуля (нижний регистр) с фолбэком на имя элемента."""
+    """functionName модуля (нижний регистр) с фолбэком на имя элемента"""
     fn = ""
     if "functionname" in mod:
         try:
@@ -168,7 +168,7 @@ def module_fn(mod) -> str:
 
 
 def make_module(function_name: str, element_type: str, attrs: list) -> "Element":
-    """Модуль из functionName и готовых Attribute."""
+    """Модуль из functionName и готовых Attribute"""
     el = Element(function_name, element_type)
     el["functionName"] = Attribute.string("functionName", function_name)
     for attr in attrs:

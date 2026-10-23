@@ -1,12 +1,10 @@
 """
 Библиотека узоров блеска: свои узоры (work/sheen_patterns/<id>.json) и
-готовые шаблоны конструктора под одним видом id.
+готовые шаблоны конструктора под одним видом id
 
-Конструктор (sheen_builder) рисует кадры по описанию узора; здесь - где
+Конструктор (sheen_builder) рисует кадры по описанию узора, здесь - где
 узоры лежат, как их найти по id из VMT и чем отличить одну версию узора от
-другой (`content_hash` - для пути маски в моде).
-
-Модуль без Qt.
+другой (`content_hash` - для пути маски в моде)
 """
 
 from __future__ import annotations
@@ -23,9 +21,9 @@ from src.services.sheen_builder import (
     PRESETS, resolve_image, clean_spec, library_dir,
 )
 
-#: Свой узор: u + 8 hex.
+#: Свой узор: u + 8 hex
 ID_RE = re.compile(r'^u[0-9a-f]{8}$')
-#: Готовый узор (шаблон конструктора) в эффекте: `p_<ключ PRESETS>`.
+#: Готовый узор (шаблон конструктора) в эффекте: `p_<ключ PRESETS>`
 PRESET_PREFIX = "p_"
 
 
@@ -44,16 +42,16 @@ def list_patterns() -> List[dict]:
 
 
 def is_pattern(pattern_id: str) -> bool:
-    """Узор конструктора: свой (u + 8 hex) или готовый шаблон (p_<ключ>)."""
+    """Узор конструктора: свой (u + 8 hex) или готовый шаблон (p_<ключ>)"""
     text = str(pattern_id or "")
     return bool(ID_RE.match(text)) or (text.startswith(PRESET_PREFIX)
                                        and text[len(PRESET_PREFIX):] in PRESETS)
 
 
 def load(pattern_id: str, deleted: bool = False) -> Optional[dict]:
-    """Узор по id. `deleted` — искать и среди удалённых: сборка работы, где
+    """Узор по id. `deleted` - искать и среди удалённых: сборка работы, где
     узор ещё стоит, не должна падать из-за того, что его убрали из списка.
-    Шаблон (`p_<ключ>`) - из PRESETS: готовые узоры эффекта рисует тот же код.
+    Шаблон (`p_<ключ>`) - из PRESETS: готовые узоры эффекта рисует тот же код
     """
     text = str(pattern_id or "")
     if is_pattern(text) and text.startswith(PRESET_PREFIX):
@@ -79,8 +77,8 @@ def load(pattern_id: str, deleted: bool = False) -> Optional[dict]:
 
 
 def save(pattern_id: Optional[str], name: str, spec: dict, length: float) -> str:
-    """Сохраняет узор; картинки слоёв копируются в библиотеку (по
-    содержимому), чтобы узор не зависел от временных файлов."""
+    """Сохраняет узор, картинки слоёв копируются в библиотеку (по
+    содержимому), чтобы узор не зависел от временных файлов"""
     folder = library_dir()
     (folder / "images").mkdir(parents=True, exist_ok=True)
     if not ID_RE.match(str(pattern_id or "")):
@@ -125,7 +123,7 @@ def delete(pattern_id: str) -> bool:
 
 def content_hash(pattern_id: str) -> str:
     """Отпечаток узора: в моде маска лежит под ним, чтобы моды, собранные до
-    и после правки узора, не делили один путь с разным содержимым."""
+    и после правки узора, не делили один путь с разным содержимым"""
     data = load(pattern_id, deleted=True)
     if data is None:
         return ""

@@ -118,7 +118,7 @@ class MergeVpkServiceTests(unittest.TestCase):
                 (base / "vpkroot.vpk").write_bytes(b"vpk")
                 return type("R", (), {"returncode": 0, "stdout": "", "stderr": ""})()
             vpk_tool = base / "vpk.exe"; vpk_tool.write_bytes(b"stub")  # pack_directory проверяет .exists()
-            # vpk.exe вызывается в PackagingService.pack_directory — патчим там.
+            # vpk.exe вызывается в PackagingService.pack_directory - патчим там
             with patch("src.services.packaging_service.subprocess.run", side_effect=fake_run):
                 with patch("src.services.packaging_service.ToolPaths.get_vpk_tool", return_value=vpk_tool):
                     result = MergeVPKService._create_vpk_from_directory(vpkroot, "out.vpk", export_folder=str(base))
@@ -132,15 +132,15 @@ class MergeVpkServiceTests(unittest.TestCase):
             def fake_run(*args, **kwargs):
                 return type("R", (), {"returncode": 1, "stdout": "bad", "stderr": "err"})()
             vpk_tool = base / "vpk.exe"; vpk_tool.write_bytes(b"stub")  # pack_directory проверяет .exists()
-            # vpk.exe вызывается в PackagingService.pack_directory — патчим там.
+            # vpk.exe вызывается в PackagingService.pack_directory - патчим там
             with patch("src.services.packaging_service.subprocess.run", side_effect=fake_run):
                 with patch("src.services.packaging_service.ToolPaths.get_vpk_tool", return_value=vpk_tool):
                     with self.assertRaises(VPKCreationError):
                         MergeVPKService._create_vpk_from_directory(vpkroot, "out.vpk", export_folder=str(base))
 
     def test_create_vpk_missing_tool_raises_friendly(self):
-        # Нет ни бандла, ни vpk.exe из TF2 → понятная RequiredFileMissingError
-        # (а не сырой FileNotFoundError из subprocess). pre-flight в pack_directory.
+        # Нет ни бандла, ни vpk.exe из TF2 -> понятная RequiredFileMissingError
+        # (а не сырой FileNotFoundError из subprocess). pre-flight в pack_directory
         with tempfile.TemporaryDirectory() as tmp:
             base = Path(tmp)
             vpkroot = base / "vpkroot"

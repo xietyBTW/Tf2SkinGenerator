@@ -1,12 +1,12 @@
 """
 Материал карточки: карты (самосвечение, отражение, нормаль, lightwarp,
-phongwarp), настройки текстуры и правка VMT вручную.
+phongwarp), настройки текстуры и правка VMT вручную
 
 Своего состояния нет: карты и настройки живут в состоянии превью сеанса
 (`preview.texture_maps` и др.), сюда - только как их показать, проверить
-и записать. Какой материал правит карточка - `_card_key` сеанса.
+и записать. Какой материал правит карточка - `_card_key` сеанса
 
-Доступ — `session().materials`; `api.py` зовёт его методы напрямую.
+Доступ - `session().materials`; `api.py` зовёт его методы напрямую
 """
 
 from __future__ import annotations
@@ -23,17 +23,17 @@ logger = get_logger(__name__)
 
 
 class MaterialsEditor:
-    """Карты материала и VMT карточки."""
+    """Карты материала и VMT карточки"""
 
     def __init__(self, host: "AppSession") -> None:
         self._host = host
 
     def texture_maps(self, material: str = '') -> Dict[str, Any]:
-        """Карты материала для показа в диалоге.
+        """Карты материала для показа в диалоге
 
         У мода из VPK это и карты из VMT самого мода (``{"mod": True,
-        "preview": …}``) — они отмечены, а не пусты. Сохранённая запись
-        важнее: снятая (``off``) не показывается, оставленная — с превью мода.
+        "preview": …}``) - они отмечены, а не пусты. Сохранённая запись
+        важнее: снятая (``off``) не показывается, оставленная - с превью мода
         """
         key = self._host._card_key(material)
         mod = self._host.preview.mod_maps.get(key) or {}
@@ -50,16 +50,16 @@ class MaterialsEditor:
     def set_texture_maps(self, material: str = '',
                          maps: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """
-        Записывает карты материала. Пустой набор снимает их совсем.
+        Записывает карты материала. Пустой набор снимает их совсем
 
         Присланное проверяется (``normalize_maps``): запись уходит в генератор
         VTF и в VMT, и мусорный ключ там превращается в сломанный материал.
-        Полоска из конструктора (``generate``) рисуется здесь же в PNG — дальше
-        она обычная картинка карты, и сборка о конструкторе не знает.
+        Полоска из конструктора (``generate``) рисуется здесь же в PNG - дальше
+        она обычная картинка карты, и сборка о конструкторе не знает
 
         Карта мода, которой в присланном нет, сохраняется отметкой ``off``:
         сборка уберёт её из VMT. Без отметки «снял» не отличить от «не
-        трогал» — и после перезапуска карта мода вернулась бы.
+        трогал» - и после перезапуска карта мода вернулась бы
         """
         from src.data.material_maps import MATERIAL_MAPS, normalize_maps
 
@@ -85,9 +85,9 @@ class MaterialsEditor:
         return {'material': key, 'maps': clean}
 
     def _generated_png(self, name: str, params: Dict[str, Any]) -> str:
-        """PNG карты из конструктора (lightwarp, phongwarp) — рядом с
+        """PNG карты из конструктора (lightwarp, phongwarp) - рядом с
         загрузками страницы (работа копирует его к себе, как любую картинку
-        карты). Дальше это обычная картинка, сборка о конструкторе не знает."""
+        карты). Дальше это обычная картинка, сборка о конструкторе не знает"""
         import hashlib
         import json
         import tempfile
@@ -104,21 +104,21 @@ class MaterialsEditor:
 
     @staticmethod
     def _game_root() -> str:
-        """Папка игры из настроек — без проверок tf2_paths: превью полоски
+        """Папка игры из настроек - без проверок tf2_paths: превью полоски
         дёргается на каждое движение ползунка, а основа нужна только для
-        чтения VPK (нет игры — основа x/2)."""
+        чтения VPK (нет игры - основа x/2)"""
         from src.config.app_config import AppConfig
         return (AppConfig.load_config().get('tf2_game_folder') or '').strip()
 
     def lightwarp_ramp(self, params: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """Полоска конструктора для живого превью: 256 цветов [r, g, b] и
-        она же точками."""
+        она же точками"""
         from src.services import lightwarp
 
         params = lightwarp.clean_params(params or {})
         strip = lightwarp.ramp(params, self._game_root())
-        # Точки той же полоски — для «Сделать точками»: любую основу со всеми
-        # настройками можно дальше править руками.
+        # Точки той же полоски - для «Сделать точками»: любую основу со всеми
+        # настройками можно дальше править руками
         return {'params': params, 'ramp': strip.tolist(), 'stops': lightwarp.to_stops(strip)}
 
     def map_preview(self, material: str = '', map_id: str = 'selfillum',
@@ -126,15 +126,15 @@ class MaterialsEditor:
         """
         Картинки для превью карты материала: текстура материала, её альфа и
         сама карта - та же, что построит сборка (derive_effect_map /
-        process_image / карта мода). Смешивает их страница по формуле шейдера.
+        process_image / карта мода). Смешивает их страница по формуле шейдера
 
         `map`: самосвечение, отражение, маска обводки - L; Phong-карта - RGBA
         (R - размер блика); detail - RGBA в своём размере (она тайлится).
         `mask`: у Phong-карты «Авто» - где блестит (сборка кладёт её в альфу
-        нормали). `env`: у отражения - шесть граней кубмапы строкой.
+        нормали). `env`: у отражения - шесть граней кубмапы строкой
 
         Не больше 256 px: превью, а не сборка. Имена по содержимому - браузер
-        не покажет старую картинку из кэша.
+        не покажет старую картинку из кэша
         """
         import hashlib
         import tempfile
@@ -147,7 +147,7 @@ class MaterialsEditor:
         key = self._host._card_key(material)
         tex = self._host.preview.textures.resolve_base(key)
         if not tex or not os.path.isfile(tex):
-            # Без текстуры шар отражения и обводки всё равно показываем.
+            # Без текстуры шар отражения и обводки всё равно показываем
             tex = None
             if map_id == 'selfillum':
                 return {'error': 'У материала нет текстуры для превью'}
@@ -176,7 +176,7 @@ class MaterialsEditor:
         thr = int(thr) if thr.isdigit() else None
         made = out / f'map_{stamp}.png'
         # Имя по входным данным, но не по содержимому карты мода или файла:
-        # прошлый файл с тем же именем мог остаться от другого материала.
+        # прошлый файл с тем же именем мог остаться от другого материала
         made.unlink(missing_ok=True)
         source = None
         if spec.get('derive') and tex:
@@ -185,7 +185,7 @@ class MaterialsEditor:
                                                  threshold=None if colour else thr)
             if map_id == 'phongexp':
                 # Где блестит: сборка кладёт маску в альфу нормали
-                # (VpkTextureBuilder: «Авто-блеск»), по яркости и порогу.
+                # (VpkTextureBuilder: «Авто-блеск»), по яркости и порогу
                 mask = out / f'mask_{stamp}.png'
                 TextureService.derive_effect_map(str(texture), str(mask), 'envmapmask',
                                                  size, threshold=thr)
@@ -207,7 +207,7 @@ class MaterialsEditor:
                 pic = img.convert('RGBA' if colour else 'L')
             if colour:
                 # Альфа отдельно: браузер обнуляет цвет там, где альфа 0, а у
-                # Phong-карты альфа - маска обводки, у detail она нужна режиму 2.
+                # Phong-карты альфа - маска обводки, у detail она нужна режиму 2
                 if map_id == 'detail':
                     alpha_map = out / f'map_alpha_{stamp}.png'
                     pic.getchannel('A').save(alpha_map)
@@ -222,7 +222,7 @@ class MaterialsEditor:
     def _cubemap_strip(self, material: str, choice: str) -> Dict[str, Any]:
         """Окружение отражения для превью: шесть граней кубмапы строкой
         (+X -X +Y -Y +Z -Z, как в VTF). `env_cubemap` - окружение карты, его
-        в файлах нет: показываем студийный cubemap_specular001 (`stand_in`)."""
+        в файлах нет: показываем студийный cubemap_specular001 (`stand_in`)"""
         import tempfile
         from pathlib import Path
 
@@ -271,14 +271,14 @@ class MaterialsEditor:
 
     @staticmethod
     def phongwarp_preview(params: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-        """Градиент блика для живого превью — уменьшенный (64×64)."""
+        """Градиент блика для живого превью - уменьшенный (64×64)"""
         from src.services import phongwarp
 
         params = phongwarp.clean_params(params or {})
         return {'params': params, 'image': phongwarp.preview(params)}
 
     def add_to_style(self, material: str = '') -> Dict[str, Any]:
-        """Добавляет материал в активный стиль (пустой карточкой)."""
+        """Добавляет материал в активный стиль (пустой карточкой)"""
         with self._host._lock:
             ok = self._host.preview.add_to_style(material)
         if not ok:
@@ -287,14 +287,14 @@ class MaterialsEditor:
         return self._host.view_state()
 
     def drop_from_style(self, material: str = '') -> Dict[str, Any]:
-        """Убирает материал из стиля — он вернётся к базовой текстуре."""
+        """Убирает материал из стиля - он вернётся к базовой текстуре"""
         with self._host._lock:
             self._host.preview.drop_from_style(material)
         self._host._autosave()
         return self._host.view_state()
 
     def texture_settings(self, material: str = '') -> Dict[str, Any]:
-        """Свои настройки материала или пусто, если он собирается как все."""
+        """Свои настройки материала или пусто, если он собирается как все"""
         key = self._host._card_key(material)
         return {'material': key,
                 'settings': dict(self._host.preview.texture_overrides.get(key, {}))}
@@ -303,11 +303,11 @@ class MaterialsEditor:
                              settings: Optional[Dict[str, Any]] = None
                              ) -> Dict[str, Any]:
         """
-        Задаёт материалу свои настройки сборки; пустые — возврат к глобальным.
+        Задаёт материалу свои настройки сборки, пустые - возврат к глобальным
 
         Страница присылает полный набор (разрешение, формат, флаги, опции):
         частичная запись потребовала бы знать здесь, что именно на ней сейчас
-        показано, а показанное — уже отражение этого состояния.
+        показано, а показанное - уже отражение этого состояния
         """
         from src.data.texture_overrides import override_badge
 
@@ -327,13 +327,13 @@ class MaterialsEditor:
                 'badge': override_badge(clean)}
 
     def texture_badges(self) -> Dict[str, str]:
-        """{материал: подпись} — у каких карточек свои настройки сборки."""
+        """{материал: подпись} - у каких карточек свои настройки сборки"""
         from src.data.texture_overrides import override_badge
         return {mat: override_badge(ov)
                 for mat, ov in self._host.preview.texture_overrides.items() if ov}
 
     def vmt_target(self, material: str = '') -> Any:
-        """(ключ правки, ключ модели, имя материала) либо словарь с ошибкой."""
+        """(ключ правки, ключ модели, имя материала) либо словарь с ошибкой"""
         from src.data.weapons import SPECIAL_MODES
         from src.services import vmt_source_service
 
@@ -342,7 +342,7 @@ class MaterialsEditor:
             return {'error': 'Сначала выберите предмет'}
         if mode == 'custom':
             # Мод из VPK: правится VMT самого мода (путь в архиве вместо
-            # ключа оружия), правка - под ключом этого мода.
+            # ключа оружия), правка - под ключом этого мода
             from src.services.edited_vmt_service import EditedVMTService
             card = self._host._card_key(material)
             vmt = self._host.preview.mod_vmts.get(card)
@@ -358,24 +358,24 @@ class MaterialsEditor:
             return {'error': 'Для этого режима редактор VMT недоступен'}
 
         weapon_key, _display = target
-        # Ключ хранения правки — имя материала: у главного он совпадает с
-        # texture_filename, который сборка и ищет.
+        # Ключ хранения правки - имя материала: у главного он совпадает с
+        # texture_filename, который сборка и ищет
         return weapon_key, (self._host._card_key(material) or weapon_key)
 
     def _vmt_label(self, edit_key: str, material: str) -> str:
         """Имя материала для страницы - она шлёт его обратно при сохранении.
         У мода из VPK ключ хранения свой (EditedVMTService.mod_key), и
-        вернувшись, он не находил карточку: «нет VMT»."""
+        вернувшись, он не находил карточку: «нет VMT»"""
         if getattr(self._host, '_mode', '') == 'custom':
             return self._host._card_key(material)
         return edit_key
 
     def open_vmt(self, material: str = '', lang: str = 'ru') -> Dict[str, Any]:
         """
-        Отдаёт текст VMT для правки: сохранённую версию либо игровой оригинал.
+        Отдаёт текст VMT для правки: сохранённую версию либо игровой оригинал
 
-        Оригинал возвращается всегда отдельным полем — по нему работает
-        «вернуть как в игре», и без него сброс вернул бы саму правку.
+        Оригинал возвращается всегда отдельным полем - по нему работает
+        «вернуть как в игре», и без него сброс вернул бы саму правку
         """
         from src.services.edited_vmt_service import EditedVMTService
 
@@ -414,12 +414,12 @@ class MaterialsEditor:
     def _vmt_original(self, mode: str, weapon_key: str, tf2_root: str,
                       edit_key: str, lang: str) -> Optional[str]:
         """
-        С чего начинается правка VMT материала.
+        С чего начинается правка VMT материала
 
         У части, ставшей своим материалом, в игре VMT нет: она начинается с
         игрового VMT исходного. Правку исходного, какой та была при создании,
-        материал части получил копией (PartsEditor._fork_vmt); поздние правки
-        исходного его не касаются (src/services/part_materials.py).
+        материал части получил копией (PartsEditor._fork_vmt), поздние правки
+        исходного его не касаются (src/services/part_materials.py)
         """
         from src.services import vmt_source_service
 
@@ -434,7 +434,7 @@ class MaterialsEditor:
             mode, weapon_key, tf2_root, edit_key, lang)
 
     def _mod_vmt_text(self, vmt_rel: str) -> Optional[str]:
-        """VMT из архива показанного мода - оригинал для его редактора."""
+        """VMT из архива показанного мода - оригинал для его редактора"""
         import vpk as vpklib
         try:
             data = vpklib.open(self._host._vpk_mod_path)[vmt_rel].read()
@@ -448,7 +448,7 @@ class MaterialsEditor:
 
     def save_vmt(self, material: str = '', content: str = '',
                  original: str = '', lang: str = 'ru') -> Dict[str, Any]:
-        """Сохраняет правку VMT. Сломанный синтаксис не сохраняется."""
+        """Сохраняет правку VMT. Сломанный синтаксис не сохраняется"""
         from src.services import vmt_source_service
 
         target = self.vmt_target(material)
@@ -465,11 +465,11 @@ class MaterialsEditor:
     def save_vmt_all(self, material: str, content: str, before: str, original: str,
                      materials: List[str], bounds: Optional[dict] = None,
                      lang: str = 'ru') -> Dict[str, Any]:
-        """Правка без шестерёнки: в этот материал и во все остальные.
+        """Правка без шестерёнки: в этот материал и во все остальные
 
         Остальным уходит не текст, а разбор правки `before` -> `content`:
         эффекты собираются в каждом заново, ключи - без путей текстур
-        (src/services/vmt_spread.py).
+        (src/services/vmt_spread.py)
         """
         from src.services import vmt_spread
 
@@ -501,12 +501,12 @@ class MaterialsEditor:
         return main
 
     def reset_vmt_all(self, materials: List[str]) -> Dict[str, Any]:
-        """«Как в игре» без шестерёнки: правки снимаются у всех материалов."""
+        """«Как в игре» без шестерёнки: правки снимаются у всех материалов"""
         done = [self.reset_vmt(m) for m in dict.fromkeys(materials)]
         return {'reset': [d['material'] for d in done if 'error' not in d]}
 
     def reset_vmt(self, material: str = '') -> Dict[str, Any]:
-        """Удаляет правку: материал вернётся к игровому оригиналу."""
+        """Удаляет правку: материал вернётся к игровому оригиналу"""
         from src.services.edited_vmt_service import EditedVMTService
 
         target = self.vmt_target(material)

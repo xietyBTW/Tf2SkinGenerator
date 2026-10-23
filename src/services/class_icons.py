@@ -1,8 +1,8 @@
 """
-Значки классов из игры (`materials/hud/leaderboard_class_<класс>.vtf`, 64×64).
+Значки классов из игры (`materials/hud/leaderboard_class_<класс>.vtf`, 64×64)
 
 Нужны окнам, где выбирают классы: имя класса текстом читается хуже, чем
-знакомая по таблице счёта голова. PNG кладутся в кэш данных один раз.
+знакомая по таблице счёта голова. PNG кладутся в кэш данных один раз
 """
 
 from __future__ import annotations
@@ -16,14 +16,14 @@ from src.shared.paths import data_dir
 
 logger = get_logger(__name__)
 
-#: Класс приложения → имя значка в игре (у подрывника он «demo»).
+#: Класс приложения -> имя значка в игре (у подрывника он «demo»)
 _STEMS = {'scout': 'scout', 'soldier': 'soldier', 'pyro': 'pyro',
           'demoman': 'demo', 'heavy': 'heavy', 'engineer': 'engineer',
           'medic': 'medic', 'sniper': 'sniper', 'spy': 'spy'}
 
 
 def class_icons(textures_vpk: str, misc_vpk: str) -> Dict[str, str]:
-    """{класс: путь PNG}. Класса без значка в ответе нет."""
+    """{класс: путь PNG}. Класса без значка в ответе нет"""
     folder = (data_dir() / 'cache' / 'class_icons').resolve()
     out: Dict[str, str] = {}
     missing = []

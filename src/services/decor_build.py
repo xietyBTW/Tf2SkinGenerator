@@ -1,25 +1,23 @@
 """
-Сборка гирлянды поверх оружия (праздничная версия, фестивайзер) в тот же мод.
+Сборка гирлянды поверх оружия (праздничная версия, фестивайзер) в тот же мод
 
-Гирлянда — отдельная модель (`c_*_xmas.mdl`, `c_*_festivizer.mdl`), которую
+Гирлянда - отдельная модель (`c_*_xmas.mdl`, `c_*_festivizer.mdl`), которую
 игра рисует костями оружия. Её правки собираются своей моделью, отдельно от
 оружия:
 
 1. разбор стоковой гирлянды (кэш декомпиляции общий с превью);
-2. подгонка под свою модель оружия запекается в вершины — кости и веса
+2. подгонка под свою модель оружия запекается в вершины - кости и веса
    остаются, и в игре гирлянда по-прежнему едет костями пушки;
 3. `$cdmaterials` уводится в СВОЮ папку (`models/tf2sg_decor/<модель>`).
    Материалы гирлянд у всех оружий общие (`festive_lights_red` один на сотню
-   моделей): подмени текстуру по игровому пути — и она легла бы на гирлянды
+   моделей): подмени текстуру по игровому пути - и она легла бы на гирлянды
    всех оружий разом. В своей папке правка касается только этой модели;
-4. каждый материал получает VMT в этой папке. Правленый — свою текстуру и
+4. каждый материал получает VMT в этой папке. Правленый - свою текстуру и
    копию игрового VMT с `$basetexture` на неё (самосвет, мигание и прочие
-   прокси остаются игровыми). Неправленый — копию игрового VMT как есть:
-   ссылки в нём от корня materials/, и стоковая текстура находится сама.
+   прокси остаются игровыми). Неправленый - копию игрового VMT как есть:
+   ссылки в нём от корня materials/, и стоковая текстура находится сама
 
-Ошибка одной гирлянды не валит сборку оружия: мод соберётся со стоковой.
-
-Модуль без Qt.
+Ошибка одной гирлянды не валит сборку оружия: мод соберётся со стоковой
 """
 
 from __future__ import annotations
@@ -34,7 +32,7 @@ from src.shared.logging_config import get_logger
 
 logger = get_logger(__name__)
 
-#: Корень папок материалов гирлянд в моде: у каждой модели своя подпапка.
+#: Корень папок материалов гирлянд в моде: у каждой модели своя подпапка
 DECOR_MATERIALS_ROOT = "models\\tf2sg_decor"
 
 _RE_CDMATERIALS_LINE = re.compile(r'^\s*\$cdmaterials\b.*$', re.IGNORECASE | re.MULTILINE)
@@ -57,17 +55,17 @@ def build_decor_models(
     emit_sub: Optional[Callable[[int, str], None]] = None,
     language: str = "ru",
 ) -> int:
-    """Собирает гирлянды в `ctx.vpkroot_dir`. Возвращает, сколько собрано.
+    """Собирает гирлянды в `ctx.vpkroot_dir`. Возвращает, сколько собрано
 
     Элемент `entries`: {'kind', 'mdl' (путь в VPK), 'smd' (своя модель
     гирлянды или пусто), 'fit' (dict | None),
-    'bends' ([{c, r, d}] — изгибы, festive_decor.apply_bends),
-    'textures': {материал: {'red': png, 'blu': png}}}.
+    'bends' ([{c, r, d}] - изгибы, festive_decor.apply_bends),
+    'textures': {материал: {'red': png, 'blu': png}}}
     """
     built = 0
     for entry in entries or ():
         mdl = (entry.get('mdl') or '').replace('\\', '/').lower()
-        # Вшитую в оружие собирает decor_bake вместе с моделью оружия.
+        # Вшитую в оружие собирает decor_bake вместе с моделью оружия
         if not mdl or entry.get('bake'):
             continue
         stem = Path(mdl).stem
@@ -80,7 +78,7 @@ def build_decor_models(
                        vtf_options, bypass_prefix)
             built += 1
         except Exception as exc:                              # noqa: BLE001
-            logger.warning(f"[гирлянда] {stem}: не собрана — в моде останется "
+            logger.warning(f"[гирлянда] {stem}: не собрана - в моде останется "
                            f"стоковая: {exc}", exc_info=True)
             if hasattr(ctx, 'warn'):
                 ctx.warn(f"Гирлянда {stem} не собралась: {exc}")
@@ -111,10 +109,10 @@ def _build_one(ctx, entry: dict, mdl: str, stem: str, misc_vpk: str,
 
 
 def prepare(ctx, entry: dict, mdl: str, stem: str, misc_vpk: str):
-    """Разобранная гирлянда с правками формы: своя модель, изгибы, подгонка.
+    """Разобранная гирлянда с правками формы: своя модель, изгибы, подгонка
 
     Returns:
-        (рабочая папка, QcModel копии разбора, её меш SMD).
+        (рабочая папка, QcModel копии разбора, её меш SMD)
     """
     from src.services import festive_decor, mesh_import_service, qc_skin_parser, smd_service
     from src.services import model_decompile_service as mds
@@ -124,7 +122,7 @@ def prepare(ctx, entry: dict, mdl: str, stem: str, misc_vpk: str):
     found = mds.ensure_decompiled(stem, misc_vpk, [mdl])
     if found is None:
         raise FileNotFoundError(f"{mdl} нет в игре")
-    # Копия: правим QC и SMD, а кэш декомпиляции общий с превью.
+    # Копия: правим QC и SMD, а кэш декомпиляции общий с превью
     shutil.copytree(found.directory, decomp_dir, dirs_exist_ok=True)
 
     model = qc_skin_parser.load_model(str(decomp_dir))
@@ -132,10 +130,10 @@ def prepare(ctx, entry: dict, mdl: str, stem: str, misc_vpk: str):
     if model is None or not ref:
         raise FileNotFoundError(f"в разборе {stem} нет QC или меша")
 
-    # Своя модель — на скелет стоковой, как в превью (festive_decor.build).
+    # Своя модель - на скелет стоковой, как в превью (festive_decor.build)
     if entry.get('smd'):
         festive_decor.own_on_stock(entry['smd'], ref, ref)
-    # Сначала изгибы (по самой гирлянде), потом подгонка — как во вьювере.
+    # Сначала изгибы (по самой гирлянде), потом подгонка - как во вьювере
     if entry.get('bends'):
         festive_decor.bend_smd(ref, ref, entry['bends'],
                                festive_decor.weapon_pose(entry.get('weapon') or '', ref))
@@ -148,7 +146,7 @@ def prepare(ctx, entry: dict, mdl: str, stem: str, misc_vpk: str):
 def write_materials(vpkroot_dir, entry: dict, model, ref: str, original_cd: List[str],
                     patched: str, work: Path, *, misc_vpk: str, textures_vpk: str,
                     size, format_type, flags, vtf_options) -> None:
-    """VMT (и свои VTF) каждого материала гирлянды в папку `patched`."""
+    """VMT (и свои VTF) каждого материала гирлянды в папку `patched`"""
     from src.services import festive_decor
     from src.services.game_vpk_reader import GameVpkReader
 
@@ -166,16 +164,16 @@ def write_materials(vpkroot_dir, entry: dict, model, ref: str, original_cd: List
             if found_vmt:
                 text = found_vmt[1]
             elif entry.get('smd'):
-                # Материал своей модели: в игре его нет, VMT пишем сами; без
-                # картинки — серый, как в превью (festive_decor._grey_png).
+                # Материал своей модели: в игре его нет, VMT пишем сами, без
+                # картинки - серый, как в превью (festive_decor._grey_png)
                 text = '"VertexLitGeneric"\n{\n\t"$basetexture" ""\n}\n'
                 image = image or festive_decor._grey_png(str(work), name)
             else:
-                logger.info(f"[гирлянда] {stem}: VMT {name} не найден — пропуск")
+                logger.info(f"[гирлянда] {stem}: VMT {name} не найден - пропуск")
                 continue
             if image and os.path.isfile(image):
-                # Лампочки мигают кадрами игровой текстуры — своя картинка
-                # раскладывается на те же кадры (festive_decor.blink_like).
+                # Лампочки мигают кадрами игровой текстуры - своя картинка
+                # раскладывается на те же кадры (festive_decor.blink_like)
                 stock = _stock_frames(reader, text, work / "stock", name)
                 if len(stock) > 1:
                     _render_blinking_vtf(image, stock, out_dir, name, size,
@@ -193,7 +191,7 @@ def write_materials(vpkroot_dir, entry: dict, model, ref: str, original_cd: List
 
 
 def _all_materials(model, ref_smd: str) -> List[str]:
-    """Все материалы гирлянды: меш и все строки $texturegroup (команда в них)."""
+    """Все материалы гирлянды: меш и все строки $texturegroup (команда в них)"""
     from src.services.smd_to_obj_service import SmdToObjService
 
     names: Dict[str, str] = {}
@@ -208,11 +206,11 @@ def _all_materials(model, ref_smd: str) -> List[str]:
 
 def _images_by_material(textures: Dict[str, dict], team_map: Dict[str, str]) -> Dict[str, str]:
     """{материал в нижнем регистре: картинка}. Правка лежит под КРАСНЫМ
-    материалом; синяя картинка уходит его командной паре из $texturegroup.
+    материалом, синяя картинка уходит его командной паре из $texturegroup
 
-    Материал без командной пары один на обе команды — ему годится любая
+    Материал без командной пары один на обе команды - ему годится любая
     из двух картинок. Команду без своей правки PreviewTextureState.decor_uploads
-    уже заполнил картинкой другой; пустая здесь - только без правок вовсе."""
+    уже заполнил картинкой другой, пустая здесь - только без правок вовсе"""
     out: Dict[str, str] = {}
     for red, teams in textures.items():
         red_img, blu_img = (teams or {}).get('red'), (teams or {}).get('blu')
@@ -229,7 +227,7 @@ def _images_by_material(textures: Dict[str, dict], team_map: Dict[str, str]) -> 
 
 
 def _set_cdmaterials(qc_path: str, folder: str) -> None:
-    """Все `$cdmaterials` QC → одна своя папка (обход sv_pure добавит patch_qc_file)."""
+    """Все `$cdmaterials` QC -> одна своя папка (обход sv_pure добавит patch_qc_file)"""
     text = Path(qc_path).read_text(encoding="utf-8", errors="replace")
     lines = _RE_CDMATERIALS_LINE.findall(text)
     if not lines:
@@ -246,7 +244,7 @@ def _set_cdmaterials(qc_path: str, folder: str) -> None:
 
 
 def _stock_frames(reader, vmt_text: str, out_dir: Path, name: str) -> List[str]:
-    """Кадры игровой базовой текстуры материала (PNG); пусто — не нашлась."""
+    """Кадры игровой базовой текстуры материала (PNG), пусто - не нашлась"""
     from src.services import vmt_parse
     from src.services.vtf_preview_service import vtf_bytes_to_frame_pngs
 
@@ -257,10 +255,10 @@ def _stock_frames(reader, vmt_text: str, out_dir: Path, name: str) -> List[str]:
 
 def _render_blinking_vtf(image: str, stock: List[str], out_dir: Path, name: str,
                          size, format_type, flags, vtf_options, work: Path) -> None:
-    """Своя картинка → многокадровый VTF с миганием игровой текстуры.
+    """Своя картинка -> многокадровый VTF с миганием игровой текстуры
 
     Частоту задаёт игровой VMT (прокси AnimatedTexture), и он остаётся как
-    есть — важно только число кадров и маска свечения в альфе.
+    есть - важно только число кадров и маска свечения в альфе
     """
     from PIL import Image
 
@@ -284,7 +282,7 @@ def _render_blinking_vtf(image: str, stock: List[str], out_dir: Path, name: str,
 
 def _render_vtf(image: str, out_dir: Path, name: str, size, format_type,
                 flags, vtf_options) -> None:
-    """Своя картинка → VTF с именем материала рядом с его VMT."""
+    """Своя картинка -> VTF с именем материала рядом с его VMT"""
     from src.services.texture_service import TextureService
 
     png = out_dir / f"{name}.png"

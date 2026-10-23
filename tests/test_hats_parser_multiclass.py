@@ -1,4 +1,4 @@
-"""Тесты мультиклассовых шапок в hats_parser: поле HatItem.per_class_models."""
+"""Тесты мультиклассовых шапок в hats_parser: поле HatItem.per_class_models"""
 
 import unittest
 import unittest.mock
@@ -108,7 +108,7 @@ class ParseHatsMulticlassTests(unittest.TestCase):
         (items_dir / "items_game.txt").write_text(_ITEMS_GAME, encoding="utf-8")
         self.root = str(root)
         # Изолируем кэш, чтобы не трогать реальный cache/. Подменяем ПАПКУ:
-        # имя файла кэша зависит от языка (см. hats_parser._cache_file).
+        # имя файла кэша зависит от языка (см. hats_parser._cache_file)
         self._cache_backup = hats_parser._CACHE_DIR
         hats_parser._CACHE_DIR = root
 
@@ -123,7 +123,7 @@ class ParseHatsMulticlassTests(unittest.TestCase):
         items = parse_hats(self.root, language="en", force_reparse=True)
         by = self._by_name(items)
 
-        # 1) model_player_per_class → все 3 класса, пути нормализованы.
+        # 1) model_player_per_class -> все 3 класса, пути нормализованы
         pc = by["multiclass_per_class_hat"]
         self.assertEqual(pc.per_class_models, {
             "scout":   "models/player/items/scout/perclasshat.mdl",
@@ -131,18 +131,18 @@ class ParseHatsMulticlassTests(unittest.TestCase):
             "demoman": "models/player/items/demo/perclasshat.mdl",
         })
 
-        # 2) %s-шаблон → раскрытие по всем 9 классам.
+        # 2) %s-шаблон -> раскрытие по всем 9 классам
         tmpl = by["template_hat"]
         self.assertEqual(len(tmpl.per_class_models), 9)
         self.assertEqual(tmpl.per_class_models["heavy"],
                          "models/player/items/all_class/gibus_heavy.mdl")
 
-        # 3) одиночная модель → per_class_models пуст.
+        # 3) одиночная модель -> per_class_models пуст
         single = by["single_model_hat"]
         self.assertEqual(single.per_class_models, {})
 
         # 4) %s в basename внутри model_player_per_class, без used_by_classes
-        #    → раскрытие по всем 9 классам.
+        #    -> раскрытие по всем 9 классам
         bn = by["basename_template_hat"]
         self.assertEqual(len(bn.per_class_models), 9)
         self.assertEqual(bn.per_class_models["spy"],
@@ -182,7 +182,7 @@ _ITEMS_GAME_CASES = '''
 
 
 class ParseHatsCaseExclusionTests(unittest.TestCase):
-    """Кейсы/ящики/крафт-инструменты не должны попадать в список шапок."""
+    """Кейсы/ящики/крафт-инструменты не должны попадать в список шапок"""
 
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
@@ -207,7 +207,7 @@ class ParseHatsCaseExclusionTests(unittest.TestCase):
 
 
 class HatItemFlagTests(unittest.TestCase):
-    """Флаги для фильтра списка шапок (медали / сезонное)."""
+    """Флаги для фильтра списка шапок (медали / сезонное)"""
 
     def _hat(self, **kw):
         from src.data.hats_parser import HatItem
@@ -225,14 +225,14 @@ class HatItemFlagTests(unittest.TestCase):
 
     def test_is_medal_from_prefab_and_item_name(self):
         # Турнирные медали: item_type_name наследуется через prefab и в блоке
-        # отсутствует — детекция должна ловить их по prefab и по item_name.
+        # отсутствует - детекция должна ловить их по prefab и по item_name
         self.assertTrue(self._hat(prefab="tournament_medal").is_medal)
         self.assertTrue(self._hat(prefab="etf2l_participation_styles tournament_medal").is_medal)
         self.assertTrue(self._hat(item_name_token="#TF_TournamentMedal_AFC_Div1_1st").is_medal)
         self.assertFalse(self._hat(prefab="hat", item_name_token="#Some_Cool_Hat").is_medal)
 
     def test_item_collections(self):
-        """Название — из локализации, справочные коллекции пропускаются."""
+        """Название - из локализации, справочные коллекции пропускаются"""
         from src.data.hats_parser import _item_collections
 
         content = '''"items_game"
@@ -251,14 +251,14 @@ class HatItemFlagTests(unittest.TestCase):
                                                "Scream Fortress 2018")})
 
     def test_is_halloween_means_holiday_restriction(self):
-        """Только то, что игра рисует лишь в Хэллоуин: по holiday_restriction."""
+        """Только то, что игра рисует лишь в Хэллоуин: по holiday_restriction"""
         self.assertTrue(self._hat(holiday="halloween_or_fullmoon").is_halloween)
         self.assertFalse(self._hat(holiday="christmas").is_halloween)
         self.assertFalse(self._hat().is_halloween)
 
 
 class DemomanModelTokenTests(unittest.TestCase):
-    """У подрывника файлы моделей называются `_demo`, а не `_demoman`."""
+    """У подрывника файлы моделей называются `_demo`, а не `_demoman`"""
 
     ITEMS = """
 "items_game"
@@ -277,8 +277,8 @@ class DemomanModelTokenTests(unittest.TestCase):
 """
 
     def test_template_expands_with_the_path_token(self):
-        """Раскрывая %s именем класса, мод оставался без модели подрывника —
-        такого файла в игре нет (там 910 моделей `_demo` и ни одной `_demoman`)."""
+        """Раскрывая %s именем класса, мод оставался без модели подрывника -
+        такого файла в игре нет (там 910 моделей `_demo` и ни одной `_demoman`)"""
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             items = root / "tf" / "scripts" / "items"

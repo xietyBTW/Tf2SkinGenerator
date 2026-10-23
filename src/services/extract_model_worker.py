@@ -5,7 +5,7 @@ from src.services.extract_model_service import ExtractModelService
 
 
 class ExtractModelWorker(StandardWorker):
-    """Фоновое извлечение + декомпиляция модели (cache-aware) через сервис."""
+    """Фоновое извлечение + декомпиляция модели (cache-aware) через сервис"""
 
     def __init__(
         self,

@@ -1,8 +1,8 @@
-"""Данные диагностики: находки (Finding) и отчёт (DiagnosticReport).
+"""Данные диагностики: находки (Finding) и отчёт (DiagnosticReport)
 
-Чистые dataclass'ы без зависимостей — легко создавать в тестах и сериализовать
+Чистые dataclass'ы без зависимостей - легко создавать в тестах и сериализовать
 для UI. Проверки (checks.py) возвращают списки Finding; runner собирает их в
-DiagnosticReport.
+DiagnosticReport
 """
 
 from __future__ import annotations
@@ -13,7 +13,7 @@ from typing import List
 
 
 class Severity(Enum):
-    """Уровень находки. Порядок важен для сортировки (ошибки выше)."""
+    """Уровень находки. Порядок важен для сортировки (ошибки выше)"""
 
     ERROR = "error"      # мод почти наверняка сломан (фиолет / невидимо / не грузится)
     WARNING = "warning"  # потенциальная проблема или плохая практика
@@ -26,15 +26,15 @@ class Severity(Enum):
 
 @dataclass(frozen=True)
 class Finding:
-    """Одна находка диагностики.
+    """Одна находка диагностики
 
-    severity  — уровень (ошибка/предупреждение/инфо);
-    code      — стабильный машинный код проверки (для тестов/фиксов), напр.
+    severity  - уровень (ошибка/предупреждение/инфо);
+    code      - стабильный машинный код проверки (для тестов/фиксов), напр.
                 "vmt.missing_texture";
-    title     — короткий заголовок для UI;
-    detail    — пояснение «почему это проблема»;
-    fix_hint  — что сделать, чтобы починить (пусто, если нечего советовать);
-    location  — путь внутри мода, к которому относится находка (или "").
+    title     - короткий заголовок для UI;
+    detail    - пояснение «почему это проблема»;
+    fix_hint  - что сделать, чтобы починить (пусто, если нечего советовать);
+    location  - путь внутри мода, к которому относится находка (или "")
     """
 
     severity: Severity
@@ -47,7 +47,7 @@ class Finding:
 
 @dataclass
 class DiagnosticReport:
-    """Результат диагностики: список находок + удобные срезы для UI."""
+    """Результат диагностики: список находок + удобные срезы для UI"""
 
     findings: List[Finding] = field(default_factory=list)
 
@@ -57,7 +57,7 @@ class DiagnosticReport:
     def extend(self, findings: List[Finding]) -> None:
         self.findings.extend(findings)
 
-    # ── Срезы по уровню ──────────────────────────────────────────────────── #
+    # Срезы по уровню
 
     @property
     def errors(self) -> List[Finding]:
@@ -73,11 +73,11 @@ class DiagnosticReport:
 
     @property
     def is_healthy(self) -> bool:
-        """True, если нет ни ошибок, ни предупреждений."""
+        """True, если нет ни ошибок, ни предупреждений"""
         return not any(
             f.severity in (Severity.ERROR, Severity.WARNING) for f in self.findings
         )
 
     def sorted(self) -> List[Finding]:
-        """Находки, отсортированные по важности (ошибки → предупреждения → инфо)."""
+        """Находки, отсортированные по важности (ошибки -> предупреждения -> инфо)"""
         return sorted(self.findings, key=lambda f: f.severity.rank)

@@ -1,8 +1,8 @@
-"""Импорт OBJ/GLB в SMD «только геометрия», подгонка, упрощение, текстуры.
+"""Импорт OBJ/GLB в SMD «только геометрия», подгонка, упрощение, текстуры
 
-Проверяем оси (glTF/OBJ Y-up, вперёд −Z → SMD оружия стволом в +Z),
+Проверяем оси (glTF/OBJ Y-up, вперёд −Z -> SMD оружия стволом в +Z),
 запекание подгонки, лимиты studiomdl, разбор GLB с трансформом узла,
-упрощение через meshoptimizer с сохранением UV и подхват базового цвета.
+упрощение через meshoptimizer с сохранением UV и подхват базового цвета
 """
 
 import base64
@@ -49,17 +49,17 @@ def _write_obj(tmp_path, with_mtl=True):
 
 def test_obj_axes_materials_and_flat_normals(tmp_path):
     mesh = mis.load_mesh(str(_write_obj(tmp_path)))
-    # Имена — под studiomdl: без точек, в нижнем регистре, порядок как в файле
+    # Имена - под studiomdl: без точек, в нижнем регистре, порядок как в файле
     assert mesh.materials == ["body_001", "grip"]
     assert mesh.triangle_count == 2 and mesh.has_uv
     tri = mesh.triangles("body_001")[0]
-    # (x, y, z) → (−x, y, −z): точка (1, 0, 0) уходит в (−1, 0, 0)
+    # (x, y, z) -> (−x, y, −z): точка (1, 0, 0) уходит в (−1, 0, 0)
     assert tri[1][:3].tolist() == [-1.0, 0.0, 0.0]
     assert tri[0][3:6].tolist() == [0.0, 0.0, -1.0]      # нормаль тоже развёрнута
     # Без vn нормаль плоская: грань (0,0,0),(1,0,0),(0,0,1) смотрит в −Y
     flat = mesh.triangles("grip")[0][0][3:6]
     assert [round(float(v), 6) for v in flat] == [0.0, -1.0, 0.0]
-    # map_Kd подхвачен только там, где файл есть; опции перед именем не мешают
+    # map_Kd подхвачен только там, где файл есть, опции перед именем не мешают
     assert list(mesh.textures) == ["body_001"]
     assert mesh.textures["body_001"].endswith("body.png")
 
@@ -72,7 +72,7 @@ def test_obj_without_mtl_has_no_textures(tmp_path):
 def test_fit_is_baked_into_smd(tmp_path):
     mesh = mis.load_mesh(str(_write_obj(tmp_path)))
     out = tmp_path / "m.smd"
-    # Поворот на 90° вокруг Y: SMD-точка (−1, 0, 0) → (0, 0, 1); масштаб 2, сдвиг +5 по Y
+    # Поворот на 90° вокруг Y: SMD-точка (−1, 0, 0) -> (0, 0, 1), масштаб 2, сдвиг +5 по Y
     mis.write_smd(mesh, str(out), mis.Fit(scale=2.0, rotate=(0, 90, 0), offset=(0, 5, 0)))
     lines = out.read_text(encoding="utf-8").splitlines()
     assert lines[:4] == ["version 1", "nodes", '0 "root" -1', "end"]
@@ -80,7 +80,7 @@ def test_fit_is_baked_into_smd(tmp_path):
     body = [l for l in lines[lines.index("triangles") + 1:] if l[:1] == "0"]
     x, y, z = (float(v) for v in body[1].split()[1:4])
     assert (round(x, 4), round(y, 4), round(z, 4)) == (0.0, 5.0, 2.0)
-    # Нормаль (0,0,−1) после поворота на 90° вокруг Y → (−1, 0, 0), масштаб не трогает
+    # Нормаль (0,0,−1) после поворота на 90° вокруг Y -> (−1, 0, 0), масштаб не трогает
     nx, ny, nz = (float(v) for v in body[0].split()[4:7])
     assert (round(nx, 4), round(ny, 4), round(nz, 4)) == (-1.0, 0.0, 0.0)
 
@@ -104,7 +104,7 @@ def test_limits_count_split_vertices():
 
 
 def _glb(tmp_path, node_extra, with_texture=False):
-    """GLB с одним треугольником; узел — с переданным трансформом."""
+    """GLB с одним треугольником, узел - с переданным трансформом"""
     pos = [(0, 0, 0), (1, 0, 0), (0, 1, 0)]
     uv = [(0, 0), (1, 0), (0, 1)]
     blob = b"".join(struct.pack("<3f", *p) for p in pos)
@@ -126,7 +126,7 @@ def _glb(tmp_path, node_extra, with_texture=False):
                       {"bufferView": 2, "componentType": 5123, "count": 3, "type": "SCALAR"}],
     }
     if with_texture:
-        blob += _PNG                       # 68 байт до — уже кратно 4
+        blob += _PNG                       # 68 байт до - уже кратно 4
         views.append({"buffer": 0, "byteOffset": 68, "byteLength": len(_PNG)})
         doc["images"] = [{"bufferView": 3, "mimeType": "image/png"}]
         doc["textures"] = [{"source": 0}]
@@ -147,11 +147,11 @@ def test_glb_node_transform_uv_flip_and_flat_normal(tmp_path):
     mesh = mis.load_mesh(str(path))
     assert mesh.materials == ["metal"]
     tri = mesh.triangles("metal")[0]
-    # Узел: масштаб 2, сдвиг +10 по Z; потом оси: (x, y, z) → (−x, y, −z)
+    # Узел: масштаб 2, сдвиг +10 по Z; потом оси: (x, y, z) -> (−x, y, −z)
     assert tri[1][:3].tolist() == [-2.0, 0.0, -10.0]
-    # UV glTF сверху вниз, SMD — снизу вверх
+    # UV glTF сверху вниз, SMD - снизу вверх
     assert tri[2][6:8].tolist() == [0.0, 0.0]
-    # Нормали в файле нет — плоская, от треугольника в плоскости XY: +Z → −Z
+    # Нормали в файле нет - плоская, от треугольника в плоскости XY: +Z -> −Z
     assert [round(float(v), 6) for v in tri[0][3:6]] == [0.0, 0.0, -1.0]
     assert mesh.textures == {}
 
@@ -178,7 +178,7 @@ def test_unsupported_and_empty():
 
 
 def _grid(n: int, material="a") -> mis.Mesh:
-    """Плоская сетка n×n с UV по координате: 2(n−1)² треугольников."""
+    """Плоская сетка n×n с UV по координате: 2(n−1)² треугольников"""
     xs, ys = np.meshgrid(np.arange(n, dtype=np.float32), np.arange(n, dtype=np.float32))
     pos = np.stack([xs.ravel(), ys.ravel(), np.zeros(n * n, np.float32)], 1)
     uv = pos[:, :2] / (n - 1)
@@ -219,14 +219,14 @@ def test_transform_smd_moves_vertices_only(tmp_path):
     lines = out.read_text(encoding="utf-8").splitlines()
     assert lines[2] == '0 "weapon_bone" -1' and lines[9] == "c_pistol"
     v = lines[10].split()
-    # (1,0,0) → поворот вокруг Y на 90° → (0,0,−1) → ×2 → +5 по Z = (0, 0, 3)
+    # (1,0,0) -> поворот вокруг Y на 90° -> (0,0,−1) -> ×2 -> +5 по Z = (0, 0, 3)
     assert [round(float(x), 3) for x in v[1:4]] == [0.0, 0.0, 3.0]
-    assert [round(float(x), 3) for x in v[4:7]] == [1.0, 0.0, 0.0]   # нормаль (0,0,1) → (1,0,0)
+    assert [round(float(x), 3) for x in v[4:7]] == [1.0, 0.0, 0.0]   # нормаль (0,0,1) -> (1,0,0)
     assert v[7:] == ["0.5", "0.5", "1", "0", "1.0"]                    # UV и веса не тронуты
 
 
 def _skinned_glb(tmp_path):
-    """GLB с двумя костями игры и скином: треугольник, углы весят на разные кости."""
+    """GLB с двумя костями игры и скином: треугольник, углы весят на разные кости"""
     pos = [(0, 0, 0), (1, 0, 0), (0, 1, 0)]
     joints = [(0, 1, 0, 0), (1, 0, 0, 0), (0, 0, 0, 0)]
     weights = [(0.75, 0.25, 0, 0), (1, 0, 0, 0), (1, 0, 0, 0)]
@@ -272,7 +272,7 @@ def test_skinned_glb_keeps_bone_names_and_weights(tmp_path):
     lines = out.read_text(encoding="utf-8").splitlines()
     assert lines[1:4] == ["nodes", '0 "weapon_bone" -1', '1 "weapon_bone_1" -1']
     tri = lines[lines.index("triangles") + 2:lines.index("triangles") + 5]
-    # Главная кость строки — самая тяжёлая, дальше все ненулевые связи
+    # Главная кость строки - самая тяжёлая, дальше все ненулевые связи
     assert tri[0].split()[0] == "0" and tri[0].split()[9:] == ["2", "0", "0.750000", "1", "0.250000"]
     assert tri[1].split()[0] == "1" and tri[1].split()[9:] == ["1", "1", "1.000000"]
     # Вершины с разными костями не свариваются, лимит считает их отдельно
@@ -280,7 +280,7 @@ def test_skinned_glb_keeps_bone_names_and_weights(tmp_path):
 
 
 def test_unskinned_mesh_under_bone_rides_that_bone(tmp_path):
-    """Меш без скина, но под узлом-костью («parent to bone» в Blender): весь на ней."""
+    """Меш без скина, но под узлом-костью («parent to bone» в Blender): весь на ней"""
     path = _skinned_glb(tmp_path)
     import json as _json
     data = bytearray(path.read_bytes())
@@ -297,5 +297,5 @@ def test_unskinned_mesh_under_bone_rides_that_bone(tmp_path):
     path.write_bytes(b"glTF" + struct.pack("<II", 2, 12 + len(body)) + body)
     mesh = mis.load_mesh(str(path))
     assert mesh.skin[:, 0].tolist() == [1.0, 1.0, 1.0] and mesh.skin[:, 4].tolist() == [1.0, 1.0, 1.0]
-    # Без скина трансформ узла применяется: сдвиг (50,0,0) → после осей (−50, …)
+    # Без скина трансформ узла применяется: сдвиг (50,0,0) -> после осей (−50, …)
     assert mesh.triangles("c_pistol")[0][0][:3].tolist() == [-50.0, 0.0, 0.0]

@@ -22,7 +22,7 @@ from src.shared.exceptions import VPKCreationError, RequiredFileMissingError as 
 
 
 class PlanMaterialsBypassTests(unittest.TestCase):
-    """plan_materials должен прокинуть выбранную папку обхода в patch_qc_file."""
+    """plan_materials должен прокинуть выбранную папку обхода в patch_qc_file"""
 
     def _minimal_qc(self, tmp: str) -> str:
         qc = Path(tmp) / "m.qc"
@@ -63,7 +63,7 @@ class PlanMaterialsBypassTests(unittest.TestCase):
 class PlanMaterialsOwnOnlyTests(unittest.TestCase):
     """Часы-вьюмодель (Часы ярого поклонника): руки шпиона стоят в строке
     первыми, но это общая текстура всего его оружия - главной должна стать
-    текстура часов, а руки не попадают в мод ни запросом, ни оригиналом."""
+    текстура часов, а руки не попадают в мод ни запросом, ни оригиналом"""
 
     def test_watch_viewmodel_builds_only_the_watch(self):
         rows = ('\t{ "spy_hands_red" "ttg_watch" "spy_hands_blue" }\n'
@@ -86,11 +86,11 @@ class PlanMaterialsOwnOnlyTests(unittest.TestCase):
 
 
 class PlanMaterialsAskSplitTests(unittest.TestCase):
-    """Сборка спрашивает то, что человек видел карточкой; остальное — молча.
+    """Сборка спрашивает то, что человек видел карточкой, остальное - молча
 
-    Тело шпиона: глаза в геометрии, но без текстуры (карточки нет) — молча;
-    убер-вариант не в геометрии, но страница показала его в «Прочем» —
-    спросят; `spy_red` из ЧС и маска (своя страница) — молча, оригиналом.
+    Тело шпиона: глаза в геометрии, но без текстуры (карточки нет) - молча;
+    убер-вариант не в геометрии, но страница показала его в «Прочем» -
+    спросят; `spy_red` из ЧС и маска (своя страница) - молча, оригиналом
     """
 
     def test_spy_body_split(self):
@@ -125,7 +125,7 @@ class VPKServiceTests(unittest.TestCase):
     def test_resolve_weapon_key_weapon(self):
         # Обычное оружие: weapon_key = суффикс после первого '_'
         self.assertEqual(VPKService._resolve_weapon_key("scout_c_scattergun", None), ("c_scattergun", None))
-        # Без '_' — возвращаем сам mode
+        # Без '_' - возвращаем сам mode
         self.assertEqual(VPKService._resolve_weapon_key("custom", None), ("custom", None))
 
     def test_resolve_weapon_key_hat(self):
@@ -260,7 +260,7 @@ class VPKServiceTests(unittest.TestCase):
                 return type("R", (), {"returncode": 0, "stdout": "", "stderr": ""})()
 
             # pack_directory резолвит vpk.exe через ToolPaths.get_vpk_tool и делает
-            # pre-flight .exists() — патчим этот символ и даём реально существующий stub.
+            # pre-flight .exists() - патчим этот символ и даём реально существующий stub
             vpk_tool = base / "vpk.exe"; vpk_tool.write_bytes(b"stub")
 
             with patch("src.services.packaging_service.ToolPaths.get_vpk_tool", return_value=vpk_tool):
@@ -343,7 +343,7 @@ class VPKServiceTests(unittest.TestCase):
             (mod_data / vmt_filename).write_text("vmt", encoding="utf-8")
 
             def fake_process_image(input_path, output_path, size):
-                # Настоящая картинка: из неё строится карта нормалей.
+                # Настоящая картинка: из неё строится карта нормалей
                 Image.new("RGB", size, "gray").save(output_path)
             
             def fake_create_vtf(png_path, output_path, format_type, flags, options=None):
@@ -362,13 +362,13 @@ class VPKServiceTests(unittest.TestCase):
             self.assertTrue(ok, msg)
 
     def test_build_vpk_real_render_flow(self):
-        """Характеризационный тест РЕАЛЬНОГО пути рендера (без custom_vtf).
+        """Характеризационный тест РЕАЛЬНОГО пути рендера (без custom_vtf)
 
         В отличие от happy-path с готовым VTF, здесь отрабатывает ветка
-        `elif image_path:` → TextureService.render_image_to_vtf (с замоканными
+        `elif image_path:` -> TextureService.render_image_to_vtf (с замоканными
         примитивами process_image/create_vtf), затем извлечение оригинального
         VMT и запись главного VMT. Покрывает тело цикла рендера для оружия с
-        одной текстурой (без extra/blu).
+        одной текстурой (без extra/blu)
         """
         with tempfile.TemporaryDirectory() as tmp:
             base = Path(tmp)
@@ -387,7 +387,7 @@ class VPKServiceTests(unittest.TestCase):
             TS = "src.services.texture_service.TextureService."
 
             def fake_create_vtf(png_path, output_path, fmt, flags, options=None):
-                # Эмулируем VTFCmd: кладём .vtf рядом по имени PNG.
+                # Эмулируем VTFCmd: кладём .vtf рядом по имени PNG
                 out = Path(output_path)
                 out.mkdir(parents=True, exist_ok=True)
                 (out / f"{Path(png_path).stem}.vtf").write_bytes(b"vtf")
@@ -402,7 +402,7 @@ class VPKServiceTests(unittest.TestCase):
                 patch(P + "TF2Paths.resolve", return_value=("studiomdl.exe", "tf2_misc_dir.vpk", str(base))),
                 patch("src.services.tf2_vpk_extract_service.TF2VPKExtractService.check_mdl_exists", return_value=True),
                 patch("src.services.tf2_vpk_extract_service.TF2VPKExtractService.extract_file_set", return_value=[str(base / "c_scattergun.mdl")]),
-                patch(P + "ModelBuildService.decompile", return_value=str(base / "a.qc")),
+                patch("src.services.model_decompile_service.decompile_into", return_value=str(base / "a.qc")),
                 patch(P + "ModelBuildService.extract_cdmaterials_path_from_qc", return_value="models/weapons/c_scattergun"),
                 patch(P + "ModelBuildService.extract_all_cdmaterials_paths_from_qc", return_value=["models/weapons/c_scattergun"]),
                 patch(P + "ModelBuildService.extract_texturegroup_filename", return_value="c_scattergun"),
@@ -422,7 +422,7 @@ class VPKServiceTests(unittest.TestCase):
                 for p in patches:
                     stack.enter_context(p)
                 # Захватываем мок create_vtf, чтобы подтвердить, что ветка рендера
-                # реально отработала (файлы к концу удаляет ctx.cleanup).
+                # реально отработала (файлы к концу удаляет ctx.cleanup)
                 m_create = stack.enter_context(patch(TS + "create_vtf", side_effect=fake_create_vtf))
                 (base / "temp_vmt").mkdir(exist_ok=True)
                 ok, msg = VPKService.build_vpk(
@@ -438,13 +438,13 @@ class VPKServiceTests(unittest.TestCase):
                     language="en",
                 )
             self.assertTrue(ok, msg)
-            # Ветка `elif image_path:` → render_image_to_vtf → create_vtf отработала.
+            # Ветка `elif image_path:` -> render_image_to_vtf -> create_vtf отработала
             self.assertTrue(m_create.called)
 
     def test_build_vpk_extra_materials_render_flow(self):
         """РЕАЛЬНЫЙ рендер доп. материала (extra_materials): пользователь дал
-        отдельную картинку для столбца shell → цикл extra-материалов рендерит её
-        и пишет VMT. Покрывает тело цикла extra-материалов (не custom_vtf)."""
+        отдельную картинку для столбца shell -> цикл extra-материалов рендерит её
+        и пишет VMT. Покрывает тело цикла extra-материалов (не custom_vtf)"""
         with tempfile.TemporaryDirectory() as tmp:
             base = Path(tmp)
             img = base / "img.png"
@@ -462,8 +462,8 @@ class VPKServiceTests(unittest.TestCase):
                   "extra_materials": ["c_scattergun_shell"], "blu_is_team": False,
                   "main_texture": "c_scattergun"}
 
-            # Третий аргумент — сколько материалов спросят ПОСЛЕ этого:
-            # по нему вопрос решает, предлагать ли «и так для остальных».
+            # Третий аргумент - сколько материалов спросят ПОСЛЕ этого:
+            # по нему вопрос решает, предлагать ли «и так для остальных»
             def extra_cb(mat, wk, remaining=0):
                 return str(shell_img) if mat == "c_scattergun_shell" else None
 
@@ -484,7 +484,7 @@ class VPKServiceTests(unittest.TestCase):
                 patch(P + "TF2Paths.resolve", return_value=("studiomdl.exe", "tf2_misc_dir.vpk", str(base))),
                 patch("src.services.tf2_vpk_extract_service.TF2VPKExtractService.check_mdl_exists", return_value=True),
                 patch("src.services.tf2_vpk_extract_service.TF2VPKExtractService.extract_file_set", return_value=[str(base / "c_scattergun.mdl")]),
-                patch(P + "ModelBuildService.decompile", return_value=str(base / "a.qc")),
+                patch("src.services.model_decompile_service.decompile_into", return_value=str(base / "a.qc")),
                 patch(P + "ModelBuildService.extract_cdmaterials_path_from_qc", return_value="models/weapons/c_scattergun"),
                 patch(P + "ModelBuildService.extract_all_cdmaterials_paths_from_qc", return_value=["models/weapons/c_scattergun"]),
                 patch(P + "ModelBuildService.extract_texturegroup_filename", return_value="c_scattergun"),
@@ -519,13 +519,13 @@ class VPKServiceTests(unittest.TestCase):
                     extra_texture_callback=extra_cb,
                 )
             self.assertTrue(ok, msg)
-            # Главная + shell → create_vtf вызван минимум дважды.
+            # Главная + shell -> create_vtf вызван минимум дважды
             self.assertGreaterEqual(m_create.call_count, 2)
 
     def test_build_vpk_blu_team_render_flow(self):
         """РЕАЛЬНЫЙ рендер BLU-командной текстуры (blu_mode='upload', blu_is_team).
         Покрывает ветку _build_blu_team_texture с генерацией {texture}_blue из
-        отдельной картинки."""
+        отдельной картинки"""
         with tempfile.TemporaryDirectory() as tmp:
             base = Path(tmp)
             img = base / "img.png"
@@ -559,7 +559,7 @@ class VPKServiceTests(unittest.TestCase):
                 patch(P + "TF2Paths.resolve", return_value=("studiomdl.exe", "tf2_misc_dir.vpk", str(base))),
                 patch("src.services.tf2_vpk_extract_service.TF2VPKExtractService.check_mdl_exists", return_value=True),
                 patch("src.services.tf2_vpk_extract_service.TF2VPKExtractService.extract_file_set", return_value=[str(base / "c_scattergun.mdl")]),
-                patch(P + "ModelBuildService.decompile", return_value=str(base / "a.qc")),
+                patch("src.services.model_decompile_service.decompile_into", return_value=str(base / "a.qc")),
                 patch(P + "ModelBuildService.extract_cdmaterials_path_from_qc", return_value="models/weapons/c_scattergun"),
                 patch(P + "ModelBuildService.extract_all_cdmaterials_paths_from_qc", return_value=["models/weapons/c_scattergun"]),
                 patch(P + "ModelBuildService.extract_texturegroup_filename", return_value="c_scattergun"),
@@ -595,7 +595,7 @@ class VPKServiceTests(unittest.TestCase):
                     blu_image_path=str(blu_img),
                 )
             self.assertTrue(ok, msg)
-            # Главная + BLU → create_vtf вызван минимум дважды.
+            # Главная + BLU -> create_vtf вызван минимум дважды
             self.assertGreaterEqual(m_create.call_count, 2)
 
     def test_build_vpk_normal_flow(self):
@@ -617,7 +617,7 @@ class VPKServiceTests(unittest.TestCase):
                     with patch("src.services.vpk_service.TF2Paths.resolve", return_value=("studiomdl.exe", "tf2_misc_dir.vpk", str(base))):
                         with patch("src.services.tf2_vpk_extract_service.TF2VPKExtractService.check_mdl_exists", return_value=True):
                             with patch("src.services.tf2_vpk_extract_service.TF2VPKExtractService.extract_file_set", return_value=[str(base / "c_scattergun.mdl")]):
-                                with patch("src.services.vpk_service.ModelBuildService.decompile", return_value=str(base / "a.qc")):
+                                with patch("src.services.model_decompile_service.decompile_into", return_value=str(base / "a.qc")):
                                     with patch("src.services.vpk_service.ModelBuildService.extract_cdmaterials_path_from_qc", return_value="models/weapons/c_scattergun"):
                                         with patch("src.services.vpk_service.ModelBuildService.extract_texturegroup_filename", return_value="c_scattergun"):
                                             with patch("src.services.vpk_service.ModelBuildService.patch_qc_file"):
@@ -651,11 +651,11 @@ class VPKServiceTests(unittest.TestCase):
             self.assertTrue(ok, msg)
     
     def test_build_vpk_hands_flow(self):
-        """Характеризационный тест ветки рук (mode in HAND_MODE_KEYS).
+        """Характеризационный тест ветки рук (mode in HAND_MODE_KEYS)
 
         Фиксирует, что сборка рук проходит конвейер декомпиляции/компиляции и
         упаковки так же, как оружие, но weapon_key берётся из arm_model, а
-        $texturegroup ограничивается текстурами руки (restrict_to_materials).
+        $texturegroup ограничивается текстурами руки (restrict_to_materials)
         """
         with tempfile.TemporaryDirectory() as tmp:
             base = Path(tmp)
@@ -681,7 +681,7 @@ class VPKServiceTests(unittest.TestCase):
                  patch(P + "TF2Paths.resolve", return_value=("studiomdl.exe", "tf2_misc_dir.vpk", str(base))), \
                  patch("src.services.tf2_vpk_extract_service.TF2VPKExtractService.check_mdl_exists", return_value=True), \
                  patch("src.services.tf2_vpk_extract_service.TF2VPKExtractService.extract_file_set", return_value=[str(base / "c_scout_arms.mdl")]), \
-                 patch(P + "ModelBuildService.decompile", return_value=str(base / "a.qc")), \
+                 patch("src.services.model_decompile_service.decompile_into", return_value=str(base / "a.qc")), \
                  patch(P + "ModelBuildService.extract_cdmaterials_path_from_qc", return_value="models/player/scout"), \
                  patch(P + "ModelBuildService.extract_all_cdmaterials_paths_from_qc", return_value=["models/player/scout"]), \
                  patch(P + "ModelBuildService.extract_texturegroup_filename", return_value="scout_hands"), \
@@ -713,10 +713,10 @@ class VPKServiceTests(unittest.TestCase):
             self.assertTrue(ok, msg)
 
     def test_build_vpk_player_body_flow(self):
-        """Характеризационный тест ветки скина тела персонажа (PLAYER_BODY_MODE_KEYS).
+        """Характеризационный тест ветки скина тела персонажа (PLAYER_BODY_MODE_KEYS)
 
-        weapon_key берётся из стема mdl_path персонажа; модель замены принудительно
-        выключается; сборка идёт через обычный конвейер декомпиляции/упаковки.
+        weapon_key берётся из стема mdl_path персонажа, модель замены принудительно
+        выключается, сборка идёт через обычный конвейер декомпиляции/упаковки
         """
         with tempfile.TemporaryDirectory() as tmp:
             base = Path(tmp)
@@ -742,7 +742,7 @@ class VPKServiceTests(unittest.TestCase):
                  patch(P + "TF2Paths.resolve", return_value=("studiomdl.exe", "tf2_misc_dir.vpk", str(base))), \
                  patch("src.services.tf2_vpk_extract_service.TF2VPKExtractService.check_mdl_exists", return_value=True), \
                  patch("src.services.tf2_vpk_extract_service.TF2VPKExtractService.extract_file_set", return_value=[str(base / "demo.mdl")]), \
-                 patch(P + "ModelBuildService.decompile", return_value=str(base / "a.qc")), \
+                 patch("src.services.model_decompile_service.decompile_into", return_value=str(base / "a.qc")), \
                  patch(P + "ModelBuildService.extract_cdmaterials_path_from_qc", return_value="models/player/demo"), \
                  patch(P + "ModelBuildService.extract_all_cdmaterials_paths_from_qc", return_value=["models/player/demo"]), \
                  patch(P + "ModelBuildService.extract_texturegroup_filename", return_value="demo"), \
@@ -774,10 +774,10 @@ class VPKServiceTests(unittest.TestCase):
             self.assertTrue(ok, msg)
 
     def test_build_vpk_hat_flow(self):
-        """Характеризационный тест ветки шапки (mode == 'hat', одиночный класс).
+        """Характеризационный тест ветки шапки (mode == 'hat', одиночный класс)
 
         weapon_key берётся из стема hat_mdl_path; без %s-шаблона и без
-        hat_class_models доп. классовые модели не собираются — обычный конвейер.
+        hat_class_models доп. классовые модели не собираются - обычный конвейер
         """
         with tempfile.TemporaryDirectory() as tmp:
             base = Path(tmp)
@@ -804,7 +804,7 @@ class VPKServiceTests(unittest.TestCase):
                  patch(P + "TF2Paths.resolve", return_value=("studiomdl.exe", "tf2_misc_dir.vpk", str(base))), \
                  patch("src.services.tf2_vpk_extract_service.TF2VPKExtractService.check_mdl_exists", return_value=True), \
                  patch("src.services.tf2_vpk_extract_service.TF2VPKExtractService.extract_file_set", return_value=[str(base / "hat_foo.mdl")]), \
-                 patch(P + "ModelBuildService.decompile", return_value=str(base / "a.qc")), \
+                 patch("src.services.model_decompile_service.decompile_into", return_value=str(base / "a.qc")), \
                  patch(P + "ModelBuildService.extract_cdmaterials_path_from_qc", return_value="models/player/items/all_class"), \
                  patch(P + "ModelBuildService.extract_all_cdmaterials_paths_from_qc", return_value=["models/player/items/all_class"]), \
                  patch(P + "ModelBuildService.extract_texturegroup_filename", return_value="hat_foo"), \
@@ -838,9 +838,9 @@ class VPKServiceTests(unittest.TestCase):
 
     def test_build_vpk_keep_materials_flow(self):
         """Характеризационный тест ветки «готовая модель со своими материалами»
-        (replace_model_enabled + replace_keep_materials, без доп-стилей).
+        (replace_model_enabled + replace_keep_materials, без доп-стилей)
 
-        Имена материалов берутся из reference-SMD, игровой $texturegroup убирается.
+        Имена материалов берутся из reference-SMD, игровой $texturegroup убирается
         """
         with tempfile.TemporaryDirectory() as tmp:
             base = Path(tmp)
@@ -864,7 +864,7 @@ class VPKServiceTests(unittest.TestCase):
                 patch(P + "TF2Paths.resolve", return_value=("studiomdl.exe", "tf2_misc_dir.vpk", str(base))),
                 patch("src.services.tf2_vpk_extract_service.TF2VPKExtractService.check_mdl_exists", return_value=True),
                 patch("src.services.tf2_vpk_extract_service.TF2VPKExtractService.extract_file_set", return_value=[str(base / "c_scattergun.mdl")]),
-                patch(P + "ModelBuildService.decompile", return_value=str(base / "a.qc")),
+                patch("src.services.model_decompile_service.decompile_into", return_value=str(base / "a.qc")),
                 patch(P + "ModelBuildService.extract_cdmaterials_path_from_qc", return_value="models/weapons/c_scattergun"),
                 patch(P + "ModelBuildService.extract_all_cdmaterials_paths_from_qc", return_value=["models/weapons/c_scattergun"]),
                 patch(P + "ModelBuildService.extract_texturegroup_filename", return_value="c_scattergun"),
@@ -908,10 +908,10 @@ class VPKServiceTests(unittest.TestCase):
             self.assertTrue(ok, msg)
 
     def test_build_vpk_skin_styles_flow(self):
-        """Характеризационный тест ветки доп-стилей (skin_build_data с tg_overrides).
+        """Характеризационный тест ветки доп-стилей (skin_build_data с tg_overrides)
 
-        _has_skins → инъекция своего $texturegroup; имена материалов выравниваются
-        по reference-SMD. variant_files пуст (цикл рендера вариантов не задействуем).
+        _has_skins -> инъекция своего $texturegroup; имена материалов выравниваются
+        по reference-SMD. variant_files пуст (цикл рендера вариантов не задействуем)
         """
         with tempfile.TemporaryDirectory() as tmp:
             base = Path(tmp)
@@ -940,7 +940,7 @@ class VPKServiceTests(unittest.TestCase):
                 patch(P + "TF2Paths.resolve", return_value=("studiomdl.exe", "tf2_misc_dir.vpk", str(base))),
                 patch("src.services.tf2_vpk_extract_service.TF2VPKExtractService.check_mdl_exists", return_value=True),
                 patch("src.services.tf2_vpk_extract_service.TF2VPKExtractService.extract_file_set", return_value=[str(base / "c_scattergun.mdl")]),
-                patch(P + "ModelBuildService.decompile", return_value=str(base / "a.qc")),
+                patch("src.services.model_decompile_service.decompile_into", return_value=str(base / "a.qc")),
                 patch(P + "ModelBuildService.extract_cdmaterials_path_from_qc", return_value="models/weapons/c_scattergun"),
                 patch(P + "ModelBuildService.extract_all_cdmaterials_paths_from_qc", return_value=["models/weapons/c_scattergun"]),
                 patch(P + "ModelBuildService.extract_texturegroup_filename", return_value="c_scattergun"),
@@ -1111,8 +1111,7 @@ class VPKServiceTests(unittest.TestCase):
                     with patch("src.services.vpk_service.TF2Paths.check_crowbar", return_value=(True, "")):
                         with patch("src.services.vpk_service.TF2Paths.resolve", return_value=("studiomdl.exe", "tf2_misc_dir.vpk", str(base))):
                             with patch("src.services.tf2_vpk_extract_service.TF2VPKExtractService.check_mdl_exists", return_value=True):
-                                with patch("src.services.tf2_vpk_extract_service.TF2VPKExtractService.extract_file_set", return_value=[str(base / "c_scattergun.vvd")]), \
-                                     patch("src.services.vpk_model_pipeline.get_cached_decompile", return_value=None):
+                                with patch("src.services.model_decompile_service.decompile_into", return_value=None):
                                     ok, msg = VPKService.build_vpk(
                                         image_path=str(img),
                                         mode="scout_c_scattergun",
@@ -1128,7 +1127,7 @@ class VPKServiceTests(unittest.TestCase):
             base = Path(tmp)
             ctx = BuildContext("id", "m", "w", base / "ctx")
             ctx.create_directories()
-            with patch("src.services.model_service.SMDService.find_reference_smd", return_value=None):
+            with patch("src.services.model_service.smd_service.find_reference_smd", return_value=None):
                 ModelService.generate_uv_layout(ctx, "weapon", (4, 4), export_folder=str(base))
     
     def test_generate_uv_layout_success(self):
@@ -1138,13 +1137,13 @@ class VPKServiceTests(unittest.TestCase):
             ctx.create_directories()
             smd_path = base / "weapon_reference.smd"
             smd_path.write_text("x", encoding="utf-8")
-            with patch("src.services.model_service.SMDService.find_reference_smd", return_value=str(smd_path)):
+            with patch("src.services.model_service.smd_service.find_reference_smd", return_value=str(smd_path)):
                 with patch("src.services.uv_layout_service.UVLayoutService.generate_uv_layout_from_smd", return_value=True) as generate:
                     ModelService.generate_uv_layout(ctx, "weapon", (4, 4), export_folder=str(base))
             generate.assert_called()
 
     def test_render_extra_texture_missing_returns_false(self):
-        # Нет файла/пустой путь → False, без побочных эффектов
+        # Нет файла/пустой путь -> False, без побочных эффектов
         with tempfile.TemporaryDirectory() as tmp:
             out = Path(tmp)
             for bad in (None, "", os.path.join(tmp, "nope.png")):
@@ -1155,7 +1154,7 @@ class VPKServiceTests(unittest.TestCase):
             self.assertEqual(list(out.glob("*.vtf")), [])
 
     def test_render_extra_texture_vtf_input_copies_and_writes_vmt(self):
-        # На вход .vtf → копируется как есть + создаётся VMT (без vtfcmd)
+        # На вход .vtf -> копируется как есть + создаётся VMT (без vtfcmd)
         with tempfile.TemporaryDirectory() as tmp:
             out = Path(tmp)
             src_vtf = out / "src.vtf"
@@ -1171,7 +1170,7 @@ class VPKServiceTests(unittest.TestCase):
 
 
     def test_render_extra_texture_image_input_renders_vtf(self):
-        # Обычная картинка → ресайз + VTF (через render_image_to_vtf) + VMT.
+        # Обычная картинка -> ресайз + VTF (через render_image_to_vtf) + VMT
         with tempfile.TemporaryDirectory() as tmp:
             out = Path(tmp)
             img = out / "skin.png"
@@ -1189,8 +1188,8 @@ class VPKServiceTests(unittest.TestCase):
             self.assertTrue((out / "shell.vmt").exists())
 
     def test_remap_skin_data_to_smd_by_index(self):
-        # UI собрал 'Material.001', SMD-материал 'material' → ремап по индексу,
-        # картинки вариантов сохраняются.
+        # UI собрал 'Material.001', SMD-материал 'material' -> ремап по индексу,
+        # картинки вариантов сохраняются
         sbd = {
             'mesh_materials': ['Material.001'],
             'tg_overrides': {1: {'Material.001': 'Material.001_bloody'}},
@@ -1212,11 +1211,11 @@ class BuildVpkCharacterizationTests(unittest.TestCase):
     Характеризационный тест build_vpk: фиксирует, КАКИЕ VTF-файлы (и с какими
     именами) производит пайплайн для обычного оружия с панельной доп.текстурой.
     Внешние инструменты (crowbar/studiomdl/VTFCmd/упаковка) замоканы; create_vtf
-    пишет маркер-файл, чтобы наблюдать именование материалов через весь конвейер.
+    пишет маркер-файл, чтобы наблюдать именование материалов через весь конвейер
 
-    Назначение — сетка безопасности под рефакторинг build_vpk: рефактор не должен
-    менять состав/имена выходных файлов. Имена материалов через пайплайн — то самое
-    место, что ломалось ранее (фиолетовые текстуры).
+    Назначение - сетка безопасности под рефакторинг build_vpk: рефактор не должен
+    менять состав/имена выходных файлов. Имена материалов через пайплайн - то самое
+    место, что ломалось ранее (фиолетовые текстуры)
     """
 
     def _run_build(self, base: Path, panel_extra_textures: dict = None, *,
@@ -1226,12 +1225,12 @@ class BuildVpkCharacterizationTests(unittest.TestCase):
                    mode="scout_c_scattergun", weapon_key="c_scattergun",
                    cdmat="models/weapons/c_scattergun", patched_cdmat=None,
                    tg=None, extra_patches=None, decompiled=None, **build_kwargs):
-        """Гоняет build_vpk с замоканными инструментами.
+        """Гоняет build_vpk с замоканными инструментами
 
-        → (ok, msg, имена VTF). Полное дерево vpkroot в момент упаковки
+        -> (ok, msg, имена VTF). Полное дерево vpkroot в момент упаковки
         ({путь: байты}) - в self.tree, моки из extra_patches - в self.mocks,
         главный прогресс - в self.progress. decompiled - {имя: текст} файлов
-        декомпиляции (QC/SMD); их текст в момент упаковки - в self.decompiled.
+        декомпиляции (QC/SMD), их текст в момент упаковки - в self.decompiled
         """
         from contextlib import ExitStack
         from src.shared.constants import EXTRA_TEX_USE_GAME_ORIGINAL
@@ -1260,7 +1259,7 @@ class BuildVpkCharacterizationTests(unittest.TestCase):
         captured = {}
 
         def fake_create_vpk(ctx_arg, *a, **k):
-            # Снимок дерева в МОМЕНТ упаковки (после — build делает ctx.cleanup()).
+            # Снимок дерева в МОМЕНТ упаковки (после - build делает ctx.cleanup())
             root = Path(ctx_arg.vpkroot_dir)
             captured['vtf'] = sorted(p.name for p in root.rglob("*.vtf"))
             captured['tree'] = {p.relative_to(root).as_posix(): p.read_bytes()
@@ -1286,20 +1285,16 @@ class BuildVpkCharacterizationTests(unittest.TestCase):
             m(patch(P + "TF2Paths.resolve_textures_vpk", return_value="tf2_textures_dir.vpk"))
             m(patch("src.services.tf2_vpk_extract_service.TF2VPKExtractService.check_mdl_exists", return_value=True))
             m(patch("src.services.tf2_vpk_extract_service.TF2VPKExtractService.extract_file_set", return_value=[str(base / f"{weapon_key}.mdl")]))
-            # Герметичность: не читаем и не пишем глобальный кэш декомпиляции,
-            # иначе соседние тесты поймают кэш-хит. Патчим имена там, где их
-            # зовут: чтение - в vpk_model_pipeline, запись - в vpk_service.
-            m(patch("src.services.vpk_model_pipeline.get_cached_decompile", return_value=None))
-            m(patch("src.services.vpk_model_pipeline.save_to_cache"))
-            m(patch(P + "save_to_cache"))
+            # Герметичность: глобальный кэш декомпиляции не читаем и не пишем,
+            # иначе соседние тесты поймают кэш-хит
+            m(patch("src.services.model_decompile_service.decompile_into", return_value=str(qc)))
             m(patch(P + "VPKService._is_attachment_only", return_value=False))
             m(patch(P + "DirectoryPaths.TEMP_VMT_EXTRACT_DIR", base / "temp_vmt"))
             m(patch(P + "data_dir", return_value=base / "data"))
-            # Правленые VMT человека (tools/edited_vmt) в снимок не попадают.
+            # Правленые VMT человека (tools/edited_vmt) в снимок не попадают
             m(patch("src.services.edited_vmt_service.EditedVMTService.get_edited_vmt", return_value=None))
             m(patch("src.services.tf2_vpk_extract_service.TF2VPKExtractService.extract_vmt_file", return_value=str(vmt_source)))
-            m(patch(P + "ModelBuildService.decompile", return_value=str(qc)))
-            # До patch_qc_file - игровой путь, после - путь обхода sv_pure.
+            # До patch_qc_file - игровой путь, после - путь обхода sv_pure
             cdmat_calls = []
 
             def fake_cdmat(_qc):
@@ -1321,7 +1316,7 @@ class BuildVpkCharacterizationTests(unittest.TestCase):
             m(patch("src.services.texture_service.TextureService.create_vtf", side_effect=fake_create_vtf))
             m(patch("src.services.texture_service.TextureService.process_image", side_effect=fake_process_image))
             if red_not_found:
-                # Имитируем «игровая RED-текстура не найдена» → должно дать warning.
+                # Имитируем «игровая RED-текстура не найдена» -> должно дать warning
                 m(patch("src.services.texture_build.game_source.get_original_vtf_bytes", return_value=None))
             for target, kw in (extra_patches or {}).items():
                 self.mocks[target] = m(patch(target, **kw))
@@ -1358,12 +1353,12 @@ class BuildVpkCharacterizationTests(unittest.TestCase):
                 base, panel_extra_textures={"c_scattergun_shell": str(extra_png)})
 
             self.assertTrue(ok, msg)
-            # Главная текстура и панельный доп.материал — именно с этими (lowercase) именами.
+            # Главная текстура и панельный доп.материал - именно с этими (lowercase) именами
             self.assertIn("c_scattergun.vtf", vtf_names)
             self.assertIn("c_scattergun_shell.vtf", vtf_names)
 
     def test_extra_material_name_lowercased(self):
-        # Имя материала из 2D-панели приводится к нижнему регистру в выходе.
+        # Имя материала из 2D-панели приводится к нижнему регистру в выходе
         with tempfile.TemporaryDirectory() as tmp:
             base = Path(tmp)
             extra_png = base / "shell.png"
@@ -1378,7 +1373,7 @@ class BuildVpkCharacterizationTests(unittest.TestCase):
 
     def test_texturegroup_extra_and_detail_map(self):
         # Шире покрываем build_vpk: доп.материал из $texturegroup (через callback)
-        # и файловая карта detail на главном материале — снимок VTF фиксирует их имена.
+        # и файловая карта detail на главном материале - снимок VTF фиксирует их имена
         with tempfile.TemporaryDirectory() as tmp:
             base = Path(tmp)
             shell_png = base / "shell2.png"
@@ -1403,8 +1398,8 @@ class BuildVpkCharacterizationTests(unittest.TestCase):
             self.assertIn("c_scattergun_detail.vtf", vtf_names)  # карта detail
 
     def test_texturegroup_extra_copies_main_on_request(self):
-        # «Скопировать главную» — материал ОБЯЗАН оказаться в моде: раньше
-        # этот ответ шёл как None, и сборка молча пропускала материал.
+        # «Скопировать главную» - материал ОБЯЗАН оказаться в моде, а не
+        # потеряться как ответ None
         from src.shared.constants import EXTRA_TEX_USE_MAIN
         with tempfile.TemporaryDirectory() as tmp:
             ok, msg, vtf_names = self._run_build(
@@ -1418,13 +1413,13 @@ class BuildVpkCharacterizationTests(unittest.TestCase):
 
     def test_blu_team_texture_only_for_real_team(self):
         # Командная (BLU) текстура создаётся ТОЛЬКО при настоящей команде
-        # (blu_is_team). У вариант-онли оружия (австралий) — НЕ создаётся.
+        # (blu_is_team). У вариант-онли оружия (австралий) - НЕ создаётся
         with tempfile.TemporaryDirectory() as tmp:
             base = Path(tmp)
             blu_img = base / "blu.vtf"
             blu_img.write_bytes(b"VTF\x00blu")
 
-            # Настоящая команда → BLU есть.
+            # Настоящая команда -> BLU есть
             ok, msg, vtf_names = self._run_build(
                 base, panel_extra_textures={},
                 blu_mode="upload", blu_image_path=str(blu_img), blu_is_team=True)
@@ -1436,8 +1431,8 @@ class BuildVpkCharacterizationTests(unittest.TestCase):
             blu_img = base / "blu.vtf"
             blu_img.write_bytes(b"VTF\x00blu")
 
-            # Нет команды (как у скаттергана: обычный+австралий) → BLU подавлен,
-            # даже если blu_mode='upload'. Регресс на c_scattergun_blue.
+            # Нет команды (как у скаттергана: обычный+австралий) -> BLU подавлен,
+            # даже если blu_mode='upload'. Регресс на c_scattergun_blue
             ok, msg, vtf_names = self._run_build(
                 base, panel_extra_textures={},
                 blu_mode="upload", blu_image_path=str(blu_img), blu_is_team=False)
@@ -1446,8 +1441,8 @@ class BuildVpkCharacterizationTests(unittest.TestCase):
             self.assertNotIn("c_scattergun_blue.vtf", vtf_names)
 
     def test_missing_game_texture_surfaces_warning(self):
-        # Игровая текстура не найдена → сборка успешна, но в сообщении есть
-        # предупреждение (иначе пользователь узнаёт о фиолете только в игре).
+        # Игровая текстура не найдена -> сборка успешна, но в сообщении есть
+        # предупреждение (иначе пользователь узнаёт о фиолете только в игре)
         with tempfile.TemporaryDirectory() as tmp:
             base = Path(tmp)
             ok, msg = self._run_build(
@@ -1456,14 +1451,14 @@ class BuildVpkCharacterizationTests(unittest.TestCase):
             self.assertIn("Warnings:", msg)            # en по умолчанию
             self.assertIn("c_scattergun", msg)         # имя проблемного материала
 
-    # ── Снимки по веткам _build_model_mode_vpk (сетка под нарезку на шаги) ──
+    # Снимки по веткам _build_model_mode_vpk (сетка под нарезку на шаги)
 
     VMT = b'"VertexLitGeneric"\r\n{\r\n}\r\n'
     VTF = b"VTF\x00marker"
 
     def test_snapshot_weapon_team_extras_maps(self):
         # Команда + доп. материал из $texturegroup + панельный + карта detail:
-        # полное дерево мода, VMT побайтно.
+        # полное дерево мода, VMT побайтно
         with tempfile.TemporaryDirectory() as tmp:
             base = Path(tmp)
             Image.new("RGB", (4, 4), color="green").save(base / "shell2.png")
@@ -1502,9 +1497,57 @@ class BuildVpkCharacterizationTests(unittest.TestCase):
             d + "c_scattergun_shell2_blue.vtf": self.VTF,
         })
 
+    def test_blue_waits_for_background_compression(self):
+        # Красная жмётся в фоне, синяя берёт её нормаль только готовой
+        import time
+
+        def slow_vtf(png_path, output_dir, *a, **k):
+            time.sleep(0.2)
+            (Path(output_dir) / f"{Path(png_path).stem}.vtf").write_bytes(self.VTF)
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            Image.new("RGB", (4, 4), color="blue").save(base / "blu.png")
+            tg = {"red_row": ["c_scattergun"], "blu_row": ["c_scattergun_blue"],
+                  "blu_is_team": True, "main_texture": "c_scattergun",
+                  "extra_materials": [], "all_rows": [["c_scattergun"], ["c_scattergun_blue"]]}
+            ok, msg, vtfs = self._run_build(
+                base, tg=tg, extra_texture_callback=lambda *a: str(base / "blu.png"),
+                vtf_options={"normal": True},
+                extra_patches={
+                    "src.services.texture_service.TextureService.create_vtf": {"side_effect": slow_vtf},
+                    "src.services.texture_service.TextureService.write_normal_png": {}})
+        self.assertTrue(ok, msg)
+        self.assertEqual(vtfs, ["c_scattergun.vtf", "c_scattergun_blue.vtf",
+                                "c_scattergun_blue_normal.vtf", "c_scattergun_normal.vtf"])
+
+    def test_same_file_compressions_run_in_order(self):
+        import threading
+        import time
+        from src.services.texture_build.vtf_jobs import VtfJobs
+        log, lock = [], threading.Lock()
+
+        def job(tag, delay):
+            time.sleep(delay)
+            with lock:
+                log.append(tag)
+        jobs = VtfJobs()
+        jobs.submit(job, "first", 0.2, key="a.png")
+        jobs.submit(job, "second", 0, key="a.png")
+        jobs.finish()
+        self.assertEqual(log, ["first", "second"])
+
+    def test_background_compression_error_fails_build(self):
+        def broken_vtf(*a, **k):
+            raise RuntimeError("VTFCmd упал")
+        with tempfile.TemporaryDirectory() as tmp:
+            ok, msg, _ = self._run_build(Path(tmp), extra_patches={
+                "src.services.texture_service.TextureService.create_vtf": {"side_effect": broken_vtf}})
+        self.assertFalse(ok)
+        self.assertIn("VTFCmd упал", msg)
+
     def test_snapshot_material_only_mirror_no_blu(self):
         # Часы шпиона: без BLU (одна текстура), зеркальный VMT по игровому
-        # пути, модель в мод не кладётся.
+        # пути, модель в мод не кладётся
         P = "src.services.vpk_service."
         with tempfile.TemporaryDirectory() as tmp:
             base = Path(tmp)
@@ -1527,12 +1570,12 @@ class BuildVpkCharacterizationTests(unittest.TestCase):
             "materials/console/models/weapons/c_items/c_pocket_watch.vtf": self.VTF,
             "materials/models/weapons/c_items/c_pocket_watch.vmt": self.VMT,
         })
-        # Экран Звона смерти идёт своим путём - он в моде.
+        # Экран Звона смерти идёт своим путём - он в моде
         self.assertIn("scripts/screens/pda_spy_invis_pocket.res", self.tree)
 
     def test_snapshot_pocket_watch_hud_inserts(self):
         # Вставки циферблата по фиксированному пути: одна и та же картинка в
-        # двух слотах конвертируется один раз, VMT рядом с VTF.
+        # двух слотах конвертируется один раз, VMT рядом с VTF
         with tempfile.TemporaryDirectory() as tmp:
             base = Path(tmp)
             Image.new("RGB", (4, 4), color="green").save(base / "a.png")
@@ -1599,8 +1642,8 @@ class BuildVpkCharacterizationTests(unittest.TestCase):
                 + 'end\n')
 
     def test_snapshot_hands_shoulder_isolation_and_promo(self):
-        # Изоляция плеч (engineer_red → vm_engineer_red и синий вариант) и
-        # промоушен нейтральной левой руки в командную: QC, SMD и дерево мода.
+        # Изоляция плеч (engineer_red -> vm_engineer_red и синий вариант) и
+        # промоушен нейтральной левой руки в командную: QC, SMD и дерево мода
         P = "src.services.vpk_service."
         with tempfile.TemporaryDirectory() as tmp:
             base = Path(tmp)
@@ -1644,7 +1687,7 @@ class BuildVpkCharacterizationTests(unittest.TestCase):
 
     def test_snapshot_custom_model_styles_and_qc_text(self):
         # Своя модель: имена от материалов SMD, свой $texturegroup стилей,
-        # правленый человеком QC с синхронизированной группой.
+        # правленый человеком QC с синхронизированной группой
         PL = "src.services.vpk_model_pipeline.VpkModelPipeline."
         smd = ('version 1\nnodes\n0 "root" -1\nend\nskeleton\ntime 0\n'
                '0 0 0 0 0 0 0\nend\ntriangles\nMyMat\n'
@@ -1677,7 +1720,7 @@ class BuildVpkCharacterizationTests(unittest.TestCase):
     def test_snapshot_blu_columns_and_extra_answers(self):
         # Все ответы на вопросы доп. материалов и столбцов BLU: своя картинка,
         # «из игры» (есть и нет в игре), «скопировать главную», пропуск;
-        # общий столбец, вариант без RED-пары, нормаль у синего.
+        # общий столбец, вариант без RED-пары, нормаль у синего
         from src.shared.constants import EXTRA_TEX_USE_GAME_ORIGINAL as GAME, EXTRA_TEX_USE_MAIN as MAIN
         orig = "src.services.texture_build.game_source.get_original_vtf_bytes"
         with tempfile.TemporaryDirectory() as tmp:
@@ -1749,16 +1792,16 @@ class BuildVpkCharacterizationTests(unittest.TestCase):
             "materials/console/models/player/items/all_class/hat_scout.vtf": self.VTF,
         })
         c = self.mocks[cls].call_args
-        self.assertEqual(c.args[1:10], (
+        self.assertEqual(c.args[1:9], (
             hat, hat, None, False, "tf2_misc_dir.vpk", "studiomdl.exe",
-            c.args[7], str(base), "en"))
+            str(base), "en"))
         self.assertEqual(c.kwargs, {
             "target_mdl_paths": ["models/player/items/all_class/hat_heavy.mdl"],
             "bypass_prefix": "console", "part_specs": None,
             "part_source_qc": qc, "part_names": {}})
         s = self.mocks[sty].call_args
         self.assertEqual(s.args[1], [{"style": 1}])
-        self.assertEqual(s.args[8:12], ((4, 4), "DXT1", [], {}))
+        self.assertEqual(s.args[7:11], ((4, 4), "DXT1", [], {}))
         self.assertEqual(s.kwargs, {
             "bypass_prefix": "console",
             "written_textures": {"console/models/player/items/all_class/hat_scout": img}})
@@ -1828,7 +1871,7 @@ class BuildVpkCharacterizationTests(unittest.TestCase):
                 self.assertEqual((ok, msg), (False, expected.format(qc=qc)))
 
     def test_snapshot_cancel_points(self):
-        # Отмена проверяется перед 25/40/60/80 %: снимок прогресса до отмены.
+        # Отмена проверяется перед 25/40/60/80 %: снимок прогресса до отмены
         for n, progress in enumerate([[], [25], [25, 40], [25, 40, 60]]):
             calls = []
 

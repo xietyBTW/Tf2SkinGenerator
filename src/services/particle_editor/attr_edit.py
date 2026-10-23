@@ -1,4 +1,4 @@
-"""Правка значений: атрибуты системы и модулей, отвязка общих модулей."""
+"""Правка значений: атрибуты системы и модулей, отвязка общих модулей"""
 
 from typing import Any, Optional
 
@@ -19,19 +19,19 @@ def set_attr(
     value: Any,
 ) -> bool:
     """
-    Меняет значение существующего атрибута.
+    Меняет значение существующего атрибута
 
     Args:
         system_name:  имя системы частиц
-        group:        группа модулей (из MODULE_GROUPS) либо None —
+        group:        группа модулей (из MODULE_GROUPS) либо None -
                       атрибут самой системы
         module_index: индекс модуля в группе (игнорируется при group=None)
         attr_name:    имя атрибута
         value:        новое значение из GUI: число, bool, строка,
-                      [x,y,z] для vec3, [r,g,b,a] 0–255 для color
+                      [x,y,z] для vec3, [r,g,b,a] 0-255 для color
 
     Returns:
-        True если атрибут найден и обновлён.
+        True если атрибут найден и обновлён
     """
     d = pcf._find_definition(system_name)
     if d is None:
@@ -45,7 +45,7 @@ def set_attr(
         return False
 
     # Пересоздаём атрибут с ИСХОДНЫМ именем (ключи srctools casefold-ятся,
-    # а в файле имя должно остаться как было) и исходным типом.
+    # а в файле имя должно остаться как было) и исходным типом
     orig_name = el[attr_name].name
     vt = el[attr_name].type
     try:
@@ -78,9 +78,9 @@ def ensure_attr(
     attr_name: str, attr_type: str, value: Any,
 ) -> bool:
     """
-    set_attr; если атрибута нет — создаёт его с заданным DMX-типом.
+    set_attr; если атрибута нет - создаёт его с заданным DMX-типом.
     Нужно простому режиму: крутилка должна работать и на модуле,
-    у которого этот атрибут ещё не записан (игра держит его в дефолте).
+    у которого этот атрибут ещё не записан (игра держит его в дефолте)
     """
     if set_attr(pcf, system_name, group, module_index, attr_name, value):
         return True
@@ -94,7 +94,7 @@ def ensure_attr(
             return False
     if attr_name in el:
         return False   # атрибут есть, но set_attr отверг значение
-    # Новый атрибут — в написании игры, иначе Source его не прочитает
+    # Новый атрибут - в написании игры, иначе Source его не прочитает
     canon = pcf.canonical_attr_name(
         group, module_fn(el) if group else "", attr_name)
     attr = attr_from_json(canon, {"t": attr_type, "v": value})
@@ -107,10 +107,10 @@ def ensure_attr(
 def remove_attr(pcf, system_name: str, group: Optional[str],
                 module_index: int, attr_name: str) -> bool:
     """
-    Удаляет параметр — значение возвращается к умолчанию движка.
+    Удаляет параметр - значение возвращается к умолчанию движка
 
     Полезно вдвойне: убирает лишнее и уменьшает PCF (для казуала файл
-    не должен превышать оригинальный).
+    не должен превышать оригинальный)
     """
     if (attr_name or "").lower() in SERVICE_ATTRS:
         return False
@@ -129,10 +129,10 @@ def remove_attr(pcf, system_name: str, group: Optional[str],
 
 
 def module_owners(pcf, mod) -> int:
-    """Сколько раз модуль встречается по группам всех систем.
+    """Сколько раз модуль встречается по группам всех систем
 
     Valve делит элементы модулей между системами: в crit.pcf один
-    «Alpha Fade and Decay» стоит у десяти определений сразу.
+    «Alpha Fade and Decay» стоит у десяти определений сразу
     """
     count = 0
     for d in pcf._all_definition_elements():
@@ -147,11 +147,11 @@ def module_owners(pcf, mod) -> int:
 
 
 def module_for_edit(pcf, d, group: str, index: int):
-    """Модуль системы под правку — свой, а не общий с другими.
+    """Модуль системы под правку - свой, а не общий с другими
 
     Общий элемент подменяется в ЭТОЙ системе отвязанной копией: иначе
     правка end_alpha у crit_text молча меняла hit_text, miss_text и ещё
-    семь систем, делящих с ней тот же оператор. None — модуля нет.
+    семь систем, делящих с ней тот же оператор. None - модуля нет
     """
     if group not in d:
         return None

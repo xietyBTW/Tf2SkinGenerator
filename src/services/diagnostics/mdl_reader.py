@@ -1,18 +1,18 @@
-"""Лёгкий парсер заголовка Source-модели (.mdl / studiohdr_t).
+"""Лёгкий парсер заголовка Source-модели (.mdl / studiohdr_t)
 
 Диагностике нужно из готовой модели узнать то, что автор задал в QC и что
 «запеклось» в .mdl:
-  • version           — совместимость с TF2 (обычно 48/49);
-  • material_names    — имена материалов (должны иметь парные VMT);
-  • cdmaterials       — папки поиска материалов ($cdmaterials);
-  • drawn_materials   — какие из них рисует хоть одна сетка в каком-нибудь
+  • version           - совместимость с TF2 (обычно 48/49);
+  • material_names    - имена материалов (должны иметь парные VMT);
+  • cdmaterials       - папки поиска материалов ($cdmaterials);
+  • drawn_materials   - какие из них рисует хоть одна сетка в каком-нибудь
                         скине (в таблице скинов бывают столбцы без сетки:
-                        у рук инженера — рука Ганслингера).
+                        у рук инженера - рука Ганслингера)
 
-Парсим ТОЛЬКО заголовок, таблицы строк и номера материалов сеток — без
+Парсим ТОЛЬКО заголовок, таблицы строк и номера материалов сеток - без
 геометрии/костей. Всё
 защищено границами: на любом непонятном файле возвращаем частичный/пустой
-результат, а не исключение.
+результат, а не исключение
 
 Смещения полей studiohdr_t (little-endian, int32), выверенные по Source SDK:
     0x04  version
@@ -22,9 +22,9 @@
     0xE8  numbodyparts     0xEC  bodypartindex
 mstudiobodyparts_t (16 байт): name, nummodels, base, modelindex;
 mstudiomodel_t (148 байт): nummeshes @72, meshindex @76;
-mstudiomesh_t (116 байт): material @0 — номер столбца таблицы скинов.
-mstudiotexture_t: первое поле sznameindex (int) — смещение имени ОТ начала
-структуры этого материала.
+mstudiomesh_t (116 байт): material @0 - номер столбца таблицы скинов.
+mstudiotexture_t: первое поле sznameindex (int) - смещение имени ОТ начала
+структуры этого материала
 """
 
 from __future__ import annotations
@@ -36,7 +36,7 @@ from typing import List, Optional
 _MAGIC = b"IDST"
 _MSTUDIOTEXTURE_SIZE = 64
 
-# Смещения в studiohdr_t.
+# Смещения в studiohdr_t
 _OFF_VERSION = 0x04
 _OFF_NUM_TEXTURES = 0xCC
 _OFF_TEXTURE_INDEX = 0xD0
@@ -45,24 +45,24 @@ _OFF_CDTEXTURE_INDEX = 0xD8
 _OFF_SKINS = 0xDC
 _OFF_BODYPARTS = 0xE8
 
-# Разумные лимиты — защита от мусорных счётчиков в битом файле.
+# Разумные лимиты - защита от мусорных счётчиков в битом файле
 _MAX_ENTRIES = 4096
 
 
 @dataclass
 class MdlHeader:
-    """Разобранный заголовок .mdl."""
+    """Разобранный заголовок .mdl"""
 
     version: int = 0
     material_names: List[str] = field(default_factory=list)
     cdmaterials: List[str] = field(default_factory=list)
-    # None — сетки не прочитались, и рисуемыми считаются все материалы.
+    # None - сетки не прочитались, и рисуемыми считаются все материалы
     drawn_materials: Optional[List[str]] = None
     valid: bool = False   # True, если сигнатура IDST на месте
 
 
 def read_mdl(path: str) -> Optional[MdlHeader]:
-    """Читает .mdl с диска. None — если файл не прочитался."""
+    """Читает .mdl с диска. None - если файл не прочитался"""
     try:
         with open(path, "rb") as f:
             data = f.read()
@@ -72,8 +72,8 @@ def read_mdl(path: str) -> Optional[MdlHeader]:
 
 
 def parse_mdl(data: bytes) -> MdlHeader:
-    """Разбирает байты .mdl. Никогда не бросает — при проблемах возвращает
-    то, что удалось (valid=False, если даже сигнатуры нет)."""
+    """Разбирает байты .mdl. Никогда не бросает - при проблемах возвращает
+    то, что удалось (valid=False, если даже сигнатуры нет)"""
     hdr = MdlHeader()
     if len(data) < 0xDC or data[:4] != _MAGIC:
         return hdr
@@ -84,19 +84,19 @@ def parse_mdl(data: bytes) -> MdlHeader:
         hdr.cdmaterials = _read_cdmaterials(data)
         hdr.drawn_materials = _read_drawn_materials(data)
     except (struct.error, IndexError, ValueError):
-        # Частичный результат лучше падения — что успели прочитать, то и вернём.
+        # Частичный результат лучше падения - что успели прочитать, то и вернём
         pass
     return hdr
 
 
-# ── Внутреннее ──────────────────────────────────────────────────────────── #
+# Внутреннее
 
 def _i32(data: bytes, offset: int) -> int:
     return struct.unpack_from("<i", data, offset)[0]
 
 
 def _read_cstr(data: bytes, offset: int) -> str:
-    """Null-terminated ASCII-строка начиная с offset."""
+    """Null-terminated ASCII-строка начиная с offset"""
     if offset < 0 or offset >= len(data):
         return ""
     end = data.find(b"\x00", offset)
@@ -110,7 +110,7 @@ def _read_material_names(data: bytes) -> List[str]:
 
 
 def _texture_names(data: bytes) -> List[str]:
-    """Имена материалов по их номерам в .mdl ('' — имя не прочиталось)."""
+    """Имена материалов по их номерам в .mdl ('' - имя не прочиталось)"""
     count = _i32(data, _OFF_NUM_TEXTURES)
     base = _i32(data, _OFF_TEXTURE_INDEX)
     if count <= 0 or count > _MAX_ENTRIES or base <= 0:
@@ -143,10 +143,10 @@ def _read_cdmaterials(data: bytes) -> List[str]:
 
 
 def _read_drawn_materials(data: bytes) -> Optional[List[str]]:
-    """Материалы без тех, что стоят только в столбцах скинов без сетки.
+    """Материалы без тех, что стоят только в столбцах скинов без сетки
 
     Материал вне таблицы скинов (замена материала у LOD) сетки не знают, но
-    игра его рисует: такой проверяется, как и раньше.
+    игра его рисует: такой проверяется
     """
     num_skinref, num_families, skin_index = struct.unpack_from("<iii", data, _OFF_SKINS)
     num_bodyparts, bodypart_index = struct.unpack_from("<ii", data, _OFF_BODYPARTS)

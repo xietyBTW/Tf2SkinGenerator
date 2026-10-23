@@ -1,4 +1,4 @@
-"""_active_custom_files: экспорт включает и VTF, и оригинальный VMT материала."""
+"""_active_custom_files: экспорт включает и VTF, и оригинальный VMT материала"""
 from src.services.particle_editor_service import ParticleEditorService
 
 

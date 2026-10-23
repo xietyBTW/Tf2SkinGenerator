@@ -1,11 +1,11 @@
 """
-Крутилки простого режима на стороне приложения.
+Крутилки простого режима на стороне приложения
 
-Схема и чтение значений живут в services/simple_params и проверены там; здесь
+Схема и чтение значений живут в services/simple_params и проверены там, здесь
 проверяется то, что добавил слой приложения: форма ответа для страницы и
-правила записи — в первую очередь запрет создавать модуль там, где схема это
+правила записи - в первую очередь запрет создавать модуль там, где схема это
 запрещает. Лишний emit_instantaneously задваивает залп, и молча добавить его
-хуже, чем отказать.
+хуже, чем отказать
 """
 
 import unittest
@@ -14,7 +14,7 @@ from src.app.session import AppSession
 
 
 class _StubService:
-    """Служба частиц ровно в том объёме, в каком её зовёт сеанс."""
+    """Служба частиц ровно в том объёме, в каком её зовёт сеанс"""
 
     def __init__(self, systems):
         self._systems = systems
@@ -105,7 +105,7 @@ class ParamsListTests(unittest.TestCase):
         self.assertEqual(drag['value'], 0.25)
 
     def test_missing_module_gives_none_and_a_placeholder(self):
-        """None — не «нет значения», а «модуля нет»: поле показывают бледным."""
+        """None - не «нет значения», а «модуля нет»: поле показывают бледным"""
         life = next(p for p in self.s.particles.particle_params('sys')
                     if p['key'] == 'lifetime')
         self.assertIsNone(life['value'])
@@ -133,7 +133,7 @@ class SetParamTests(unittest.TestCase):
                          [('initializers', 'Lifetime Random')])
 
     def test_emitter_module_is_never_created(self):
-        """creatable=False у эмиттеров — добавленный залп звучал бы дважды."""
+        """creatable=False у эмиттеров - добавленный залп звучал бы дважды"""
         res = self.s.particles.set_particle_param('sys', 'spawn_burst', 50)
         self.assertIn('error', res)
         self.assertEqual(self.s.particles.pcf.added, [])
@@ -147,13 +147,13 @@ class SetParamTests(unittest.TestCase):
 
 
 class ExpertModeTests(unittest.TestCase):
-    """Экспертный режим показывает файл как есть — но без служебных ключей."""
+    """Экспертный режим показывает файл как есть - но без служебных ключей"""
 
     def setUp(self):
         self.s = _session({'sys': _system(
             operators=[_mod('Movement Basic', {'drag': 0.25})],
             initializers=[_mod('Lifetime Random', {'lifetime_min': 1.0})])})
-        # functionName и name адресуют модуль, а не настраивают его.
+        # functionName и name адресуют модуль, а не настраивают его
         mod = self.s.particles.pcf.systems_json()['sys']['operators'][0]
         mod['attrs']['functionname'] = {'t': 'string', 'v': 'Movement Basic'}
         mod['attrs']['id'] = {'t': 'string', 'v': 'x'}
@@ -180,7 +180,7 @@ class ExpertModeTests(unittest.TestCase):
         groups = self._groups()
         self.assertNotIn('forces', groups)
         self.assertNotIn('constraints', groups)
-        # А основные группы видны и пустыми — иначе в них нечего добавить.
+        # А основные группы видны и пустыми - иначе в них нечего добавить
         self.assertIn('renderers', groups)
 
     def test_attrs_are_sorted(self):
@@ -205,7 +205,7 @@ class ExpertModeTests(unittest.TestCase):
 
 
 class StructureTests(unittest.TestCase):
-    """Правка состава эффекта: модули, параметры, дети."""
+    """Правка состава эффекта: модули, параметры, дети"""
 
     def setUp(self):
         self.s = _session({'sys': _system(
@@ -215,7 +215,7 @@ class StructureTests(unittest.TestCase):
             {'delay': 0.0, 'childName': 'other'}]
 
     def test_every_change_returns_systems_and_tree(self):
-        """Каталог слева и свойства справа рисуются одним ответом."""
+        """Каталог слева и свойства справа рисуются одним ответом"""
         res = self.s.particles.add_particle_module('sys', 'forces', 'random force')
         self.assertIn('systems', res)
         self.assertIn('tree', res)
@@ -229,7 +229,7 @@ class StructureTests(unittest.TestCase):
         self.assertIn('error', self.s.particles.remove_particle_module('sys', 'operators', 7))
 
     def test_children_are_listed_with_their_index(self):
-        """Отцепляют по индексу: одна и та же система может висеть дважды."""
+        """Отцепляют по индексу: одна и та же система может висеть дважды"""
         self.assertEqual(self.s.particles.particle_children('sys'),
                          [{'index': 0, 'name': 'other', 'delay': 0.0}])
 
@@ -247,7 +247,7 @@ class StructureTests(unittest.TestCase):
 
 
 class CopyPayloadTests(unittest.TestCase):
-    """Формат буфера обмена — тот же, что у панели приложения."""
+    """Формат буфера обмена - тот же, что у панели приложения"""
 
     def setUp(self):
         self.s = _session({'sys': _system(
@@ -255,13 +255,13 @@ class CopyPayloadTests(unittest.TestCase):
             initializers=[_mod('Radius Random', {'radius_min': 1.0})])})
         self.s.particles.pcf.systems_json()['sys']['attrs']['radius'] = {
             't': 'float', 'v': 5.0}
-        # Служебные ключи адресуют модуль, а не настраивают его.
+        # Служебные ключи адресуют модуль, а не настраивают его
         self.s.particles.pcf.systems_json()['sys']['operators'][0]['attrs'].update(
             {'functionname': {'t': 'string', 'v': 'Movement Basic'},
              'id': {'t': 'string', 'v': 'x'}})
 
     def test_whole_system_is_marked_full(self):
-        """Полный набор при вставке спрашивает, заменять ли систему целиком."""
+        """Полный набор при вставке спрашивает, заменять ли систему целиком"""
         payload = self.s.particles.copy_particle_params('sys')['payload']
         self.assertTrue(payload['full'])
         self.assertEqual(payload['attrs'], {'radius': {'t': 'float', 'v': 5.0}})
@@ -280,7 +280,7 @@ class CopyPayloadTests(unittest.TestCase):
         self.assertEqual(list(attrs), ['drag'])
 
     def test_single_attribute_of_a_module(self):
-        """Самый частый случай: перенести одну настройку, не трогая остального."""
+        """Самый частый случай: перенести одну настройку, не трогая остального"""
         payload = self.s.particles.copy_particle_params(
             'sys', 'operators', 0, 'drag')['payload']
         self.assertEqual(payload['modules']['operators'],
@@ -309,7 +309,7 @@ class CopyPayloadTests(unittest.TestCase):
 
 
 class _HistoryService(_StubService):
-    """Служба со снимками: снимок — копия систем, восстановление — обратно."""
+    """Служба со снимками: снимок - копия систем, восстановление - обратно"""
 
     def snapshot(self):
         import copy
@@ -324,10 +324,10 @@ class _HistoryService(_StubService):
 
 class HistoryTests(unittest.TestCase):
     """
-    Отмена правок снимками.
+    Отмена правок снимками
 
     Снимок покрывает и будущие операции: забыть «откат» для новой правки
-    невозможно, чего не даёт набор обратимых команд.
+    невозможно, чего не даёт набор обратимых команд
     """
 
     def setUp(self):
@@ -380,7 +380,7 @@ class HistoryTests(unittest.TestCase):
         self.assertFalse(self.s.particles.particle_history()['redo'])
 
     def test_undo_itself_is_not_an_edit(self):
-        """Иначе откат добавлял бы снимок и возврат стал бы недостижим."""
+        """Иначе откат добавлял бы снимок и возврат стал бы недостижим"""
         self.s.particles.set_particle_attr('sys', 'operators', 0, 'drag', 0.9)
         before = len(self.s.particles.history)
         self.s.particles.undo_particles(-1)
@@ -391,7 +391,7 @@ class HistoryTests(unittest.TestCase):
         self.assertIn('error', self.s.particles.undo_particles(1))
 
     def test_history_is_capped(self):
-        """Снимок — копия всего дерева; помним ограниченное число шагов."""
+        """Снимок - копия всего дерева, помним ограниченное число шагов"""
         for i in range(self.s.particles.HISTORY_LIMIT + 10):
             self.s.particles.set_particle_attr('sys', 'operators', 0, 'drag', i / 100)
         self.assertEqual(len(self.s.particles.history), self.s.particles.HISTORY_LIMIT)
@@ -401,11 +401,11 @@ class HistoryTests(unittest.TestCase):
 
 
 class ControlPointTests(unittest.TestCase):
-    """Какие контрольные точки нужны эффекту.
+    """Какие контрольные точки нужны эффекту
 
-    В игре их выставляет код (где оружие, какого цвета килстрик), в превью —
+    В игре их выставляет код (где оружие, какого цвета килстрик), в превью -
     человек. Без подсказки узнать, что эффекту важна CP 9, можно только
-    вычитав это в дереве свойств.
+    вычитав это в дереве свойств
     """
 
     def test_points_of_the_effect_and_its_children(self):
@@ -430,7 +430,7 @@ class ControlPointTests(unittest.TestCase):
 
 
 class _MaterialService(_StubService):
-    """Служба с материалами: их картинки и признак своей текстуры."""
+    """Служба с материалами: их картинки и признак своей текстуры"""
 
     def __init__(self, systems, materials, custom=()):
         super().__init__(systems)
@@ -456,7 +456,7 @@ class _MaterialService(_StubService):
 
 
 class MaterialTests(unittest.TestCase):
-    """Карточки текстур эффекта."""
+    """Карточки текстур эффекта"""
 
     def setUp(self):
         self.s = AppSession()
@@ -470,7 +470,7 @@ class MaterialTests(unittest.TestCase):
             custom=['effects/glow.vmt'])
 
     def test_only_the_materials_of_the_chosen_effect(self):
-        """В PCF десятки систем; чужая карточка предлагала бы заменить не то."""
+        """В PCF десятки систем, чужая карточка предлагала бы заменить не то"""
         svc = self.s.particles.pcf
         svc._systems['root'] = _system()
         svc._systems['root']['attrs']['material'] = {
@@ -486,7 +486,7 @@ class MaterialTests(unittest.TestCase):
 
         names = [c['name'] for c in self.s.particles.particle_materials('root')]
         self.assertEqual(names, ['effects/glow.vmt', 'particle/smoke.vmt'])
-        # Без системы — весь файл: так материалы смотрят до выбора эффекта.
+        # Без системы - весь файл: так материалы смотрят до выбора эффекта
         self.assertEqual(len(self.s.particles.particle_materials()), 3)
 
     def test_shared_child_is_not_listed_twice(self):
@@ -503,7 +503,7 @@ class MaterialTests(unittest.TestCase):
                          ['effects/glow.vmt'])
 
     def test_cycle_in_children_does_not_hang(self):
-        """Ребёнок может ссылаться назад — обход обязан это пережить."""
+        """Ребёнок может ссылаться назад - обход обязан это пережить"""
         svc = self.s.particles.pcf
         svc._systems['a'] = _system()
         svc._systems['a']['children'] = [{'delay': 0, 'childName': 'b'}]
@@ -515,12 +515,12 @@ class MaterialTests(unittest.TestCase):
         cards = {c['name']: c for c in self.s.particles.particle_materials()}
         self.assertEqual(cards['effects/glow.vmt']['width'], 128)
         self.assertTrue(cards['effects/glow.vmt']['custom'])
-        # Покадровая анимация: об этом предупреждают ДО замены картинки.
+        # Покадровая анимация: об этом предупреждают ДО замены картинки
         self.assertTrue(cards['particle/smoke.vmt']['sheet'])
         self.assertFalse(cards['effects/glow.vmt']['sheet'])
 
     def test_material_without_a_picture_still_gets_a_card(self):
-        """Текстура могла не найтись — карточка нужна всё равно, её правят."""
+        """Текстура могла не найтись - карточка нужна всё равно, её правят"""
         self.s.particles.pcf._materials['effects/none.vmt'] = {}
         cards = {c['name']: c for c in self.s.particles.particle_materials()}
         self.assertEqual(cards['effects/none.vmt']['dataUrl'], '')
@@ -544,11 +544,11 @@ class MaterialTests(unittest.TestCase):
 
 
 class EffectCatalogTests(unittest.TestCase):
-    """Каталог эффектов: имя из items_game и система в файле."""
+    """Каталог эффектов: имя из items_game и система в файле"""
 
     def test_name_from_the_game_finds_its_file_whatever_the_case(self):
         # items_game зовёт эффект stamp_spin, а в stamp_spin.pcf система
-        # Stamp_spin: игра сравнивает без регистра, каталог тоже должен.
+        # Stamp_spin: игра сравнивает без регистра, каталог тоже должен
         from types import SimpleNamespace
         from unittest import mock
 

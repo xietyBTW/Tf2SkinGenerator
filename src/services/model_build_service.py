@@ -1,6 +1,6 @@
 """
 Сервис для декомпила и компила моделей TF2.
-Работа с Crowbar, studiomdl и QC файлами.
+Работа с Crowbar, studiomdl и QC файлами
 """
 
 import os
@@ -13,7 +13,7 @@ from src.services.smd_service import NON_REFERENCE_SMD_KEYWORDS
 from src.shared.constants import ToolTimeouts
 from src.shared.logging_config import get_logger
 
-# Предкомпилированные regex — создаются один раз при импорте модуля
+# Предкомпилированные regex - создаются один раз при импорте модуля
 _RE_LOD          = re.compile(r'^\$lod\s+\d+',                     re.IGNORECASE)
 _RE_CDMATERIALS  = re.compile(r'^\$cdmaterials\s*"([^"]*)"',        re.IGNORECASE)
 _RE_CDMAT_DETECT = re.compile(r'^\$cdmaterials\s+',                  re.IGNORECASE)
@@ -25,7 +25,7 @@ logger = get_logger(__name__)
 
 
 class ModelBuildService:
-    """Декомпиляция и компиляция моделей: Crowbar для декомпила, studiomdl для компила."""
+    """Декомпиляция и компиляция моделей: Crowbar для декомпила, studiomdl для компила"""
     
     @staticmethod
     def decompile(
@@ -34,10 +34,10 @@ class ModelBuildService:
         crowbar_decomp_exe: str
     ) -> str:
         """
-        Декомпилирует .mdl в QC через Crowbar.
+        Декомпилирует .mdl в QC через Crowbar
         
         Без Crowbar декомпиляция невозможна: studiomdl не умеет из MDL делать QC.
-        Это единственный способ получить QC из готовой модели.
+        Это единственный способ получить QC из готовой модели
         
         Args:
             mdl_path: Путь к .mdl файлу
@@ -104,9 +104,9 @@ class ModelBuildService:
                 f"STDERR: {result.stderr}"
             )
 
-        # Crowbar 0.68 теряет у флексовых мешей вторую strip-группу (Air Head —
-        # 112 треугольников из 1398, тело пиромана — четыре). Дописываем
-        # недостающее из VVD/VTX, которые лежат рядом с MDL; без них — как есть.
+        # Crowbar 0.68 теряет у флексовых мешей вторую strip-группу (Air Head -
+        # 112 треугольников из 1398, тело пиромана - четыре). Дописываем
+        # недостающее из VVD/VTX, которые лежат рядом с MDL; без них - как есть
         ModelBuildService._repair_lost_geometry(mdl_path, qc_path)
         return qc_path
 
@@ -129,10 +129,10 @@ class ModelBuildService:
     @staticmethod
     def extract_cdmaterials_path_from_qc(qc_path: str) -> Optional[str]:
         """
-        Вытаскивает путь из первой непустой строки $cdmaterials.
+        Вытаскивает путь из первой непустой строки $cdmaterials
         
         В QC может быть куча $cdmaterials (включая пустые), нам нужен тот где реально указан путь.
-        Пропускаем пустые, ищем первый непустой.
+        Пропускаем пустые, ищем первый непустой
         
         Args:
             qc_path: Путь к QC файлу
@@ -147,8 +147,8 @@ class ModelBuildService:
             lines = f.readlines()
         
         # Ищем первую непустую $cdmaterials без относительных переходов (..)
-        # Пути вида "console\..\..\effects" — это системные папки движка (глаза, эффекты),
-        # а не папки скинов модели. Их пропускаем — нам нужен путь к текстурам тела.
+        # Пути вида "console\..\..\effects" - это системные папки движка (глаза, эффекты),
+        # а не папки скинов модели. Их пропускаем - нам нужен путь к текстурам тела
         for line in lines:
             stripped = line.strip()
             if re.match(r'\$cdmaterials\s+', stripped, re.IGNORECASE):
@@ -163,18 +163,18 @@ class ModelBuildService:
     @staticmethod
     def extract_all_cdmaterials_paths_from_qc(qc_path: str) -> list:
         """
-        Возвращает ВСЕ непустые пути $cdmaterials из QC файла в порядке появления.
+        Возвращает ВСЕ непустые пути $cdmaterials из QC файла в порядке появления
 
         Crowbar добавляет префикс ``console\\`` и иногда включает пути вида
-        ``console\\..\\..\\effects`` (для частиц — не текстуры). Эта функция
-        возвращает сырые значения; нормализацию (стрип console/, пропуск ..)
-        делает потребитель.
+        ``console\\..\\..\\effects`` (для частиц - не текстуры). Эта функция
+        возвращает сырые значения, нормализацию (стрип console/, пропуск ..)
+        делает потребитель
 
         Args:
             qc_path: Путь к QC файлу
 
         Returns:
-            Список непустых путей из всех $cdmaterials (может быть пустым).
+            Список непустых путей из всех $cdmaterials (может быть пустым)
         """
         if not os.path.exists(qc_path):
             return []
@@ -193,17 +193,17 @@ class ModelBuildService:
     @staticmethod
     def define_missing_bones(qc_path: str, smd_path: str) -> List[str]:
         """
-        Описывает в QC (`$definebone`) кости reference-SMD, которых там нет.
+        Описывает в QC (`$definebone`) кости reference-SMD, которых там нет
 
         Кость без анимации, вложений и описания studiomdl сворачивает в
         родителя («Collapsed N bones»): свои кости модели, дописанные к
         игровому скелету (SMDService._own_bones), после сборки пропадали.
-        Описанная кость остаётся. Поза — из первого кадра skeleton; углы в
+        Описанная кость остаётся. Поза - из первого кадра skeleton; углы в
         `$definebone` в градусах и в порядке Y, Z, X, как их пишет Crowbar
-        (в SMD — радианы X, Y, Z).
+        (в SMD - радианы X, Y, Z)
 
         Returns:
-            Имена описанных костей.
+            Имена описанных костей
         """
         import math
         from src.services.smd_service import SMDService
@@ -214,7 +214,7 @@ class ModelBuildService:
             with open(qc_path, 'r', encoding='utf-8', errors='replace') as f:
                 lines = f.readlines()
         except OSError as exc:
-            # Модель уже заменена; без описания кости свернутся, но мод соберётся.
+            # Модель уже заменена, без описания кости свернутся, но мод соберётся
             logger.warning(f"[QC] свои кости не описаны: {exc}")
             return []
         defined = {m.group(1).lower() for line in lines
@@ -238,7 +238,7 @@ class ModelBuildService:
             added.append(name)
         if not new_lines:
             return []
-        # После последнего описания кости, иначе перед первой анимацией.
+        # После последнего описания кости, иначе перед первой анимацией
         at = max((i + 1 for i, line in enumerate(lines)
                   if re.match(r'\s*\$definebone\b', line, re.IGNORECASE)), default=None)
         if at is None:
@@ -254,7 +254,7 @@ class ModelBuildService:
     @staticmethod
     def extract_modelname_path(qc_path: str) -> Optional[str]:
         """
-        Вытаскивает путь из $modelname в QC файле.
+        Вытаскивает путь из $modelname в QC файле
         
         Args:
             qc_path: Путь к QC файлу
@@ -280,23 +280,23 @@ class ModelBuildService:
     def extract_texturegroup_filename(qc_path: str) -> Optional[str]:
         """
         Базовое имя главной текстуры из $texturegroup (col0 первой базовой
-        строки, варианты _gold/_festive/… пропускаются).
+        строки, варианты _gold/_festive/… пропускаются)
 
         Returns:
-            Имя текстуры (например, "c_scattergun") или None если группы нет.
+            Имя текстуры (например, "c_scattergun") или None если группы нет
         """
         return qc_skin_parser.parse_skin_layout(qc_path).main_texture
     
     @staticmethod
     def _parse_texturegroup_rows(qc_path: str) -> List[List[str]]:
-        """Строки-скины из $texturegroup (делегирует в qc_skin_parser)."""
+        """Строки-скины из $texturegroup (делегирует в qc_skin_parser)"""
         return qc_skin_parser.parse_texturegroup_rows(qc_path)
     
     @staticmethod
     def extract_texturegroup_structure(qc_path: str) -> dict:
         """
         Анализирует $texturegroup и возвращает структурированную информацию
-        о текстурах для RED/BLU команд и дополнительных материалах.
+        о текстурах для RED/BLU команд и дополнительных материалах
         
         В TF2:
         - СТРОКИ (rows) = skin families (RED, BLU, gold, festive...)
@@ -320,17 +320,17 @@ class ModelBuildService:
             }
         """
         layout = qc_skin_parser.parse_skin_layout(qc_path)
-        # Команда — через единый авторитет selector_spec (тот же, что и превью),
-        # чтобы детект не расходился между UI и сборкой.
+        # Команда - через единый авторитет selector_spec (тот же, что и превью),
+        # чтобы детект не расходился между UI и сборкой
         spec = qc_skin_parser.selector_spec(layout)
         # Позиционная семантика для сборки: blu_row = вторая базовая строка
-        # КАК ЕСТЬ (команда или стиль — решает team; сборка рендерит второй скин
-        # в любом случае). Column alignment с RED сохранён.
+        # КАК ЕСТЬ (команда или стиль - решает team; сборка рендерит второй скин
+        # в любом случае). Column alignment с RED сохранён
         return {
             'red_row': layout.base_rows[0] if layout.base_rows else [],
             'blu_row': layout.second_row,
-            'blu_is_team': spec.team,  # вторая строка — настоящая команда, а не вариант
-            # {материал RED: материал BLU} по столбцам — тем же правилом, что
+            'blu_is_team': spec.team,  # вторая строка - настоящая команда, а не вариант
+            # {материал RED: материал BLU} по столбцам - тем же правилом, что
             # и в превью: часть столбцов команда не переключает вовсе
             'team_map': qc_skin_parser.team_material_map(layout),
             'main_texture': layout.main_texture,
@@ -343,29 +343,29 @@ class ModelBuildService:
                                     skin_overrides: dict) -> str:
         """
         Генерирует блок $texturegroup "skinfamilies" из материалов меша и
-        переопределений по скинам.
+        переопределений по скинам
 
         Args:
             mesh_materials: имена материалов меша (порядок = skin 0, базовые имена).
             skin_overrides: {skin_index(int>=1): {material_name: variant_texture_name}}.
                             Только материалы, которые пользователь сделал РАЗНЫМИ
-                            в этом скине. Остальные наследуют базовое имя.
+                            в этом скине. Остальные наследуют базовое имя
 
         Правила Source:
           • в группу попадают ТОЛЬКО переменные материалы (переопределённые хоть в
-            одном скине); постоянные не пишутся вообще;
+            одном скине), постоянные не пишутся вообще;
           • во всех строках одинаковые столбцы, в порядке mesh_materials;
-          • skin 0 = базовые имена; skin K = вариант (если есть) или базовое имя.
+          • skin 0 = базовые имена; skin K = вариант (если есть) или базовое имя
 
         Returns:
             Текст блока $texturegroup (с переводом строки) или '' если вариантов нет
-            (тогда группа не нужна — модель одно-скиновая).
+            (тогда группа не нужна - модель одно-скиновая)
         """
         if not skin_overrides:
             return ''
 
-        # Переменные материалы — те, что переопределены хотя бы в одном скине.
-        # Сохраняем порядок mesh_materials (важно для выравнивания столбцов).
+        # Переменные материалы - те, что переопределены хотя бы в одном скине.
+        # Сохраняем порядок mesh_materials (важно для выравнивания столбцов)
         overridden = set()
         for ov in skin_overrides.values():
             overridden.update(ov.keys())
@@ -380,11 +380,11 @@ class ModelBuildService:
             ov = skin_overrides.get(skin, {})
             names = []
             for mat in variant_mats:
-                # skin 0 — всегда базовое имя; иначе вариант или базовое (наследование)
+                # skin 0 - всегда базовое имя, иначе вариант или базовое (наследование)
                 names.append(mat if skin == 0 else ov.get(mat, mat))
-            # Имена материалов → нижний регистр: Source приводит пути материалов
+            # Имена материалов -> нижний регистр: Source приводит пути материалов
             # к lowercase при загрузке, а лукап в VPK регистрозависим. Файлы VTF/VMT
-            # пишутся тоже в нижнем регистре — иначе текстура не находится (фиолетовая).
+            # пишутся тоже в нижнем регистре - иначе текстура не находится (фиолетовая)
             row = ' '.join(f'"{n.lower()}"' for n in names)
             lines.append(f'\t{{ {row} }}')
         lines.append('}')
@@ -394,20 +394,20 @@ class ModelBuildService:
     def generate_renamed_texturegroup(rows: List[List[str]],
                                       rename_map: dict) -> str:
         """
-        Генерирует `$texturegroup` с ПЕРЕИМЕНОВАННЫМИ материалами (в т.ч. в skin 0).
+        Генерирует `$texturegroup` с ПЕРЕИМЕНОВАННЫМИ материалами (в т.ч. в skin 0)
 
         Используется для изоляции плеч вьюмодели: материал, общий с миром
         (`engineer`), переименовываем в уникальный (`vm_engineer`) во ВСЕХ строках
-        этого texturegroup — тогда arms-модель ссылается на новый путь, а мировой
-        персонаж остаётся на старом.
+        этого texturegroup - тогда arms-модель ссылается на новый путь, а мировой
+        персонаж остаётся на старом
 
         Args:
             rows:       строки существующего texturegroup (или [[mesh_materials]],
-                        если группы не было) — порядок столбцов = порядок материалов.
-            rename_map: {orig_material_lower: new_name}. Ключи в нижнем регистре.
+                        если группы не было) - порядок столбцов = порядок материалов.
+            rename_map: {orig_material_lower: new_name}. Ключи в нижнем регистре
 
         Returns:
-            Текст блока `$texturegroup` (с \n) или '' если переименовывать нечего.
+            Текст блока `$texturegroup` (с \n) или '' если переименовывать нечего
         """
         if not rows:
             return ''
@@ -415,7 +415,7 @@ class ModelBuildService:
         lines = ['$texturegroup "skinfamilies"', '{']
         for row in rows:
             names = [rm.get(m.lower(), m) for m in row]
-            # Source приводит пути материалов к lowercase; файлы пишем тоже в lower.
+            # Source приводит пути материалов к lowercase; файлы пишем тоже в lower
             row_txt = ' '.join(f'"{n.lower()}"' for n in names)
             lines.append(f'\t{{ {row_txt} }}')
         lines.append('}')
@@ -424,9 +424,9 @@ class ModelBuildService:
     @staticmethod
     def extract_skin_info(qc_path: str) -> dict:
         """
-        Читает $texturegroup игрового QC и возвращает инфу о скинах — для UI
+        Читает $texturegroup игрового QC и возвращает инфу о скинах - для UI
         (вкладки) и генерации. Padding-дубли схлопнуты, варианты
-        (_gold/_festive…) скинами не считаются.
+        (_gold/_festive…) скинами не считаются
 
         Returns:
             {
@@ -446,20 +446,20 @@ class ModelBuildService:
             'has_australium': bool(layout.variants),
             'rows': layout.all_rows,
             # Можно ли «сделать командным», не стерев стиль второй строки
-            # (кровь тесака) — то же правило, по которому пишет сборка.
+            # (кровь тесака) - то же правило, по которому пишет сборка
             'team_pairs_free': qc_skin_parser.team_pairs_free(layout.all_rows),
-            # Полный список скинов (база+команда+варианты) с сырыми индексами —
-            # для кастомной модели (показ всех групп как переопределяемых стилей).
+            # Полный список скинов (база+команда+варианты) с сырыми индексами -
+            # для кастомной модели (показ всех групп как переопределяемых стилей)
             'skins': layout.skins,
-            # Доп. косметические стили (bloody/clean) — (подпись, сырой_индекс).
+            # Доп. косметические стили (bloody/clean) - (подпись, сырой_индекс).
             # Для стокового оружия полосу стилей показываем ТОЛЬКО когда тут не пусто
-            # (иначе у команды/австралия конфликт с их тумблерами).
+            # (иначе у команды/австралия конфликт с их тумблерами)
             'styles': spec.styles,
         }
 
     @staticmethod
     def _strip_texturegroup(content: str) -> str:
-        """Удаляет блок $texturegroup { ... } из текста QC (с учётом вложенности)."""
+        """Удаляет блок $texturegroup { ... } из текста QC (с учётом вложенности)"""
         m = re.search(r'(?im)^[ \t]*\$texturegroup\b', content)
         if not m:
             return content
@@ -487,14 +487,14 @@ class ModelBuildService:
     @staticmethod
     def replace_texturegroup_in_qc(qc_path: str, new_block: str) -> bool:
         """
-        Заменяет $texturegroup в QC на сгенерированный (или удаляет, если new_block пуст).
+        Заменяет $texturegroup в QC на сгенерированный (или удаляет, если new_block пуст)
 
         Только для КАСТОМНЫХ моделей: исходная группа ссылается на игровые имена
-        материалов, которых нет в меше пользователя — её надо убрать/заменить,
-        иначе studiomdl ругается на висящие материалы. Пустой new_block → модель
-        одно-скиновая (без группы, что валидно).
+        материалов, которых нет в меше пользователя - её надо убрать/заменить,
+        иначе studiomdl ругается на висящие материалы. Пустой new_block -> модель
+        одно-скиновая (без группы, что валидно)
 
-        Returns True, если файл изменён.
+        Returns True, если файл изменён
         """
         if not os.path.exists(qc_path):
             return False
@@ -510,7 +510,7 @@ class ModelBuildService:
     @staticmethod
     def replace_texturegroup_in_text(content: str, new_block: str) -> str:
         """Строковая версия replace_texturegroup_in_qc: вырезает старую группу и
-        вставляет new_block после $modelname (или убирает, если блок пуст)."""
+        вставляет new_block после $modelname (или убирает, если блок пуст)"""
         content = ModelBuildService._strip_texturegroup(content)
         if new_block and new_block.strip():
             # Вставляем после $modelname (texturegroup должен идти после $body/$model)
@@ -527,17 +527,17 @@ class ModelBuildService:
         """
         Возвращает текст QC в том виде, в каком его получает компилятор: пути
         пропатчены под console\\, $lod удалены, $texturegroup заменён на tg_block
-        (или убран, если пуст). Не мутирует исходный файл — работает на копии.
+        (или убран, если пуст). Не мутирует исходный файл - работает на копии
 
         Нужен для редактора QC: пользователь видит ИСПРАВЛЕННЫЙ QC, а не сырой
-        декомпилированный из игры.
+        декомпилированный из игры
         """
         from src.shared.file_utils import get_temp_file_path
         if not src_qc_path or not os.path.exists(src_qc_path):
             return ''
         tmp = str(get_temp_file_path(prefix='tf2sg_qcedit_', suffix='.qc'))
         try:
-            # Превью показывает QC с реальной папкой обхода (как в сборке).
+            # Превью показывает QC с реальной папкой обхода (как в сборке)
             from src.config.app_config import AppConfig
             from src.shared.constants import bypass_prefix
             _bp = bypass_prefix(AppConfig.load_config().get('sv_pure_bypass', 'console'))
@@ -560,25 +560,25 @@ class ModelBuildService:
 
     @staticmethod
     def extract_bodygroup_groups(qc_path: str) -> List[List[Optional[str]]]:
-        """Варианты каждой бодигруппы QC — без имён (см. extract_bodygroups)."""
+        """Варианты каждой бодигруппы QC - без имён (см. extract_bodygroups)"""
         return [variants for _, variants in ModelBuildService.extract_bodygroups(qc_path)]
 
     @staticmethod
     def extract_bodygroups(qc_path: str) -> List[Tuple[str, List[Optional[str]]]]:
         """
-        Бодигруппы QC с именами: [(имя, варианты)] в порядке объявления.
+        Бодигруппы QC с именами: [(имя, варианты)] в порядке объявления
 
-        `$bodygroup "shell" { studio "shell.smd" blank }` — это ПЕРЕКЛЮЧАТЕЛЬ:
+        `$bodygroup "shell" { studio "shell.smd" blank }` - это ПЕРЕКЛЮЧАТЕЛЬ:
         игра показывает ровно один вариант, по умолчанию нулевой. Для превью
         это важно: сложить все варианты в одну модель значит показать целую
-        бутылку и разбитую разом (в стоке так устроены 36 пушек из 295 — shell
+        бутылку и разбитую разом (в стоке так устроены 36 пушек из 295 - shell
         у сигнальных, reload у гранатомётов, broken у бутылки, bites у сэндвича
-        — и 6 шапок вроде id_badge с девятью классовыми вариантами).
+        - и 6 шапок вроде id_badge с девятью классовыми вариантами)
 
         Returns:
-            Список групп; каждая группа — список вариантов в порядке QC, где
+            Список групп, каждая группа - список вариантов в порядке QC, где
             вариант это путь к SMD либо None для `blank` (пустой вариант).
-            Порядок групп — как в файле, поэтому первая обычно основное тело.
+            Порядок групп - как в файле, поэтому первая обычно основное тело
         """
         if not os.path.exists(qc_path):
             return []
@@ -593,18 +593,18 @@ class ModelBuildService:
         for m in re.finditer(r'\$(?:bodygroup|body)\b', content, re.IGNORECASE):
             line_end = content.find('\n', m.end())
             head = content[m.end():line_end if line_end != -1 else len(content)]
-            # Имя группы — первая строка в кавычках после ключевого слова
-            # (`$bodygroup "broken"`); без него группа зовётся по номеру.
+            # Имя группы - первая строка в кавычках после ключевого слова
+            # (`$bodygroup "broken"`), без него группа зовётся по номеру
             named = re.match(r'\s*"([^"]*)"', head)
             name = (named.group(1).strip() if named and not named.group(1).lower().endswith('.smd')
                     else '') or f'group{len(groups)}'
-            # Однострочная форма: $body studio "x.smd" — блока нет
+            # Однострочная форма: $body studio "x.smd" - блока нет
             inline = re.search(r'studio\s+"([^"]+\.smd)"', head, re.IGNORECASE)
             if inline:
                 groups.append((name, [os.path.join(qc_dir, inline.group(1))]))
                 continue
             # Блочная форма: '{' обычно на СЛЕДУЮЩЕЙ строке (так пишет Crowbar).
-            # Между заголовком и скобкой не должно быть другой директивы.
+            # Между заголовком и скобкой не должно быть другой директивы
             brace = content.find('{', m.end())
             if brace == -1 or '$' in content[m.end():brace]:
                 continue
@@ -629,14 +629,14 @@ class ModelBuildService:
         return groups
 
     #: Бодигруппы-снаряды: заряженный в оружие снаряд (граната у гранатомётов
-    #: демомана, ракета у сигнальных, стрела у луков). Пусто | снаряд; игра
+    #: демомана, ракета у сигнальных, стрела у луков). Пусто | снаряд, игра
     #: включает снаряд сама и только в первом лице, на перезарядке
-    #: (c_demo_animations: loch_reload_* → "reload 1" … "reload 0").
+    #: (c_demo_animations: loch_reload_* -> "reload 1" … "reload 0")
     PROJECTILE_BODYGROUPS = frozenset({'reload', 'shell', 'arrow'})
 
     @staticmethod
     def projectile_variant(name: str, variants: List[Optional[str]]) -> Optional[int]:
-        """Номер варианта со снарядом у группы-снаряда (пусто | снаряд), иначе None."""
+        """Номер варианта со снарядом у группы-снаряда (пусто | снаряд), иначе None"""
         if (name or '').lower() not in ModelBuildService.PROJECTILE_BODYGROUPS:
             return None
         filled = [i for i, v in enumerate(variants) if v]
@@ -646,8 +646,8 @@ class ModelBuildService:
     def preview_choice(groups: List[Tuple[str, List[Optional[str]]]],
                        choice: Optional[Dict[str, int]] = None) -> Dict[str, int]:
         """Выбор вариантов для кадра предмета: снаряд виден, пока его не
-        скрыли, — его правят, а в игре он мелькает только при перезарядке.
-        Вид от первого лица этим не пользуется: там всё как в игре."""
+        скрыли, - его правят, а в игре он мелькает только при перезарядке.
+        Вид от первого лица этим не пользуется: там всё как в игре"""
         out = dict(choice or {})
         for name, variants in groups:
             shown = ModelBuildService.projectile_variant(name, variants)
@@ -661,8 +661,8 @@ class ModelBuildService:
         """
         SMD выбранных вариантов бодигрупп: по умолчанию нулевой из каждой
         группы (его показывает игра, пока группу не переключили), либо тот,
-        что назвал ``choice`` {имя группы: номер}. `blank` — группа не
-        рисуется. Служебные SMD (physics/anim) отбрасываются.
+        что назвал ``choice`` {имя группы: номер}. `blank` - группа не
+        рисуется. Служебные SMD (physics/anim) отбрасываются
         """
         choice = choice or {}
         out: List[str] = []
@@ -671,7 +671,7 @@ class ModelBuildService:
             index = choice.get(name, 0)
             picked = variants[index] if 0 <= index < len(variants) else None
             if not picked:
-                continue                      # blank — вариант ничего не рисует
+                continue                      # blank - вариант ничего не рисует
             low = os.path.basename(picked).lower()
             if any(skip in low for skip in NON_REFERENCE_SMD_KEYWORDS):
                 continue
@@ -684,16 +684,16 @@ class ModelBuildService:
     @staticmethod
     def extract_all_mesh_smds(qc_path: str) -> List[str]:
         """
-        ВСЕ меши модели: `$model`, `$body`, все варианты `$bodygroup`.
+        ВСЕ меши модели: `$model`, `$body`, все варианты `$bodygroup`
 
         Нужно там, где важно «из чего вообще состоит модель», а не «что видно
         по умолчанию»: например, чтобы посчитать, какой материал её покрывает.
         Косметика часто объявляет единственный меш через `$model` (в кэше
         декомпиляции таких QC каждый шестой), и разбор одних бодигрупп на них
-        не находит ничего.
+        не находит ничего
 
         Служебные SMD (physics/anim/pose) отбрасываются, порядок сохранён,
-        дубли убраны. Несуществующие файлы не возвращаются.
+        дубли убраны. Несуществующие файлы не возвращаются
         """
         out: List[str] = []
         seen = set()
@@ -713,7 +713,7 @@ class ModelBuildService:
             for variant in variants:
                 add(variant)
 
-        # $model "Body" "hat.smd" { ... } — одиночный меш без бодигруппы
+        # $model "Body" "hat.smd" { ... } - одиночный меш без бодигруппы
         try:
             with open(qc_path, 'r', encoding='utf-8', errors='replace') as f:
                 content = f.read()
@@ -729,8 +729,8 @@ class ModelBuildService:
     def extract_default_body_smds(qc_path: str,
                                   choice: Optional[Dict[str, int]] = None) -> List[str]:
         """
-        SMD, которые игра показывает при бодигруппах по умолчанию — либо при
-        выбранных ``choice`` {имя группы: номер варианта} (см. chosen_body_smds).
+        SMD, которые игра показывает при бодигруппах по умолчанию - либо при
+        выбранных ``choice`` {имя группы: номер варианта} (см. chosen_body_smds)
         """
         return ModelBuildService.chosen_body_smds(
             ModelBuildService.extract_bodygroups(qc_path), choice)
@@ -738,7 +738,7 @@ class ModelBuildService:
     @staticmethod
     def extract_extra_body_smds(qc_path: str, weapon_key: str) -> List[str]:
         """
-        Находит дополнительные SMD файлы (bodygroup) в QC файле.
+        Находит дополнительные SMD файлы (bodygroup) в QC файле
         
         При декомпиляции MDL через Crowbar получаются несколько SMD:
         - Основной: c_flaregun_reference.smd (основное тело оружия)
@@ -752,7 +752,7 @@ class ModelBuildService:
             blank
         }
         
-        Метод возвращает пути к дополнительным SMD (не основному body).
+        Метод возвращает пути к дополнительным SMD (не основному body)
         
         Args:
             qc_path: Путь к QC файлу
@@ -781,9 +781,9 @@ class ModelBuildService:
         main_smd_name = None
 
         # У персонажей (и части моделей) основной body задаётся через $model/$body,
-        # БЕЗ ключевого слова studio — значит его нет в all_smd_refs, и брать первую
+        # БЕЗ ключевого слова studio - значит его нет в all_smd_refs, и брать первую
         # studio-ссылку за основную нельзя (иначе bodygroup вроде demo_smiley.smd
-        # ошибочно считается основным телом и отбрасывается из доп. SMD).
+        # ошибочно считается основным телом и отбрасывается из доп. SMD)
         body_dir = re.search(r'\$(?:model|body)\b[^\n{]*?"([^"]+\.smd)"',
                              content, re.IGNORECASE)
         if body_dir:
@@ -845,24 +845,24 @@ class ModelBuildService:
     @staticmethod
     def extract_main_body_smd(qc_path: str, weapon_key: str) -> Optional[str]:
         """
-        Возвращает абсолютный путь к основному reference-SMD, который QC передаёт компилятору.
+        Возвращает абсолютный путь к основному reference-SMD, который QC передаёт компилятору
 
-        Читает директивы $body / studio из QC файла напрямую — это надёжнее поиска по
-        имени файла (weapon_key), т.к. Crowbar может назвать SMD иначе чем мы ожидаем.
+        Читает директивы $body / studio из QC файла напрямую - это надёжнее поиска по
+        имени файла (weapon_key), т.к. Crowbar может назвать SMD иначе чем мы ожидаем
 
         Алгоритм выбора «основного» SMD (в порядке убывания приоритета):
           1. Первый studio-ссылка сразу после $body (однострочный формат).
           2. Первый studio-ссылка, содержащий weapon_key + "_reference".
           3. Первый studio-ссылка, содержащий weapon_key.
           4. Первый studio-ссылка с "_reference" в имени.
-          5. Самый первый studio-ссылка в файле.
+          5. Самый первый studio-ссылка в файле
 
         Args:
             qc_path:    Путь к QC файлу (может быть не пропатчен).
-            weapon_key: Ключ оружия / шапки (используется для приоритизации).
+            weapon_key: Ключ оружия / шапки (используется для приоритизации)
 
         Returns:
-            Абсолютный путь к SMD-файлу или None если не найдено.
+            Абсолютный путь к SMD-файлу или None если не найдено
         """
         if not os.path.exists(qc_path):
             return None
@@ -877,14 +877,14 @@ class ModelBuildService:
             p = os.path.join(qc_dir, ref)
             return p if os.path.exists(p) else None
 
-        # Приоритет 1: основной body, заданный директивой $body / $model — в т.ч.
+        # Приоритет 1: основной body, заданный директивой $body / $model - в т.ч.
         # формат с именем bodygroup: $model "name" "ref.smd". Используем ТОТ ЖЕ
         # паттерн, что и extract_extra_body_smds ([^\n{]*? перешагивает кавычки),
         # чтобы обе функции согласованно определяли основной SMD. Иначе у шапок с
         # телом через $model основная геометрия заменяется не в том SMD (или не
         # заменяется вовсе), а реальное тело остаётся оригинальным.
-        # ВАЖНО: проверяем ДО guard'а на studio-ссылки — у простой модели без
-        # $bodygroup ключевого слова studio вовсе нет, но $body/$model есть.
+        # ВАЖНО: проверяем ДО guard'а на studio-ссылки - у простой модели без
+        # $bodygroup ключевого слова studio вовсе нет, но $body/$model есть
         body_dir = re.search(r'\$(?:model|body)\b[^\n{]*?"([^"]+\.smd)"',
                              content, re.IGNORECASE)
         if body_dir:
@@ -924,8 +924,8 @@ class ModelBuildService:
     def _qc_has_unsafe_flex(lines) -> bool:
         """True, если в QC есть flexcontroller с операторным символом (+ - * /) в
         имени. Crowbar декомпилирует такие имена буквально (напр. 'CloseLidLoL+
-        CloseLidLoR'), но studiomdl парсит '+' как сложение → 'unknown controller'.
-        Любой такой контроллер делает flex-секцию некомпилируемой → её надо вырезать.
+        CloseLidLoR'), но studiomdl парсит '+' как сложение -> 'unknown controller'.
+        Любой такой контроллер делает flex-секцию некомпилируемой -> её надо вырезать
         """
         pat = re.compile(r'^\s*flexcontroller\s+(\S+)', re.IGNORECASE)
         for l in lines:
@@ -936,12 +936,12 @@ class ModelBuildService:
 
     @staticmethod
     def apply_cdmaterials_prefix(original_path: str, bypass_prefix: str = "console") -> str:
-        """Перенаправляет один путь $cdmaterials в whitelisted-папку обхода sv_pure.
+        """Перенаправляет один путь $cdmaterials в whitelisted-папку обхода sv_pure
 
-        bypass_prefix — папка обхода ('console' или 'vgui\\replay\\thumbnails').
-        Если путь уже под этой папкой — оставляем как есть; если под console\\
-        (его добавляет Crowbar при декомпиляции), но целевая папка другая —
-        пере-корневаем в целевую. Результат всегда с обратными слешами.
+        bypass_prefix - папка обхода ('console' или 'vgui\\replay\\thumbnails').
+        Если путь уже под этой папкой - оставляем как есть, если под console\\
+        (его добавляет Crowbar при декомпиляции), но целевая папка другая -
+        пере-корневаем в целевую. Результат всегда с обратными слешами
         """
         prefix = bypass_prefix.rstrip("\\/") + "\\"
         norm = original_path.replace("/", "\\")
@@ -951,18 +951,18 @@ class ModelBuildService:
         if low.startswith(pref_low):
             return body                              # уже под нашей папкой
         if low.startswith("console\\"):
-            body = body[len("console\\"):]           # Crowbar-console → в целевую
+            body = body[len("console\\"):]           # Crowbar-console -> в целевую
         return prefix + body
 
     @staticmethod
     def patch_qc_file(qc_path: str, bypass_prefix: str = "console") -> None:
         """
-        Пропатчивает QC файл после декомпиляции.
+        Пропатчивает QC файл после декомпиляции
 
         Нужно чтобы модель правильно компилировалась и текстуры загружались:
         - НЕ трогаем $modelname (оставляем как есть, путь модели должен быть правильным)
         - Перенаправляем $cdmaterials в whitelisted-папку обхода sv_pure
-          (console\\ по умолчанию, либо vgui\\replay\\thumbnails\\ — см.
+          (console\\ по умолчанию, либо vgui\\replay\\thumbnails\\ - см.
           apply_cdmaterials_prefix и SVPURE_BYPASS_PREFIXES)
         - Удаляем все блоки $lod (LOD нам не нужны, только мусорят)
 
@@ -978,18 +978,18 @@ class ModelBuildService:
 
         # Flex-контроллеры с операторными символами (+ - * /) в имени Crowbar
         # декомпилирует буквально, но studiomdl парсит их как выражение и падает
-        # ('unknown controller'). Если такие есть — вырезаем всю flex-секцию
-        # (flexfile/flexcontroller/localvar/%-правила); для косметики флексы не нужны.
+        # ('unknown controller'). Если такие есть - вырезаем всю flex-секцию
+        # (flexfile/flexcontroller/localvar/%-правила), для косметики флексы не нужны
         strip_flex = ModelBuildService._qc_has_unsafe_flex(lines)
         if strip_flex:
             logger.info(
-                "[QC] Обнаружены flex-контроллеры с операторными символами в имени — "
+                "[QC] Обнаружены flex-контроллеры с операторными символами в имени - "
                 "вырезаем flex-секцию (несовместима со studiomdl)"
             )
 
         new_lines: List[str] = []
         # Индекс в new_lines ПОСЛЕ последнего записанного непустого $cdmaterials.
-        # Туда вставим пустой $cdmaterials "" за один проход, без предварительного счёта.
+        # Туда вставим пустой $cdmaterials "" за один проход, без предварительного счёта
         last_cdmat_insert_pos = -1
         i = 0
 
@@ -1055,7 +1055,7 @@ class ModelBuildService:
                     original_path = m.group(1)
                     if not original_path.strip():
                         i += 1
-                        continue  # пустой путь — пропускаем
+                        continue  # пустой путь - пропускаем
 
                     modified_path = ModelBuildService.apply_cdmaterials_prefix(
                         original_path, bypass_prefix)
@@ -1081,9 +1081,9 @@ class ModelBuildService:
     @staticmethod
     def remove_lod_files(decompile_dir: str) -> None:
         """
-        Удаляет все файлы с окончанием .lod<номер> из декомпилированной директории.
+        Удаляет все файлы с окончанием .lod<номер> из декомпилированной директории
         
-        LOD файлы - это уровни детализации, для скинов не нужны, только мусорят.
+        LOD файлы - это уровни детализации, для скинов не нужны, только мусорят
         
         Args:
             decompile_dir: Директория с декомпилированными файлами
@@ -1117,9 +1117,9 @@ class ModelBuildService:
         game_dir_or_gameinfo: str
     ) -> None:
         """
-        Компилирует QC файл в .mdl через studiomdl.
+        Компилирует QC файл в .mdl через studiomdl
         
-        studiomdl - это официальный компилятор Source, без него никак.
+        studiomdl - это официальный компилятор Source, без него никак
         
         Args:
             qc_path: Путь к QC файлу
@@ -1149,11 +1149,11 @@ class ModelBuildService:
             game_arg, os.path.abspath(game_dir_or_gameinfo),
             "-nop4",
             "-nopack",
-            "-quiet",           # Подавляем вывод прогресса — studiomdl тратит время на буферизацию stdout
+            "-quiet",           # Подавляем вывод прогресса - studiomdl тратит время на буферизацию stdout
             os.path.abspath(qc_path)
         ]
         
-        # Запускаем без capture_output на happy path — быстрее, т.к. нет буферизации stdout/stderr
+        # Запускаем без capture_output на happy path - быстрее, т.к. нет буферизации stdout/stderr
         try:
             result = subprocess.run(
                 cmd,
@@ -1170,7 +1170,7 @@ class ModelBuildService:
             )
 
         if result.returncode != 0:
-            # На ошибке — перезапускаем с захватом stdout для диагностики
+            # На ошибке - перезапускаем с захватом stdout для диагностики
             result2 = subprocess.run(
                 [c for c in cmd if c != "-quiet"],
                 capture_output=True,

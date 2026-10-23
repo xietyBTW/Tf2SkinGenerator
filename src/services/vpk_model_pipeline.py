@@ -1,12 +1,12 @@
 """
-Модельный конвейер VPK-сборки (вынесено из VPKService).
+Модельный конвейер VPK-сборки (вынесено из VPKService)
 
 Поиск/подбор .mdl, разрешение SMD замены модели, получение декомпилированного
 QC, применение замены модели, сборка доп. классовых/стилевых моделей шапок,
 копирование прекомпилированных моделей и запуск компиляции. Извлечено
 extract-class из ``VPKService``; методы статические, внутренние вызовы
 переиспользуют этот класс, вторичная текстура идёт в ``texture_build.panel_extras``,
-копирование скомпилированных моделей — напрямую в ``ModelService``.
+копирование скомпилированных моделей - напрямую в ``ModelService``
 """
 
 import os
@@ -15,10 +15,11 @@ from pathlib import Path
 from typing import Iterable, List, Optional, Tuple
 
 from src.services.debug_service import DebugService
-from src.services.decompile_cache import get_cached_decompile, restore_from_cache, save_to_cache
+from src.services import model_decompile_service as mds
 from src.services import qc_skin_parser
 from src.services.model_build_service import ModelBuildService
 from src.services.model_service import ModelService
+from src.services import smd_service
 from src.services.smd_service import SMDService
 from src.services.tf2_paths import build_hat_mdl_candidates
 from src.services.tf2_vpk_extract_service import TF2VPKExtractService
@@ -37,10 +38,10 @@ logger = get_logger(__name__)
 
 def texture_slot_key(cdmaterials_path: str, material: str) -> str:
     """
-    Ключ «куда ляжет файл текстуры»: папка обхода + имя материала.
+    Ключ «куда ляжет файл текстуры»: папка обхода + имя материала
 
     Нормализует слэши и регистр: путь приходит и в QC-виде (обратные слэши),
-    и в VPK-виде (прямые), а на диске это один и тот же файл.
+    и в VPK-виде (прямые), а на диске это один и тот же файл
     """
     cd = (cdmaterials_path or "").replace(chr(92), "/").strip().strip("/")
     name = (material or "").replace(chr(92), "/").strip("/")
@@ -48,7 +49,7 @@ def texture_slot_key(cdmaterials_path: str, material: str) -> str:
 
 
 class VpkModelPipeline:
-    """Модельный конвейер VPK-сборки (см. модуль)."""
+    """Модельный конвейер VPK-сборки (см. модуль)"""
 
     @staticmethod
     def _build_mdl_search_paths(
@@ -59,23 +60,23 @@ class VpkModelPipeline:
         tf2_root: Optional[str] = None,
     ) -> Tuple[List[str], Optional[str]]:
         """
-        Строит список путей-кандидатов к MDL внутри игрового VPK.
+        Строит список путей-кандидатов к MDL внутри игрового VPK
 
         TF2 хранит модели в разных местах (workshop / workshop_partner /
         weapons/c_models / c_items / player/items), поэтому пробуем все
-        вероятные варианты по порядку.
+        вероятные варианты по порядку
 
         Returns:
-            (paths_to_try, error). error != None — фатальная ошибка режима
+            (paths_to_try, error). error != None - фатальная ошибка режима
             (нет mdl_path для персонажа или оружие не найдено в конфиге);
-            вызывающий код должен очистить ctx и вернуть ошибку.
+            вызывающий код должен очистить ctx и вернуть ошибку
         """
-        # ── Шапка: путь из items_game.txt, возможно с %s-плейсхолдером ──── #
+        # Шапка: путь из items_game.txt, возможно с %s-плейсхолдером
         if mode == "hat" and hat_mdl_path:
             # Единая логика кандидатов (%s, workshop-варианты, суффиксы класса)
             return build_hat_mdl_candidates(hat_mdl_path), None
 
-        # ── Тело персонажа / маски шпиона: прямой путь к MDL ────────────── #
+        # Тело персонажа / маски шпиона: прямой путь к MDL
         if mode in PLAYER_BODY_MODE_KEYS or mode == SPY_MASK_MODE_KEY:
             if mode == SPY_MASK_MODE_KEY:
                 _char_mdl = SPY_MDL_PATH
@@ -86,7 +87,7 @@ class VpkModelPipeline:
                 return [], f"No mdl_path defined for character mode: {mode}"
             return [_char_mdl], None
 
-        # ── Обычное оружие: пробуем все вероятные места хранения ─────────── #
+        # Обычное оружие: пробуем все вероятные места хранения
         if weapon_key not in WEAPON_MDL_PATHS:
             return [], t['error_weapon_not_found'].format(weapon_key=weapon_key)
 
@@ -95,8 +96,8 @@ class VpkModelPipeline:
         _flat_suffix = f"/{weapon_key}.mdl"
         paths_to_try = []
 
-        # Точный путь из items_game.txt (авторитетный) — первым кандидатом.
-        # Убирает зависимость от угадывания папок/префиксов и ручных оверрайдов.
+        # Точный путь из items_game.txt (авторитетный) - первым кандидатом.
+        # Убирает зависимость от угадывания папок/префиксов и ручных оверрайдов
         if tf2_root:
             try:
                 from src.data.weapon_model_index import resolve_weapon_mdl
@@ -106,7 +107,7 @@ class VpkModelPipeline:
             except Exception as _e:
                 logger.debug(f"weapon index: {_e}")
 
-        # workshop_partner → workshop → стандарт → c_items: путь с папкой и без
+        # workshop_partner -> workshop -> стандарт -> c_items: путь с папкой и без
         for _candidate in (
             base_path.replace("models/weapons/", "models/workshop_partner/weapons/"),
             base_path.replace("models/weapons/", "models/workshop/weapons/"),
@@ -117,7 +118,7 @@ class VpkModelPipeline:
             if _folder_suffix in _candidate:
                 paths_to_try.append(_candidate.replace(_folder_suffix, _flat_suffix))
 
-        # Последний шанс — папки классов (там обычно старьё)
+        # Последний шанс - папки классов (там обычно старьё)
         if '_' in mode:
             class_name_lower = mode.split('_', 1)[0]
             paths_to_try.append(f"models/player/items/{class_name_lower}/{weapon_key}/{weapon_key}.mdl")
@@ -133,13 +134,13 @@ class VpkModelPipeline:
         t: dict,
     ) -> Tuple[Optional[str], Optional[str]]:
         """
-        Ищет первый существующий MDL среди путей-кандидатов внутри VPK.
+        Ищет первый существующий MDL среди путей-кандидатов внутри VPK
 
-        Только проверяет наличие (check_mdl_exists), не распаковывая файлы —
-        так быстрее, чем тащить всю папку.
+        Только проверяет наличие (check_mdl_exists), не распаковывая файлы -
+        так быстрее, чем тащить всю папку
 
         Returns:
-            (found_path, error). Ровно одно из значений не None.
+            (found_path, error). Ровно одно из значений не None
         """
         last_error = None
         for mdl_rel_path in paths_to_try:
@@ -168,15 +169,15 @@ class VpkModelPipeline:
         model_file_callback,
     ) -> Optional[str]:
         """
-        Определяет путь к пользовательскому SMD для режима «замена модели».
+        Определяет путь к пользовательскому SMD для режима «замена модели»
 
-        Источники по приоритету: прямой путь (тесты) → callback (UI-поток).
+        Источники по приоритету: прямой путь (тесты) -> callback (UI-поток).
         Возвращает None, если режим выключен, задан model_ready_path или
-        пользователь отменил выбор.
+        пользователь отменил выбор
 
-        Своего диалога здесь нет намеренно: показывать окна — дело слоя UI,
-        а сборка идёт в фоновом потоке. Кому нужен выбор файла — передаёт
-        model_file_callback, который UI исполняет в своём потоке.
+        Своего диалога здесь нет намеренно: показывать окна - дело слоя UI,
+        а сборка идёт в фоновом потоке. Кому нужен выбор файла - передаёт
+        model_file_callback, который UI исполняет в своём потоке
         """
         if not replace_model_enabled or model_ready_path:
             return None
@@ -186,7 +187,7 @@ class VpkModelPipeline:
             return replace_model_path
 
         if model_file_callback:
-            # Qt не любит UI из рабочего потока — запрашиваем файл через callback главного потока
+            # Файл спрашиваем у страницы через callback
             file_path = model_file_callback()
             if file_path and os.path.exists(file_path):
                 logger.info(f"Выбран файл для замены модели через callback: {file_path}")
@@ -201,15 +202,15 @@ class VpkModelPipeline:
     @staticmethod
     def _find_decompiled_reference_smd(qc_path: str, weapon_key: str, decompile_dir) -> Optional[str]:
         """
-        Находит основной reference-SMD декомпилированной модели.
+        Находит основной reference-SMD декомпилированной модели
 
-        Сначала через QC-директивы ($body/studio) — надёжнее, т.к. Crowbar
+        Сначала через QC-директивы ($body/studio) - надёжнее, т.к. Crowbar
         может назвать SMD иначе, чем weapon_key (особенно для шапок).
-        Иначе — запасной поиск по имени файла.
+        Иначе - запасной поиск по имени файла
         """
         smd = ModelBuildService.extract_main_body_smd(qc_path, weapon_key)
         if not smd:
-            smd = SMDService.find_reference_smd(str(decompile_dir), weapon_key)
+            smd = smd_service.find_reference_smd(str(decompile_dir), weapon_key)
         return smd
 
     @staticmethod
@@ -218,52 +219,33 @@ class VpkModelPipeline:
         found_mdl_path: str,
         weapon_key: str,
         tf2_misc_vpk: str,
-        crowbar_exe: str,
         debug_mode: bool,
         language: str,
         t: dict,
         emit_sub,
-    ) -> Tuple[Optional[str], bool, Optional[str]]:
+    ) -> Tuple[Optional[str], Optional[str]]:
         """
-        Возвращает QC-файл декомпилированной модели.
-
-        Сначала пытается восстановить из кэша (cache hit — пропускает
-        распаковку и Crowbar). Иначе извлекает MDL-набор из VPK и
-        декомпилирует через Crowbar.
+        QC декомпилированной модели в ctx.decompile_dir: из кэша или после
+        Crowbar (общий путь с превью, см. model_decompile_service)
 
         Returns:
-            (qc_path, was_cached, error). error != None → фатальная ошибка
-            (MDL не извлёкся); вызывающий код чистит ctx и возвращает ошибку.
+            (qc_path, error). error != None -> фатальная ошибка, вызывающий
+            код чистит ctx и возвращает ошибку
         """
-        cached_decompile = get_cached_decompile(weapon_key, tf2_misc_vpk, found_mdl_path)
-        if cached_decompile:
-            # CACHE HIT — пропускаем extraction и decompile
-            emit_sub(-1, "Restoring cache..." if language == "en" else "Восстановление кэша...")
-            qc_path = restore_from_cache(cached_decompile, ctx.decompile_dir)
-            return qc_path, True, None
-
-        # CACHE MISS — извлекаем и декомпилируем
-        emit_sub(-1, "Extracting model..." if language == "en" else "Извлечение модели...")
-        logger.info(f"Извлекаем файлы модели: {found_mdl_path}")
-        extracted_files = TF2VPKExtractService.extract_file_set(
-            tf2_misc_vpk,
-            found_mdl_path,
-            str(ctx.extract_dir),
+        en = language == "en"
+        stage_text = {
+            mds.Stage.EXTRACTING: "Extracting model..." if en else "Извлечение модели...",
+            mds.Stage.DECOMPILING: "Decompiling model..." if en else "Декомпиляция модели...",
+        }
+        qc_path = mds.decompile_into(
+            weapon_key, tf2_misc_vpk, [found_mdl_path], str(ctx.decompile_dir),
+            on_progress=lambda stage: emit_sub(-1, stage_text[stage]),
         )
-
-        mdl_file = next((f for f in extracted_files if f.endswith('.mdl')), None)
-        if not mdl_file:
-            return None, False, t['error_mdl_not_extracted'].format(path=found_mdl_path)
-
-        if debug_mode:
-            DebugService.save_extracted_stage(ctx, extracted_files)
-
-        emit_sub(-1, "Decompiling model..." if language == "en" else "Декомпиляция модели...")
-        logger.info(f"Запускаем Crowbar для {weapon_key}...")
-        qc_path = ModelBuildService.decompile(mdl_file, ctx.decompile_dir, crowbar_exe)
+        if not qc_path:
+            return None, t['error_mdl_not_extracted'].format(path=found_mdl_path)
         if debug_mode:
             DebugService.save_decompiled_stage(ctx, ctx.decompile_dir)
-        return qc_path, False, None
+        return qc_path, None
 
     @staticmethod
     def _apply_model_replacement(
@@ -278,22 +260,22 @@ class VpkModelPipeline:
         part_models: Optional[dict] = None,
     ) -> None:
         """
-        Применяет пользовательскую замену модели поверх декомпилированных SMD.
+        Применяет пользовательскую замену модели поверх декомпилированных SMD
 
-        1. Главный reference-SMD: nodes/skeleton/материалы — из оригинала,
-           данные треугольников — из пользовательского файла.
+        1. Главный reference-SMD: nodes/skeleton/материалы - из оригинала,
+           данные треугольников - из пользовательского файла.
         2. Доп. части (shell, scope и т.п.): своя модель из сеанса
-           (part_models — снаряд в оружии, он и без своей модели оружия),
-           иначе вопрос через extra_model_callback; замена по тому же принципу.
+           (part_models - снаряд в оружии, он и без своей модели оружия),
+           иначе вопрос через extra_model_callback; замена по тому же принципу
 
-        Ошибки замены не прерывают сборку — логируются, сборка продолжается
-        с оригинальной моделью.
+        Ошибки замены не прерывают сборку - логируются, сборка продолжается
+        с оригинальной моделью
         """
         if replace_model_smd_path and os.path.exists(replace_model_smd_path):
             try:
                 # Ищем основной reference-SMD через QC-директивы ($body/studio).
                 # Это надёжнее поиска по имени файла, т.к. Crowbar может назвать SMD
-                # иначе чем weapon_key (особенно для шапок).
+                # иначе чем weapon_key (особенно для шапок)
                 _smd_files_in_decompile = [f for f in os.listdir(ctx.decompile_dir) if f.endswith('.smd')] if ctx.decompile_dir.exists() else []
                 logger.info(f"[REPLACE] weapon_key={weapon_key!r}  decompile SMDs={_smd_files_in_decompile}")
 
@@ -315,8 +297,8 @@ class VpkModelPipeline:
                         keep_user_materials=keep_user_materials,
                     )
                     if keep_user_materials:
-                        # Свои кости модели — в QC, иначе studiomdl свернёт их
-                        # в родителя (кость без анимации ему не нужна).
+                        # Свои кости модели - в QC, иначе studiomdl свернёт их
+                        # в родителя (кость без анимации ему не нужна)
                         ModelBuildService.define_missing_bones(qc_path, original_smd_path)
                     logger.info(
                         f"Модель успешно заменена: {original_smd_path} "
@@ -338,7 +320,7 @@ class VpkModelPipeline:
                 )
                 # Не прерываем сборку, просто продолжаем с оригинальной моделью (лучше так, чем упасть)
                     
-        # === Замена дополнительных частей модели (shell, scope и т.д.) ===
+        # Замена дополнительных частей модели (shell, scope и т.д.)
         # Проверяем, есть ли в QC файле дополнительные bodygroup SMD
         extra_body_smds = ModelBuildService.extract_extra_body_smds(qc_path, weapon_key)
         if extra_body_smds:
@@ -383,7 +365,6 @@ class VpkModelPipeline:
         keep_user_materials: bool,
         tf2_misc_vpk: str,
         studiomdl_exe: str,
-        crowbar_exe: str,
         tf_dir: str,
         language: str,
         emit_sub,
@@ -394,34 +375,34 @@ class VpkModelPipeline:
         part_names: Iterable[str] = (),
     ) -> None:
         """
-        Собирает модель для остальных классов мультиклассовой шапки при замене модели.
+        Собирает модель для остальных классов мультиклассовой шапки при замене модели
 
         Основная сборка компилирует модель только одного класса. У мультиклассовых
-        шапок каждый класс — отдельная MDL со СВОИМ скелетом (bonemerge), поэтому
+        шапок каждый класс - отдельная MDL со СВОИМ скелетом (bonemerge), поэтому
         просто скопировать модель одного класса на путь другого нельзя (съедет). Для
         каждого ОСТАЛЬНОГО класса декомпилируем его MDL, вставляем геометрию
         пользователя (скелет берём класса), компилируем и кладём в VPK по его
-        $modelname.
+        $modelname
 
         Источник списка путей:
-          • target_mdl_paths — явные MDL-пути остальных классов (model_player_per_class
-            с произвольными путями; основной режим — выбор классов в UI);
-          • иначе — legacy %s-шаблон в hat_mdl_path, раскрытый по всем классам.
+          • target_mdl_paths - явные MDL-пути остальных классов (model_player_per_class
+            с произвольными путями, основной режим - выбор классов в UI);
+          • иначе - legacy %s-шаблон в hat_mdl_path, раскрытый по всем классам
 
-        Ошибки одного класса не валят сборку — этот класс просто останется с
-        оригинальной игровой моделью.
+        Ошибки одного класса не валят сборку - этот класс просто останется с
+        оригинальной игровой моделью
 
         Свои материалы частей (part_specs) выбирали на модели основного класса
         (part_source_qc, уже с ними): на модель класса они переносятся по
         участкам текстуры (part_materials.specs_for_other_model). VMT частей
         общие и уже записаны, поэтому имя, которого у основной модели нет
-        (part_names), значит другую раскладку скинов — о нём предупреждаем.
+        (part_names), значит другую раскладку скинов - о нём предупреждаем
         """
         # Модель класса пересобирается ВСЕГДА, даже когда пользователь менял
         # только текстуру: путь к материалам в модели переписывается на папку
         # обхода sv_pure, и класс, чью модель не тронули, продолжает грузить
-        # ОРИГИНАЛЬНУЮ текстуру игры. Раньше сюда заходили только при замене
-        # геометрии — и мод «работал только на одном классе».
+        # ОРИГИНАЛЬНУЮ текстуру игры. Поэтому заходим сюда и без замены
+        # геометрии, иначе мод «работает только на одном классе»
         has_geometry = bool(replace_model_smd_path
                             and os.path.exists(replace_model_smd_path))
         use_explicit = bool(target_mdl_paths)
@@ -430,9 +411,6 @@ class VpkModelPipeline:
 
         import re as _re
         from src.services.tf2_paths import build_hat_mdl_candidates
-        from src.services.decompile_cache import (
-            get_cached_decompile, restore_from_cache,
-        )
 
         _cls_pat = _re.compile(
             r'_(heavy|scout|soldier|pyro|demoman|engineer|medic|sniper|spy)\.mdl$',
@@ -447,8 +425,8 @@ class VpkModelPipeline:
         seen = set()
         if use_explicit:
             # Явные пути остальных классов (основной класс уже собран primary-сборкой).
-            # Пути из model_player_per_class авторитетны — берём как есть, без
-            # суффиксной экспансии (она могла бы подставить модель другого класса).
+            # Пути из model_player_per_class авторитетны - берём как есть, без
+            # суффиксной экспансии (она могла бы подставить модель другого класса)
             for cand in target_mdl_paths:
                 norm = (cand or '').replace('\\', '/').lower()
                 if not norm or norm in seen:
@@ -462,7 +440,7 @@ class VpkModelPipeline:
                 except Exception:
                     continue
         else:
-            # Legacy %s: один существующий MDL на класс (исключая уже собранный).
+            # Legacy %s: один существующий MDL на класс (исключая уже собранный)
             built_cls = _cls_of(built_mdl_path or '')
             seen_cls = {built_cls} if built_cls else set()
             for cand in build_hat_mdl_candidates(hat_mdl_path):
@@ -491,41 +469,24 @@ class VpkModelPipeline:
                 emit_sub(-1, f"Class model: {_lbl}..." if language == "en"
                          else f"Модель класса: {_lbl}...")
                 cls_root = ctx.temp_dir / f"hatcls_{wk}"
-                extract_d = cls_root / "extract"
                 decomp_d = cls_root / "decompile"
                 comp_d = cls_root / "compile"
-                for _d in (extract_d, decomp_d, comp_d):
-                    ensure_directory_exists(_d)
+                ensure_directory_exists(comp_d)
 
-                # QC: из кэша декомпила или свежая декомпиляция.
-                cached = get_cached_decompile(wk, tf2_misc_vpk, mdl_rel)
-                if cached:
-                    qc_p = restore_from_cache(cached, str(decomp_d))
-                else:
-                    extracted = TF2VPKExtractService.extract_file_set(
-                        tf2_misc_vpk, mdl_rel, str(extract_d)
-                    )
-                    mdl_file = next((f for f in extracted if f.endswith('.mdl')), None)
-                    if not mdl_file:
-                        logger.warning(f"[HAT MULTI] {cls}: MDL не извлёкся")
-                        continue
-                    qc_p = ModelBuildService.decompile(mdl_file, str(decomp_d), crowbar_exe)
-                    ModelBuildService.remove_lod_files(str(decomp_d))
-                    save_to_cache(wk, tf2_misc_vpk, mdl_rel, str(decomp_d))
-
+                qc_p = mds.decompile_into(wk, tf2_misc_vpk, [mdl_rel], str(decomp_d))
                 if not qc_p or not os.path.exists(qc_p):
                     logger.warning(f"[HAT MULTI] {cls}: QC не найден")
                     continue
 
                 # Вставляем геометрию пользователя в reference SMD ЭТОГО класса
-                # (скелет/кости — класса, иначе bonemerge съедет). Без своей
-                # геометрии просто перекомпилируем модель класса как есть —
-                # ради пути к материалам.
+                # (скелет/кости - класса, иначе bonemerge съедет). Без своей
+                # геометрии просто перекомпилируем модель класса как есть -
+                # ради пути к материалам
                 if has_geometry:
                     ref_smd = VpkModelPipeline._find_decompiled_reference_smd(
                         qc_p, wk, decomp_d)
                     if not ref_smd:
-                        logger.warning(f"[HAT MULTI] {cls}: reference SMD не найден — пропуск")
+                        logger.warning(f"[HAT MULTI] {cls}: reference SMD не найден - пропуск")
                         continue
                     SMDService.replace_model_sections(
                         replace_model_smd_path, ref_smd, ref_smd,
@@ -539,36 +500,36 @@ class VpkModelPipeline:
                         VpkModelPipeline._class_part_materials(
                             ctx, part_specs, part_source_qc, qc_p, part_names, cls or wk,
                             own_mesh=ref_smd if has_geometry else None)
-                    except Exception as exc:   # noqa: BLE001 — модель класса важнее частей
+                    except Exception as exc:   # noqa: BLE001 - модель класса важнее частей
                         logger.warning(f"[HAT MULTI] {cls or wk}: части не перенесены: {exc}",
                                        exc_info=True)
                         ctx.warn(f"Свои материалы частей не перенесены на модель класса {cls or wk}")
 
-                # Патчим cdmaterials в ту же папку обхода, что и основная модель —
-                # чтобы модель класса нашла нашу текстуру по тому же пути.
+                # Патчим cdmaterials в ту же папку обхода, что и основная модель -
+                # чтобы модель класса нашла нашу текстуру по тому же пути
                 ModelBuildService.patch_qc_file(qc_p, bypass_prefix)
 
                 ModelBuildService.compile(qc_p, str(comp_d), studiomdl_exe, tf_dir)
 
-                # Копируем скомпилированные файлы в VPK по $modelname этого класса.
+                # Копируем скомпилированные файлы в VPK по $modelname этого класса
                 _sub = type('SubCtx', (), {'compile_dir': comp_d, 'vpkroot_dir': ctx.vpkroot_dir})()
                 ModelService.copy_compiled_models_to_vpkroot(_sub, qc_p)
                 logger.info(f"[HAT MULTI] модель класса {cls or wk} собрана и добавлена в мод")
             except Exception as exc:
                 logger.warning(
-                    f"[HAT MULTI] класс {cls}: ошибка сборки модели — класс останется "
+                    f"[HAT MULTI] класс {cls}: ошибка сборки модели - класс останется "
                     f"с оригинальной моделью: {exc}", exc_info=True
                 )
 
     @staticmethod
     def _class_part_materials(ctx, part_specs, source_qc, qc_p, known, label,
                               own_mesh: Optional[str] = None) -> None:
-        """Свои материалы частей — на модель класса мультиклассовой шапки.
+        """Свои материалы частей - на модель класса мультиклассовой шапки
 
-        own_mesh — reference-SMD класса со своей моделью человека: она легла
+        own_mesh - reference-SMD класса со своей моделью человека: она легла
         в каждый класс та же и тем же порядком, и номера частей переносятся
         как есть (сверку `total` делает apply_to_model). Без своей модели
-        сетки классов разные — переносим по UV (specs_for_other_model).
+        сетки классов разные - переносим по UV (specs_for_other_model)
         """
         from src.services import part_materials as _pm
 
@@ -591,7 +552,6 @@ class VpkModelPipeline:
         hat_style_builds: list,
         tf2_misc_vpk: str,
         studiomdl_exe: str,
-        crowbar_exe: str,
         tf_dir: str,
         language: str,
         emit_sub,
@@ -604,25 +564,22 @@ class VpkModelPipeline:
         written_textures: Optional[dict] = None,
     ) -> None:
         """
-        Собирает доп. ИЗМЕНЁННЫЕ стили-модели шапки — каждый со СВОЕЙ моделью и
-        СВОЕЙ текстурой в тот же VPK (накопленные пер-стилевые правки из UI).
+        Собирает доп. ИЗМЕНЁННЫЕ стили-модели шапки - каждый со СВОЕЙ моделью и
+        СВОЕЙ текстурой в тот же VPK (накопленные пер-стилевые правки из UI)
 
         Для каждого стиля и каждой его MDL:
           1. декомпилируем MDL (с кэшем);
-          2. при наличии — вставляем геометрию пользователя (replace_smd) в
+          2. при наличии - вставляем геометрию пользователя (replace_smd) в
              reference SMD этого стиля (скелет берём стиля);
           3. патчим $cdmaterials под console\\ (чтобы модель нашла нашу текстуру);
           4. компилируем и кладём модель в vpkroot по её $modelname;
-          5. пишем текстуру стиля {texture_filename}.vtf + .vmt по console-пути.
+          5. пишем текстуру стиля {texture_filename}.vtf + .vmt по console-пути
 
         Каждый стиль обычно несёт собственное имя текстуры из $texturegroup, так
-        что текстуры стилей не конфликтуют. Ошибки одного стиля не валят сборку.
+        что текстуры стилей не конфликтуют. Ошибки одного стиля не валят сборку
         """
         if not hat_style_builds:
             return
-        from src.services.decompile_cache import (
-            get_cached_decompile, restore_from_cache,
-        )
 
         for entry in hat_style_builds:
             replace_smd = entry.get('replace_smd')
@@ -630,7 +587,7 @@ class VpkModelPipeline:
             img = entry.get('vtf_path') or entry.get('image_path')
             # Стиль-черновик собирается одной своей текстурой: материалы
             # частей переносит только сборка открытого стиля. Молча терять их
-            # нельзя — человек их делал.
+            # нельзя - человек их делал
             if entry.get('part_materials'):
                 ctx.warn("Свои материалы частей неоткрытого стиля в мод не попали: "
                          "их собирает только открытый стиль")
@@ -646,40 +603,23 @@ class VpkModelPipeline:
                     emit_sub(-1, f"Style model: {wk}..." if language == "en"
                              else f"Модель стиля: {wk}...")
                     st_root = ctx.temp_dir / f"hatstyle_{wk}"
-                    extract_d = st_root / "extract"
                     decomp_d = st_root / "decompile"
                     comp_d = st_root / "compile"
-                    for _d in (extract_d, decomp_d, comp_d):
-                        ensure_directory_exists(_d)
+                    ensure_directory_exists(comp_d)
 
-                    # QC: из кэша декомпила или свежая декомпиляция.
-                    cached = get_cached_decompile(wk, tf2_misc_vpk, mdl_norm)
-                    if cached:
-                        qc_p = restore_from_cache(cached, str(decomp_d))
-                    else:
-                        extracted = TF2VPKExtractService.extract_file_set(
-                            tf2_misc_vpk, mdl_norm, str(extract_d)
-                        )
-                        mdl_file = next((f for f in extracted if f.endswith('.mdl')), None)
-                        if not mdl_file:
-                            logger.warning(f"[HAT STYLE] {wk}: MDL не извлёкся")
-                            continue
-                        qc_p = ModelBuildService.decompile(mdl_file, str(decomp_d), crowbar_exe)
-                        ModelBuildService.remove_lod_files(str(decomp_d))
-                        save_to_cache(wk, tf2_misc_vpk, mdl_norm, str(decomp_d))
-
+                    qc_p = mds.decompile_into(wk, tf2_misc_vpk, [mdl_norm], str(decomp_d))
                     if not qc_p or not os.path.exists(qc_p):
                         logger.warning(f"[HAT STYLE] {wk}: QC не найден")
                         continue
 
-                    # Имя текстуры и cdmaterials стиля — ДО патча console\.
+                    # Имя текстуры и cdmaterials стиля - ДО патча console\
                     tex_name = ModelBuildService.extract_texturegroup_filename(qc_p)
                     cdmat0 = ModelBuildService.extract_cdmaterials_path_from_qc(qc_p)
                     if not tex_name or not cdmat0:
-                        logger.warning(f"[HAT STYLE] {wk}: нет texturegroup/cdmaterials — пропуск")
+                        logger.warning(f"[HAT STYLE] {wk}: нет texturegroup/cdmaterials - пропуск")
                         continue
 
-                    # Замена геометрии стиля (если пользователь загрузил свою модель).
+                    # Замена геометрии стиля (если пользователь загрузил свою модель)
                     if replace_smd and os.path.exists(replace_smd):
                         ref_smd = VpkModelPipeline._find_decompiled_reference_smd(qc_p, wk, decomp_d)
                         if ref_smd:
@@ -689,15 +629,15 @@ class VpkModelPipeline:
                             if keep_mat:
                                 ModelBuildService.define_missing_bones(qc_p, ref_smd)
                         else:
-                            logger.warning(f"[HAT STYLE] {wk}: reference SMD не найден — геометрия оригинала")
+                            logger.warning(f"[HAT STYLE] {wk}: reference SMD не найден - геометрия оригинала")
 
-                    # Патчим cdmaterials в папку обхода и компилируем.
+                    # Патчим cdmaterials в папку обхода и компилируем
                     ModelBuildService.patch_qc_file(qc_p, bypass_prefix)
                     ModelBuildService.compile(qc_p, str(comp_d), studiomdl_exe, tf_dir)
                     _sub = type('SubCtx', (), {'compile_dir': comp_d, 'vpkroot_dir': ctx.vpkroot_dir})()
                     ModelService.copy_compiled_models_to_vpkroot(_sub, qc_p)
 
-                    # Текстуры стиля → materials/<папка обхода>/<cdmat0>/
+                    # Текстуры стиля -> materials/<папка обхода>/<cdmat0>/
                     patched_cd = ModelBuildService.apply_cdmaterials_prefix(
                         cdmat0, bypass_prefix)
                     materials_rel = "materials/" + patched_cd.replace('\\', '/').strip().rstrip('/')
@@ -716,7 +656,7 @@ class VpkModelPipeline:
                         logger.info(f"[HAT STYLE] стиль {wk}: модель добавлена (без своей текстуры)")
                 except Exception as exc:
                     logger.warning(
-                        f"[HAT STYLE] {wk}: ошибка сборки стиля — пропуск: {exc}",
+                        f"[HAT STYLE] {wk}: ошибка сборки стиля - пропуск: {exc}",
                         exc_info=True,
                     )
 
@@ -738,21 +678,19 @@ class VpkModelPipeline:
         label: str = "",
     ) -> int:
         """
-        Пишет ВСЕ текстуры одного стиля: каждый его материал и командный вариант.
+        Пишет ВСЕ текстуры одного стиля: каждый его материал и командный вариант
 
-        Раньше стиль получал ровно одну текстуру — главный материал из
-        $texturegroup, — а пер-материальные и BLU-правки пользователя молча
-        терялись: панель их запоминает (`capture_edit_state()['textures']`),
-        метка «изменён» у стиля загоралась, сборка проходила без ошибок, и уже
-        в игре оказывалось, что у стиля заменена только часть. Это не редкость:
+        С одной главной текстурой пер-материальные и BLU-правки молча терялись
+        бы, и только в игре оказывалось бы, что у стиля заменена часть. Это не
+        редкость:
         из 1401 модели стилей в стоке у 605 несколько материалов, у 575 есть
-        команда.
+        команда
 
         Правки пользователя хранятся по имени RED-материала, поэтому синяя
-        картинка пишется под именем ЕГО командной пары из $texturegroup.
+        картинка пишется под именем ЕГО командной пары из $texturegroup
 
         Returns:
-            Сколько текстур записано.
+            Сколько текстур записано
         """
         from src.shared.constants import Team
 
@@ -775,8 +713,8 @@ class VpkModelPipeline:
                 return False
             # Стили одной шапки нередко делят материал (63 шапки в стоке:
             # «Bugscreen Up»/«Bugscreen Down» и т.п.). Тогда РАЗНЫМИ их
-            # текстуры не сделать — в игре у них один файл, и мод молча
-            # оставил бы ту, что записалась последней. Говорим об этом.
+            # текстуры не сделать - в игре у них один файл, и мод молча
+            # оставил бы ту, что записалась последней. Говорим об этом
             key = texture_slot_key(patched_cd, name)
             prev = seen.get(key)
             if prev and os.path.abspath(prev) != os.path.abspath(img) and ctx:
@@ -792,7 +730,7 @@ class VpkModelPipeline:
         written = 0
         for mat in mats:
             low = mat.lower()
-            # Общая картинка стиля достаётся главному материалу — тому, что
+            # Общая картинка стиля достаётся главному материалу - тому, что
             # показан на главной карточке превью
             img = red_edits.get(low)
             if not img and low == (main_tex or '').lower():
@@ -818,7 +756,7 @@ class VpkModelPipeline:
         """
         Копирует pre-compiled модель (.mdl/.vvd/.vtx/.phy) в compile_dir,
         переименовывая под $modelname из QC (а не под имя пользовательского
-        файла) — иначе все файлы мода получат чужое имя. studiomdl не нужен.
+        файла) - иначе все файлы мода получат чужое имя. studiomdl не нужен
         """
         emit_sub(-1, "Copying ready model..." if language == "en" else "Копирование готовой модели...")
         try:
@@ -826,9 +764,9 @@ class VpkModelPipeline:
             ready_stem  = os.path.splitext(os.path.basename(model_ready_path))[0]
             model_exts  = ('.mdl', '.vvd', '.vtx', '.phy', '.dx80.vtx', '.dx90.vtx', '.sw.vtx')
             # Целевое имя: $modelname из QC (совпадает с weapon_key).
-            # Запрещено падать обратно на ready_stem (имя пользовательского файла) —
+            # Запрещено падать обратно на ready_stem (имя пользовательского файла) -
             # это приводит к тому, что все файлы мода переименовываются в имя
-            # загруженной модели вместо оригинального имени шапки/оружия.
+            # загруженной модели вместо оригинального имени шапки/оружия
             qc_modelname = ModelBuildService.extract_modelname_path(qc_path)
             if qc_modelname:
                 target_stem = os.path.splitext(os.path.basename(qc_modelname))[0]
@@ -887,13 +825,13 @@ class VpkModelPipeline:
         """
         Запускает (в фоне) получение скомпилированной модели и возвращает
         (compile_thread, compile_exc). Вызывающий код делает join() и, если
-        compile_exc[0] не None, поднимает исключение.
+        compile_exc[0] не None, поднимает исключение
 
         Сценарии:
-          • model_ready = .smd → заменяем reference SMD и компилируем studiomdl;
-          • model_ready = .mdl → копируем pre-compiled файлы (без studiomdl);
-          • обычная сборка → компилируем декомпилированный QC.
-        Компиляция идёт в фоне параллельно генерации VTF/VMT в главном потоке.
+          • model_ready = .smd -> заменяем reference SMD и компилируем studiomdl;
+          • model_ready = .mdl -> копируем pre-compiled файлы (без studiomdl);
+          • обычная сборка -> компилируем декомпилированный QC.
+        Компиляция идёт в фоне параллельно генерации VTF/VMT в главном потоке
         """
         compile_exc: list = [None]
 

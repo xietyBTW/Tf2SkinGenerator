@@ -1,4 +1,4 @@
-"""War Paint."""
+"""War Paint"""
 
 from __future__ import annotations
 
@@ -9,13 +9,13 @@ from src.app.api._common import _lang, endpoint
 
 @endpoint
 def paintkits(lang: str = '') -> Dict[str, object]:
-    """War Paint игры для показанного оружия: [{id, name, item, wears, team}]."""
+    """War Paint игры для показанного оружия: [{id, name, item, wears, team}]"""
     from src.app.session import session
     return session().paintkits.paintkits(_lang(lang))
 
 
 def _cards(materials) -> Optional[List[str]]:
-    """Отмеченные материалы War Paint: None — как по умолчанию."""
+    """Отмеченные материалы War Paint: None - как по умолчанию"""
     if materials is None:
         return None
     return [str(m) for m in materials if isinstance(m, str) and m][:64]
@@ -23,7 +23,7 @@ def _cards(materials) -> Optional[List[str]]:
 
 @endpoint
 def paintkit_materials(item: int = 0) -> Dict[str, object]:
-    """Материалы оружия для War Paint: {materials: [{card, game}]}."""
+    """Материалы оружия для War Paint: {materials: [{card, game}]}"""
     from src.app.session import session
     return session().paintkits.paintkit_materials(int(item))
 
@@ -32,7 +32,7 @@ def paintkit_materials(item: int = 0) -> Dict[str, object]:
 def apply_paintkit(kit: int, item: int, wear: int = 1, seed: int = 0,
                    size: int = 1024, layout: int = 0,
                    materials: Optional[List[str]] = None) -> Dict[str, object]:
-    """Накладывает War Paint на отмеченные материалы. Готовность придёт событием."""
+    """Накладывает War Paint на отмеченные материалы. Готовность придёт событием"""
     from src.app.session import session
     return session().paintkits.apply_paintkit(int(kit), int(item), int(wear), int(seed),
                                               int(size), int(layout), _cards(materials))
@@ -42,7 +42,7 @@ def apply_paintkit(kit: int, item: int, wear: int = 1, seed: int = 0,
 def preview_paintkit(kit: int, item: int, wear: int = 1, seed: int = 0,
                      layout: int = 0, materials: Optional[List[str]] = None
                      ) -> Dict[str, object]:
-    """Предпросмотр War Paint (512 px): {images: {карточка: png}} — на модель временно."""
+    """Предпросмотр War Paint (512 px): {images: {карточка: png}} - на модель временно"""
     from src.app.session import session
     return session().paintkits.preview_paintkit(int(kit), int(item), int(wear), int(seed),
                                                 int(layout), _cards(materials))
@@ -50,13 +50,13 @@ def preview_paintkit(kit: int, item: int, wear: int = 1, seed: int = 0,
 
 @endpoint
 def paintkit_layout(kit: int, item: int, layout: int = 0) -> Dict[str, object]:
-    """Раскладка War Paint по деталям: слои, детали и карта треугольников."""
+    """Раскладка War Paint по деталям: слои, детали и карта треугольников"""
     from src.app.session import session
     return session().paintkits.paintkit_layout(int(kit), int(item), int(layout))
 
 
 @endpoint
 def set_paintkit_layout(kit: int, assign: Optional[Dict[str, int]] = None) -> Dict[str, object]:
-    """Раскладка человека {деталь: слой}; пусто — вернуть автомат."""
+    """Раскладка человека {деталь: слой}; пусто - вернуть автомат"""
     from src.app.session import session
     return session().paintkits.set_paintkit_layout(int(kit), assign)

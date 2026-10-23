@@ -1,14 +1,12 @@
 """
 Реестр «простых» категорий моделей: снаряды (w_models), пикапы (аптечки/патроны),
-реквизит насмешек.
+реквизит насмешек
 
 У всех трёх одинаковая форма данных (``key -> {ru, en, mdl_path}``) и один и тот же
-pipeline (MDL из VPK → Crowbar → QC → текстуры/команды). Раньше каждая категория
-дублировала: таблицу, геттер имени, populate-метод в UI и блок построения ``mode``.
-Здесь — единый геттер имени и реестр «категория → таблица + префикс mode», по
-которому UI и сборка работают ОДНОЙ параметризованной логикой вместо трёх копий.
+pipeline (MDL из VPK -> Crowbar -> QC -> текстуры/команды). Здесь - единый геттер имени и реестр «категория -> таблица + префикс mode», по
+которому UI и сборка работают ОДНОЙ параметризованной логикой вместо трёх копий
 
-Добавить новую такую категорию = добавить таблицу-модуль и одну строку в реестр.
+Добавить новую такую категорию = добавить таблицу-модуль и одну строку в реестр
 """
 
 from typing import Dict, NamedTuple
@@ -19,22 +17,22 @@ from src.data.taunt_props import TAUNT_PROPS, TAUNT_PROP_MODE_PREFIX
 
 
 def model_display_name(table: Dict[str, dict], key: str, language: str = "ru") -> str:
-    """Локализованное имя модели из таблицы ``{key: {ru, en, ...}}``.
+    """Локализованное имя модели из таблицы ``{key: {ru, en, ...}}``
 
-    Fallback: запрошенный язык → ru → сам ключ. Единый геттер для всех простых
-    категорий (заменил get_projectile_name / get_pickup_name / get_taunt_prop_name).
+    Fallback: запрошенный язык -> ru -> сам ключ. Единый геттер для всех простых
+    категорий (заменил get_projectile_name / get_pickup_name / get_taunt_prop_name)
     """
     data = table.get(key, {})
     return data.get(language, data.get("ru", key))
 
 
 class SimpleModelCategory(NamedTuple):
-    """Описание простой категории: таблица моделей + префикс её ``mode``."""
+    """Описание простой категории: таблица моделей + префикс её ``mode``"""
     table: Dict[str, dict]
     mode_prefix: str
 
 
-#: Имя категории (как в UI-комбо) → таблица + префикс mode (``mode = f"{prefix}{key}"``).
+#: Имя категории (как в UI-комбо) -> таблица + префикс mode (``mode = f"{prefix}{key}"``)
 SIMPLE_MODEL_CATEGORIES: Dict[str, SimpleModelCategory] = {
     "projectile": SimpleModelCategory(PROJECTILES, PROJECTILE_MODE_PREFIX),
     "pickup": SimpleModelCategory(PICKUPS, PICKUP_MODE_PREFIX),
@@ -43,12 +41,12 @@ SIMPLE_MODEL_CATEGORIES: Dict[str, SimpleModelCategory] = {
 
 
 def category_of_mode(mode: str) -> str:
-    """Имя простой категории по режиму, либо '' — режим не из них.
+    """Имя простой категории по режиму, либо '' - режим не из них
 
     `kind_of` относит снаряды, пикапы и реквизит насмешек к оружию: таблицы
     оружия у них нет, а pipeline тот же. Там, где спрашивают именно про
-    ОРУЖИЕ В РУКАХ (вид от первого лица), этого мало — у мировой модели
-    вьюмодели не существует, и вопрос задаётся сюда.
+    ОРУЖИЕ В РУКАХ (вид от первого лица), этого мало - у мировой модели
+    вьюмодели не существует, и вопрос задаётся сюда
     """
     for name, cat in SIMPLE_MODEL_CATEGORIES.items():
         if mode.startswith(cat.mode_prefix):

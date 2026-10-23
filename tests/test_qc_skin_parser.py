@@ -1,9 +1,9 @@
 """
 Корпусные тесты единого парсера $texturegroup.
 
-Фикстуры в tests/fixtures/qc/ — реальные паттерны QC из декомпиляции TF2.
+Фикстуры в tests/fixtures/qc/ - реальные паттерны QC из декомпиляции TF2.
 Любое изменение эвристик (BLU/варианты/стили/padding) должно проходить
-по всему корпусу — это защита от «починили одно оружие, сломали другое».
+по всему корпусу - это защита от «починили одно оружие, сломали другое».
 """
 
 import unittest
@@ -47,14 +47,14 @@ class CorpusTests(unittest.TestCase):
         self.assertEqual(layout.main_texture, "c_rocketlauncher")
         self.assertEqual(layout.second_row, ["c_rocketlauncher_blue"])
         self.assertTrue(layout.blu_is_team)
-        # gold-строки — варианты, не скины
+        # gold-строки - варианты, не скины
         self.assertIn("australium", layout.variants)
         self.assertEqual(layout.variants["australium"], ["c_rocketlauncher_gold"])
         self.assertEqual(len(layout.base_rows), 2)
         self.assertEqual(layout.roles, ["RED", "BLU"])
 
     def test_pocket_watch_single(self):
-        """Одна общая текстура: ни BLU, ни стилей — спецсписки не нужны."""
+        """Одна общая текстура: ни BLU, ни стилей - спецсписки не нужны."""
         layout = parse_skin_layout(_qc("pocket_watch_single.qc"))
         self.assertEqual(layout.main_texture, "c_pocket_watch")
         self.assertEqual(layout.second_row, [])
@@ -94,22 +94,22 @@ class CorpusTests(unittest.TestCase):
         self.assertTrue(layout.blu_is_team)
 
     def test_all_variant_rows_fallback(self):
-        """Все строки — варианты → fallback: базовыми считаются все."""
+        """Все строки - варианты -> fallback: базовыми считаются все."""
         layout = parse_skin_layout(_qc("all_variant_rows.qc"))
         self.assertEqual(layout.main_texture, "c_weapon_gold")
         self.assertIn("australium", layout.variants)
         self.assertIn("festive", layout.variants)
 
     def test_team_with_red_suffixed_base(self):
-        """Снаряд: col0 уже с суффиксом _red (w_grenade_red → w_grenade_blue) —
-        blu_is_team должен распознать команду (раньше UI её не показывал)."""
+        """Снаряд: col0 уже с суффиксом _red (w_grenade_red -> w_grenade_blue) -
+        blu_is_team должен распознать команду."""
         layout = parse_skin_layout(_qc("projectile_team_red_base.qc"))
         self.assertTrue(layout.blu_is_team)
         self.assertEqual(layout.main_texture, "w_grenade_red")
         self.assertEqual(layout.second_row, ["w_grenade_blue", "w_grenade_blue"])
 
     def test_selector_spec_team_styles_variant(self):
-        """Единый авторитет selector_spec: команда / вариант / стили — из одного
+        """Единый авторитет selector_spec: команда / вариант / стили - из одного
         разбора, одинаково для любого типа модели."""
         from src.services.qc_skin_parser import selector_spec
 
@@ -125,13 +125,13 @@ class CorpusTests(unittest.TestCase):
         self.assertEqual(s.variant, "australium")
         self.assertEqual(s.styles, [])
 
-        # Команда нейтраль→blue, без варианта/стилей
+        # Команда нейтраль->blue, без варианта/стилей
         s = selector_spec(parse_skin_layout(_qc("flaregun_team_shell.qc")))
         self.assertTrue(s.team)
         self.assertIsNone(s.variant)
         self.assertEqual(s.styles, [])
 
-        # Команда X_red→X_blue (снаряд)
+        # Команда X_red->X_blue (снаряд)
         s = selector_spec(parse_skin_layout(_qc("projectile_team_red_base.qc")))
         self.assertTrue(s.team)
         self.assertIsNone(s.variant)
@@ -141,7 +141,7 @@ class CorpusTests(unittest.TestCase):
         self.assertTrue(s.team)
         self.assertIsNone(s.variant)
 
-        # Нет $texturegroup — всё пусто
+        # Нет $texturegroup - всё пусто
         s = selector_spec(parse_skin_layout(_qc("no_texturegroup.qc")))
         self.assertFalse(s.team)
         self.assertIsNone(s.variant)
@@ -154,8 +154,8 @@ class CorpusTests(unittest.TestCase):
         self.assertEqual(s.styles, [])
 
     def test_native_festive_no_false_variant(self):
-        """Натив-праздничная модель (c_sapper_xmas): festive — база, а не
-        overlay-вариант → нет ложной карточки варианта, но команда работает."""
+        """Натив-праздничная модель (c_sapper_xmas): festive - база, а не
+        overlay-вариант -> нет ложной карточки варианта, но команда работает."""
         layout = parse_skin_layout(_qc("native_festive_team.qc"))
         self.assertEqual(layout.main_texture, "c_sapper_xmas")
         self.assertNotIn("festive", layout.variants)
@@ -183,15 +183,15 @@ class CorpusTests(unittest.TestCase):
 class CdmaterialsTests(unittest.TestCase):
     def test_normalization(self):
         cdmats = parse_cdmaterials(_qc("hat_blueprints.qc"))
-        # console\ срезан, бэкслеши → /, relative-путь разрешён по соседнему.
+        # console\ срезан, бэкслеши -> /, relative-путь разрешён по соседнему.
         # Свой путь всегда первый: он и есть папка материалов предмета, а
-        # разрешённый relative — лишь дополнительный кандидат поиска.
+        # разрешённый relative - лишь дополнительный кандидат поиска.
         self.assertEqual(cdmats, ["models/player/items/engineer", "models/debug"])
 
     def test_relative_path_resolves_against_the_neighbour(self):
         """В QC тела шпиона '../../effects' рядом с 'models/player/spy'.
 
-        Вместе это `models/effects` — там лежат invulnfx_red/blue (убер-эффект).
+        Вместе это `models/effects` - там лежат invulnfx_red/blue (убер-эффект).
         Пока такие строки выбрасывались, эти материалы оставались без текстуры
         и в превью, и в моде.
         """
@@ -226,7 +226,7 @@ class CdmaterialsTests(unittest.TestCase):
 class BonemergeTests(unittest.TestCase):
     """$bonemerge перечисляет кости, которые модель отдаёт родителю.
 
-    Список исчерпывающий: у револьвера `weapon_bone_1` — его собственный
+    Список исчерпывающий: у револьвера `weapon_bone_1` - его собственный
     барабан, и сажать его в руку по совпадению имени нельзя (см. viewmodel_pose).
     """
 
@@ -253,7 +253,7 @@ class VariantKindTests(unittest.TestCase):
         self.assertIsNone(variant_kind(""))
 
     def test_team_variant_of_variant(self):
-        """BLU-вариант австралиума — вариант, а не фантомный базовый скин."""
+        """BLU-вариант австралиума - вариант, а не фантомный базовый скин."""
         self.assertEqual(variant_kind("c_rocketlauncher_gold_blue"), "australium")
         self.assertEqual(variant_kind("c_w_festive_blu"), "festive")
 
@@ -283,7 +283,7 @@ class PickPreviewVariantTests(unittest.TestCase):
 
 
 class SkinsListTests(unittest.TestCase):
-    """skins — полный список (база+команда+варианты) с сырыми индексами."""
+    """skins - полный список (база+команда+варианты) с сырыми индексами."""
 
     def test_team_style_australium_all_listed_with_raw_indices(self):
         layout = classify_rows([
@@ -331,7 +331,7 @@ class RestrictToMaterialsTests(unittest.TestCase):
         self.assertEqual(blu, ["engineer_arms_blue"])
 
     def test_neutral_shared_texture_skipped_in_blu(self):
-        """BLU == RED на позиции руки → нейтральная текстура, не BLU."""
+        """BLU == RED на позиции руки -> нейтральная текстура, не BLU."""
         main, extras, blu = restrict_to_materials(
             main_texture="spy_red",
             red_row=["spy_red", "spy_gloves"],
@@ -400,14 +400,13 @@ class RowParserEdgeCases(unittest.TestCase):
 
 
 class TeamMaterialMapTests(unittest.TestCase):
-    """Карта «столбец RED → столбец BLU»: что именно меняет команда."""
+    """Карта «столбец RED -> столбец BLU»: что именно меняет команда."""
 
     def test_multi_column_hat_keeps_shared_materials(self):
         """Alcoholic Automaton: четыре столбца, команда переключает два.
 
-        Столбцы 3-4 в обеих строках одинаковы (линза синяя всегда) — они
-        отображаются сами в себя. Раньше превью брало одну первую BLU-текстуру
-        и клало её на всю модель, из-за чего линза получала текстуру корпуса.
+        Столбцы 3-4 в обеих строках одинаковы (линза синяя всегда) - они
+        отображаются сами в себя, и линза не получает текстуру корпуса.
         """
         layout = classify_rows([
             ["auto_1", "auto", "auto_1_blue", "auto_blue"],
@@ -426,7 +425,7 @@ class TeamMaterialMapTests(unittest.TestCase):
         self.assertEqual(team_material_map(layout), {"hat": "hat_blue"})
 
     def test_styles_are_not_a_team(self):
-        """Второй скин — стиль (bloody), а не команда: карты нет."""
+        """Второй скин - стиль (bloody), а не команда: карты нет."""
         layout = classify_rows([["knife"], ["knife_bloody"]])
         self.assertEqual(team_material_map(layout), {})
 
@@ -435,7 +434,7 @@ class TeamMaterialMapTests(unittest.TestCase):
         self.assertEqual(team_material_map(classify_rows([])), {})
 
     def test_shorter_blu_row_falls_back_to_self(self):
-        """BLU-строка короче RED — недостающие столбцы остаются собой."""
+        """BLU-строка короче RED - недостающие столбцы остаются собой."""
         layout = classify_rows([
             ["body", "shell", "scope"],
             ["body_blue", "shell_blue"],

@@ -1,4 +1,4 @@
-"""Материалы систем: текстуры для превью, смена материала у систем."""
+"""Материалы систем: текстуры для превью, смена материала у систем"""
 
 import base64
 import io
@@ -18,8 +18,8 @@ logger = get_logger(__name__)
 
 #: Режимы Sprite-шейдера, которые складывают цвет с фоном: 3 glow, 5 add,
 #: 7 add frame blend, 8 alpha add, 9 world glow (RenderMode_t). У таких VMT
-#: «$additive» часто не написан, а текстура без альфы — без этого она
-#: рисовалась чёрным квадратом.
+#: «$additive» часто не написан, а текстура без альфы - без этого она
+#: рисовалась чёрным квадратом
 _ADDITIVE_SPRITE_MODES = (3, 5, 7, 8, 9)
 
 
@@ -32,15 +32,15 @@ def _is_additive(vmt) -> bool:
 # Якорь по началу строки: иначе матчились закомментированные строки и ссылки
 # на $basetexture внутри proxies; хвостовой //-комментарий отсекается.
 # \r?$ обязателен: VMT Valve с CRLF-концами строк.
-#: Только для ЗАМЕНЫ строки $basetexture в тексте VMT. Чтение — через
-#: vmt_parse: регулярка не отличает настоящий параметр от закомментированного.
+#: Только для ЗАМЕНЫ строки $basetexture в тексте VMT. Чтение - через
+#: vmt_parse: регулярка не отличает настоящий параметр от закомментированного
 _RE_BASETEXTURE_LINE = re.compile(
     r'^[ \t]*"?\$basetexture"?[ \t]+"?([^"\r\n]+?)"?[ \t]*(?://[^\r\n]*)?\r?$',
     re.IGNORECASE | re.MULTILINE)
 
 
 def _mtime(path: Optional[str]) -> int:
-    """mtime файла в наносекундах; нет файла — ноль."""
+    """mtime файла в наносекундах, нет файла - ноль"""
     try:
         return os.stat(path).st_mtime_ns if path else 0
     except OSError:
@@ -50,8 +50,8 @@ def _mtime(path: Optional[str]) -> int:
 def set_material_to_game(pcf, old_material: str, game_material: str) -> bool:
     """
     Переводит все системы с материалом old_material на СУЩЕСТВУЮЩИЙ игровой
-    материал game_material (просто меняет строку — новый файл не создаётся).
-    Работает в казуале: игра уже содержит этот материал.
+    материал game_material (просто меняет строку - новый файл не создаётся).
+    Работает в казуале: игра уже содержит этот материал
     """
     def _norm(m: str) -> str:
         return m.replace("\\", "/").lower()
@@ -67,7 +67,7 @@ def set_material_to_game(pcf, old_material: str, game_material: str) -> bool:
 
 
 def material_names(pcf) -> List[str]:
-    """Уникальные пути материалов всех систем (как записаны в PCF)."""
+    """Уникальные пути материалов всех систем (как записаны в PCF)"""
     names = []
     for _name, sys_json in pcf.systems_json().items():
         mat = sys_json["attrs"].get("material", {}).get("v")
@@ -81,14 +81,14 @@ def materials_json(pcf, tf2_root_dir: str, cancel_check=None,
     """
     Резолвит материалы систем в текстуры для JS:
     {mat: {"dataUrl": png, "sheet": {...}|None, "additive": bool,
-           "shader": str, "width": int, "height": int}}.
+           "shader": str, "width": int, "height": int}}
 
-    Ошибки не фатальны — система без текстуры рендерится белым спрайтом.
-    cancel_check: колбэк () -> bool; True — прервать (для фоновых воркеров).
+    Ошибки не фатальны - система без текстуры рендерится белым спрайтом.
+    cancel_check: колбэк () -> bool; True - прервать (для фоновых воркеров).
     names: только эти материалы (эффект, а не весь файл): у item_fx их 96,
-    и распаковка всех VTF при первом открытии - полторы секунды из двух.
+    и распаковка всех VTF при первом открытии - полторы секунды из двух
     """
-    # Перезаписанные текстуры — превью-инфо по нормализованному ключу
+    # Перезаписанные текстуры - превью-инфо по нормализованному ключу
     out: Dict[str, dict] = {}
     names = material_names(pcf) if names is None else list(names)
     for mat in names:
@@ -105,9 +105,9 @@ def materials_json(pcf, tf2_root_dir: str, cancel_check=None,
     vpks = [misc_vpk, textures_vpk] + TF2Paths.resolve_hl2_vpks(tf2_root_dir)
     paks = None
     # Стоковые материалы одни на все PCF и не меняются между загрузками:
-    # `effects/…` повторяются из файла в файл, а VTF→PNG стоил три
+    # `effects/…` повторяются из файла в файл, а VTF->PNG стоил три
     # четверти времени открытия. Ключ с mtime архива: обновление игры
-    # подменяет VPK, и старая картинка его не переживёт.
+    # подменяет VPK, и старая картинка его не переживёт
     stamp = tuple(_mtime(v) for v in vpks)
     cache = _stock_material_cache
     if cache.get('stamp') != stamp:
@@ -134,13 +134,13 @@ def materials_json(pcf, tf2_root_dir: str, cancel_check=None,
 
 
 #: Разобранные стоковые материалы: {норм. путь: info | None} плюс
-#: `stamp` — mtime архивов, для которых они разобраны.
+#: `stamp` - mtime архивов, для которых они разобраны
 _stock_material_cache: Dict[str, Any] = {}
 
 
 def _resolve_material(paks: list, mat: str) -> Optional[dict]:
     # Путь строим той же нормализацией, что и ключ материала: иначе
-    # искали бы в архиве не то, с чем потом сопоставляем.
+    # искали бы в архиве не то, с чем потом сопоставляем
     vmt_rel = "materials/" + norm_mat(mat)
 
     vmt_raw = read_from_vpks(paks, vmt_rel)
@@ -153,8 +153,8 @@ def _resolve_material(paks: list, mat: str) -> Optional[dict]:
     shader = vmt.shader
     base = vmt.path("basetexture")
     if not base:
-        # Материалы без $basetexture (vgui/white и т.п.) — однотонный квад
-        # с вершинным цветом; важно сохранить хотя бы режим блендинга
+        # Материалы без $basetexture (vgui/white и т.п.) - однотонный квад
+        # с вершинным цветом, важно сохранить хотя бы режим блендинга
         return {
             "dataUrl": None,
             "sheet": None,
@@ -162,9 +162,9 @@ def _resolve_material(paks: list, mat: str) -> Optional[dict]:
             "mod2x": vmt.flag("mod2x"),
             "shader": shader,
             # Refract без искажения и размытия (nothing2, effect_mask,
-            # skullmask — 8 материалов в стоке) в игре невидим: это маска,
+            # skullmask - 8 материалов в стоке) в игре невидим: это маска,
             # которая прячет частицы за собой. Рисовать за него мягкий
-            # белый круг значило показывать «белый шар».
+            # белый круг значило показывать «белый шар»
             "invisible": (shader.lower() == "refract"
                           and not vmt.number("refractamount", 0)
                           and not vmt.number("bluramount", 0)),
@@ -187,8 +187,8 @@ def _resolve_material(paks: list, mat: str) -> Optional[dict]:
         "sheet": parse_vtf_sheet(vtf_raw),
         "additive": _is_additive(vmt),
         # Модуляция (glow_modulate, beam_generic_3_modulate): цвет
-        # УМНОЖАЕТ фон ×2, серый — нейтрален. Через обычный бленд такой
-        # спрайт виден серым квадратом.
+        # УМНОЖАЕТ фон ×2, серый - нейтрален. Через обычный бленд такой
+        # спрайт виден серым квадратом
         "mod2x": vmt.flag("mod2x"),
         "shader": shader,
         "width": width,
@@ -197,8 +197,8 @@ def _resolve_material(paks: list, mat: str) -> Optional[dict]:
 
 
 def _vtf_to_png(vtf_raw: bytes) -> Optional[tuple]:
-    """VTF-байты → (data URL PNG, w, h). VTFLib читает только с диска —
-    пишем во временный файл."""
+    """VTF-байты -> (data URL PNG, w, h). VTFLib читает только с диска -
+    пишем во временный файл"""
     tmp_path = None
     try:
         from PIL import Image
@@ -208,8 +208,8 @@ def _vtf_to_png(vtf_raw: bytes) -> Optional[tuple]:
             f.write(vtf_raw)
         rgba, w, h = VTFLib.read_vtf_as_rgba(tmp_path)
         buf = io.BytesIO()
-        # Сжатие послабее: уровень 3 против 6 — 2 мс вместо 29 на текстуру
-        # 256², а картинка тяжелее лишь на десятую часть.
+        # Сжатие послабее: уровень 3 против 6 - 2 мс вместо 29 на текстуру
+        # 256², а картинка тяжелее лишь на десятую часть
         Image.frombytes("RGBA", (w, h), rgba).save(buf, format="PNG",
                                                    compress_level=3)
         b64 = base64.b64encode(buf.getvalue()).decode("ascii")
@@ -227,12 +227,12 @@ def _vtf_to_png(vtf_raw: bytes) -> Optional[tuple]:
 
 def rename_material(pcf, old_material: str, new_material: str) -> bool:
     """
-    Меняет путь материала у всех систем, где он используется.
+    Меняет путь материала у всех систем, где он используется
 
     Если текстура была заменена своей картинкой, кастомные файлы
-    переезжают на новый путь (и VMT начинает ссылаться на новый VTF) —
+    переезжают на новый путь (и VMT начинает ссылаться на новый VTF) -
     так эффект получает СВОЙ материал вместо перезаписи стокового,
-    и замена перестаёт менять текстуру у других эффектов игры.
+    и замена перестаёт менять текстуру у других эффектов игры
     """
     new_material = (new_material or "").strip()
     if not new_material or not old_material:

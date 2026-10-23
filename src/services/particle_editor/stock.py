@@ -1,4 +1,4 @@
-"""Сток: игровая версия открытого файла, сравнение с ней и откат."""
+"""Сток: игровая версия открытого файла, сравнение с ней и откат"""
 
 import os
 from typing import Any, Dict, List, Optional
@@ -12,8 +12,8 @@ logger = get_logger(__name__)
 
 
 def _same_value(a: Any, b: Any) -> bool:
-    """Значения атрибутов равны. Числа — с допуском: float32 из файла и
-    число из поля отличаются в седьмом знаке."""
+    """Значения атрибутов равны. Числа - с допуском: float32 из файла и
+    число из поля отличаются в седьмом знаке"""
     if isinstance(a, (list, tuple)) and isinstance(b, (list, tuple)):
         return len(a) == len(b) and all(_same_value(x, y) for x, y in zip(a, b))
     if isinstance(a, bool) or isinstance(b, bool):
@@ -24,7 +24,7 @@ def _same_value(a: Any, b: Any) -> bool:
 
 
 def _diff_attrs(cur: Dict[str, dict], ref: Dict[str, dict]) -> List[str]:
-    """Имена атрибутов, где текущее отличается от стокового (или его нет)."""
+    """Имена атрибутов, где текущее отличается от стокового (или его нет)"""
     out = []
     for name, tv in cur.items():
         if name.lower() in SERVICE_ATTRS:
@@ -37,10 +37,10 @@ def _diff_attrs(cur: Dict[str, dict], ref: Dict[str, dict]) -> List[str]:
 
 def diff_systems(current: Dict[str, dict],
                  stock: Dict[str, dict]) -> Dict[str, dict]:
-    """Чем открытый файл отличается от игрового, по системам.
+    """Чем открытый файл отличается от игрового, по системам
 
     Модули сопоставляются по functionName и порядковому номеру среди
-    одноимённых: два Remap в одной группе — это два разных модуля.
+    одноимённых: два Remap в одной группе - это два разных модуля
 
     Returns:
         {имя: {"status": added|changed|same, "attrs": [имена],
@@ -93,10 +93,10 @@ def diff_systems(current: Dict[str, dict],
 
 
 def stock_path(pcf) -> str:
-    """Путь игрового PCF, с которым сравнивать. Пусто — стока нет.
+    """Путь игрового PCF, с которым сравнивать. Пусто - стока нет
 
-    Файл из игры — он сам; файл с диска — игровой с тем же именем, если
-    такой есть (чужой crit.pcf сравниваем с crit.pcf Valve).
+    Файл из игры - он сам, файл с диска - игровой с тем же именем, если
+    такой есть (чужой crit.pcf сравниваем с crit.pcf Valve)
     """
     src = pcf.source_path or ""
     if src.startswith("vpk:"):
@@ -106,7 +106,7 @@ def stock_path(pcf) -> str:
 
 
 def stock(pcf, tf2_root_dir: str):
-    """Игровая версия открытого файла. None — её нет или не читается."""
+    """Игровая версия открытого файла. None - её нет или не читается"""
     path = pcf.stock_path()
     if not path:
         return None
@@ -125,7 +125,7 @@ def stock(pcf, tf2_root_dir: str):
 
 
 def stock_diff(pcf, tf2_root_dir: str) -> Dict[str, dict]:
-    """Отличия от игры по системам (см. diff_systems). Пусто — стока нет."""
+    """Отличия от игры по системам (см. diff_systems). Пусто - стока нет"""
     stock = pcf.stock(tf2_root_dir)
     if stock is None:
         return {}
@@ -136,10 +136,10 @@ def stock_diff(pcf, tf2_root_dir: str) -> Dict[str, dict]:
 
 
 def revert_system(pcf, tf2_root_dir: str, system_name: str) -> bool:
-    """Возвращает систему в игровой вид: атрибуты, модули, дочерние.
+    """Возвращает систему в игровой вид: атрибуты, модули, дочерние
 
-    Дочерние — ссылки на другие системы этого же файла; берём их по
-    имени, и если такой системы у нас больше нет, ссылку пропускаем.
+    Дочерние - ссылки на другие системы этого же файла, берём их по
+    имени, и если такой системы у нас больше нет, ссылку пропускаем
     """
     stock = pcf.stock(tf2_root_dir)
     d = pcf._find_definition(system_name)
@@ -154,10 +154,10 @@ def revert_system(pcf, tf2_root_dir: str, system_name: str) -> bool:
             continue
         d[attr.name] = attr.copy()
     # Пустой список srctools не типизирует (ловушка: `el[group] = []`
-    # падает) — массив заводим явно и наполняем.
+    # падает) - массив заводим явно и наполняем.
     # Модули у Valve общие между системами: берём наш же элемент с тем
-    # же uuid, если он ещё жив у соседей, — иначе файл раздувался бы
-    # копиями и переставал влезать в потолок казуала.
+    # же uuid, если он ещё жив у соседей, - иначе файл раздувался бы
+    # копиями и переставал влезать в потолок казуала
     mine_by_uuid = {}
     for other in pcf._all_definition_elements():
         for group in MODULE_GROUPS:
@@ -188,11 +188,11 @@ def revert_system(pcf, tf2_root_dir: str, system_name: str) -> bool:
 
 
 def _copy_children(pcf, ref, mine_by_uuid: dict, done: dict):
-    """Ссылки на дочерние из стока — на НАШИ системы с теми же именами.
+    """Ссылки на дочерние из стока - на НАШИ системы с теми же именами
 
-    Дочерняя, которой у нас больше нет (отцепили единственную ссылку —
+    Дочерняя, которой у нас больше нет (отцепили единственную ссылку -
     и определение ушло из дерева), копируется из стока целиком, вместе
-    со своими модулями и детьми. `done` — уже скопированные, от циклов.
+    со своими модулями и детьми. `done` - уже скопированные, от циклов
     """
     arr = Attribute.array(ref["children"].name, ValueType.ELEMENT)
     for ch in ref["children"].iter_elem():
@@ -213,7 +213,7 @@ def _copy_children(pcf, ref, mine_by_uuid: dict, done: dict):
 
 
 def _copy_definition(pcf, ref, mine_by_uuid: dict, done: dict):
-    """Отвязанная копия определения системы из стока (с модулями и детьми)."""
+    """Отвязанная копия определения системы из стока (с модулями и детьми)"""
     if ref.uuid in done:
         return done[ref.uuid]
     new = Element(ref.name, ref.type, ref.uuid)
@@ -241,7 +241,7 @@ def _copy_definition(pcf, ref, mine_by_uuid: dict, done: dict):
 def revert_attr(pcf, tf2_root_dir: str, system_name: str,
                 group: Optional[str], module_index: int,
                 attr_name: str) -> bool:
-    """Значение атрибута как в игре; в игре его нет — убираем."""
+    """Значение атрибута как в игре, в игре его нет - убираем"""
     stock = pcf.stock(tf2_root_dir)
     if stock is None:
         return False

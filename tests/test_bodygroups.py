@@ -1,9 +1,9 @@
 """
-Разбор бодигрупп QC: что игра показывает по умолчанию.
+Разбор бодигрупп QC: что игра показывает по умолчанию
 
-`$bodygroup` — это ПЕРЕКЛЮЧАТЕЛЬ, игра рисует ровно один вариант. Превью
+`$bodygroup` - это ПЕРЕКЛЮЧАТЕЛЬ, игра рисует ровно один вариант. Превью
 складывало все варианты в одну модель, и бутылка показывалась целой и
-разбитой одновременно (в стоке так устроены 36 пушек из 295 и 6 шапок).
+разбитой одновременно (в стоке так устроены 36 пушек из 295 и 6 шапок)
 """
 
 import os
@@ -35,7 +35,7 @@ class BodygroupParseTests(unittest.TestCase):
         return [os.path.basename(p) for p in paths]
 
     def test_switchable_group_gives_only_the_default_variant(self):
-        """Бутылка: нулевой вариант — целая, первый — разбитая."""
+        """Бутылка: нулевой вариант - целая, первый - разбитая"""
         qc = self._qc(
             '$bodygroup "broken"\n{\n\tstudio "c_bottle.smd"\n'
             '\tstudio "c_bottle_broken.smd"\n}\n',
@@ -48,7 +48,7 @@ class BodygroupParseTests(unittest.TestCase):
                          ["c_bottle.smd"])
 
     def test_several_groups(self):
-        """Тело + переключаемая гильза: показываем тело и нулевую гильзу."""
+        """Тело + переключаемая гильза: показываем тело и нулевую гильзу"""
         qc = self._qc(
             '$bodygroup "body"\n{\n\tstudio "c_flaregun.smd"\n}\n\n'
             '$bodygroup "shell"\n{\n\tstudio "c_flaregun_shell.smd"\n\tblank\n}\n',
@@ -58,7 +58,7 @@ class BodygroupParseTests(unittest.TestCase):
             ["c_flaregun.smd", "c_flaregun_shell.smd"])
 
     def test_blank_first_means_nothing_is_drawn(self):
-        """Если нулевой вариант — blank, группа по умолчанию не рисуется."""
+        """Если нулевой вариант - blank, группа по умолчанию не рисуется"""
         qc = self._qc(
             '$bodygroup "body"\n{\n\tstudio "main.smd"\n}\n\n'
             '$bodygroup "extra"\n{\n\tblank\n\tstudio "extra.smd"\n}\n',
@@ -70,7 +70,7 @@ class BodygroupParseTests(unittest.TestCase):
             ["main.smd"])
 
     def test_nine_class_variants(self):
-        """id_badge: девять классовых вариантов одной бодигруппы."""
+        """id_badge: девять классовых вариантов одной бодигруппы"""
         classes = [f"badge_{c}.smd" for c in
                    ("scout", "soldier", "pyro", "demo", "heavy",
                     "engineer", "medic", "sniper", "spy")]
@@ -84,7 +84,7 @@ class BodygroupParseTests(unittest.TestCase):
             ["badge_body.smd", "badge_scout.smd"])
 
     def test_single_line_body_form(self):
-        """Однострочная форма `$body studio "x.smd"` — тоже группа."""
+        """Однострочная форма `$body studio "x.smd"` - тоже группа"""
         qc = self._qc('$body studio "main.smd"\n', ["main.smd"])
         self.assertEqual(
             self._names(ModelBuildService.extract_default_body_smds(qc)),
@@ -100,7 +100,7 @@ class BodygroupParseTests(unittest.TestCase):
             ["main.smd"])
 
     def test_groups_carry_their_names_and_a_choice_picks_a_variant(self):
-        """Переключатель состояния в превью: {имя группы: номер варианта}."""
+        """Переключатель состояния в превью: {имя группы: номер варианта}"""
         qc = self._qc(
             '$bodygroup "body"\n{\n\tstudio "c_caber_reference.smd"\n}\n'
             '$bodygroup "broken"\n{\n\tstudio "caber_top_bodygroup.smd"\n'
@@ -115,7 +115,7 @@ class BodygroupParseTests(unittest.TestCase):
         self.assertEqual(
             self._names(ModelBuildService.chosen_body_smds(groups, {"broken": 1})),
             ["c_caber_reference.smd", "caber_exploded_bodygroup.smd"])
-        # Номер за пределами группы — как blank: вариант не рисуется.
+        # Номер за пределами группы - как blank: вариант не рисуется
         self.assertEqual(
             self._names(ModelBuildService.chosen_body_smds(groups, {"broken": 7})),
             ["c_caber_reference.smd"])
@@ -134,13 +134,13 @@ class BodygroupParseTests(unittest.TestCase):
             self._qc("совсем не qc\n")), [])
 
     def test_all_mesh_smds_include_the_single_model_form(self):
-        """Косметика часто объявляет меш через $model — не через $bodygroup."""
+        """Косметика часто объявляет меш через $model - не через $bodygroup"""
         qc = self._qc('$model "Body" "hat.smd"\n', ["hat.smd"])
         self.assertEqual(
             self._names(ModelBuildService.extract_all_mesh_smds(qc)), ["hat.smd"])
 
     def test_all_mesh_smds_include_hidden_variants(self):
-        """«Из чего состоит модель» — это все варианты, а не только видимые."""
+        """«Из чего состоит модель» - это все варианты, а не только видимые"""
         qc = self._qc(
             '$bodygroup "broken"\n{\n\tstudio "c_bottle.smd"\n'
             '\tstudio "c_bottle_broken.smd"\n}\n',
@@ -156,7 +156,7 @@ class BodygroupParseTests(unittest.TestCase):
             self._names(ModelBuildService.extract_all_mesh_smds(qc)), ["hat.smd"])
 
     def test_build_path_still_sees_every_variant(self):
-        """Сборке нужны ВСЕ варианты: пользователь вправе заменить и разбитую."""
+        """Сборке нужны ВСЕ варианты: пользователь вправе заменить и разбитую"""
         qc = self._qc(
             '$bodygroup "broken"\n{\n\tstudio "c_bottle.smd"\n'
             '\tstudio "c_bottle_broken.smd"\n}\n',

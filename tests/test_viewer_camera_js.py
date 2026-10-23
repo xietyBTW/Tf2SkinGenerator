@@ -1,12 +1,12 @@
 """
-Камера вида от первого лица (viewer_camera.js) через Node.
+Камера вида от первого лица (viewer_camera.js) через Node
 
 Ошибку здесь Python-тесты не увидят: сцена соберётся правильно, а камера
-встанет не туда — и вьюмодель окажется за спиной или боком. Оси не абстрактные,
+встанет не туда - и вьюмодель окажется за спиной или боком. Оси не абстрактные,
 а замеренные на настоящих моделях TF2 (см. комментарий в модуле): после
-конвертации осей вперёд — это +Z, вверх — +Y.
+конвертации осей вперёд - это +Z, вверх - +Y
 
-Тест пропускается, если node недоступен.
+Тест пропускается, если node недоступен
 """
 
 import json
@@ -38,7 +38,7 @@ console.log(JSON.stringify(out));
 
 
 def test_camera_sits_in_the_eye_and_looks_forward():
-    """Глаз в начале координат, взгляд по +Z — это и есть кадр игрока."""
+    """Глаз в начале координат, взгляд по +Z - это и есть кадр игрока"""
     out = _run("return firstPersonCamera({});")
     assert out["position"] == [0, 0, 0]
     assert out["target"] == [0, 0, 1]
@@ -47,7 +47,7 @@ def test_camera_sits_in_the_eye_and_looks_forward():
 
 
 def test_eye_offset_moves_the_target_with_it():
-    """Сдвиг глаза — калибровочная ручка; направление взгляда меняться не должно."""
+    """Сдвиг глаза - калибровочная ручка, направление взгляда меняться не должно"""
     out = _run("return firstPersonCamera({eye: [1, -2, 3]});")
     assert out["position"] == [1, -2, 3]
     assert out["target"] == [1, -2, 4]
@@ -59,7 +59,7 @@ def test_forward_is_normalized():
 
 
 def test_degenerate_direction_falls_back_instead_of_producing_nan():
-    """Нулевой вектор взгляда развалил бы матрицу вида — лучше вернуться к дефолту."""
+    """Нулевой вектор взгляда развалил бы матрицу вида - лучше вернуться к дефолту"""
     out = _run("return firstPersonCamera({forward: [0, 0, 0], up: [0, 0, 0]});")
     assert out["target"] == [0, 0, 1]
     assert out["up"] == [0, 1, 0]
@@ -98,7 +98,7 @@ def test_rig_fov_reaches_the_camera():
 
 
 def test_defaults_are_the_measured_axes():
-    """Если конвертацию осей когда-нибудь поменяют, тест обязан упасть здесь."""
+    """Если конвертацию осей когда-нибудь поменяют, тест обязан упасть здесь"""
     out = _run("return DEFAULT_RIG;")
     assert out == {"eye": [0, 0, 0], "forward": [0, 0, 1],
                    "up": [0, 1, 0], "fov": 54}

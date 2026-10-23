@@ -1,11 +1,9 @@
 """
-Извлечение текстур в воркере превью — против фейкового VPK.
+Извлечение текстур в воркере превью - против фейкового VPK
 
-Раньше эти 1800 строк проверялись только руками на установленной игре, и
-ошибки в них всплывали как «у шапки не та текстура на линзе» через месяцы.
 Здесь модель (QC на диске) и архивы (словарь путей) поддельные, поэтому
 проверяется именно логика: какой материал берётся для команды и когда команда
-вообще что-то меняет.
+вообще что-то меняет
 
 """
 
@@ -24,7 +22,7 @@ from tests.fake_vpk import fake_reader, vmt                   # noqa: E402
 CD = "models/workshop/player/items/demo/hat"
 
 #: Раскладка Alcoholic Automaton: четыре столбца, команда переключает два,
-#: линза (столбцы 3-4) в обеих строках одна и та же.
+#: линза (столбцы 3-4) в обеих строках одна и та же
 QC_FOUR_COLUMNS = """
 $modelname "hat.mdl"
 $cdmaterials "models\\workshop\\player\\items\\demo\\hat\\"
@@ -60,7 +58,7 @@ def _png_bytes(color=(20, 20, 20, 255)) -> bytes:
 
 @pytest.fixture(autouse=True)
 def _stub_vtf_decoder():
-    """«VTF-байты» в этих тестах — уже готовый PNG."""
+    """«VTF-байты» в этих тестах - уже готовый PNG"""
     from src.services import vtf_preview_service as vps
 
     orig = vps.vtf_bytes_to_png
@@ -73,7 +71,7 @@ def _stub_vtf_decoder():
         return out_png_path
 
     def fake_frames(data, out_dir, base_name, tmp_dir=None):
-        """Запасной путь просит ВСЕ кадры — у нас всегда один."""
+        """Запасной путь просит ВСЕ кадры - у нас всегда один"""
         path = Path(out_dir) / f"{base_name}.png"
         return [p] if (p := fake(data, str(path))) else []
 
@@ -86,7 +84,7 @@ def _stub_vtf_decoder():
 
 
 def _worker(files, qc_text, tmp) -> tuple:
-    """Воркер с поддельным VPK и QC на диске. → (worker, decomp_dir)."""
+    """Воркер с поддельным VPK и QC на диске. -> (worker, decomp_dir)"""
     decomp = Path(tmp) / "decomp"
     decomp.mkdir(parents=True, exist_ok=True)
     (decomp / "hat.qc").write_text(qc_text, encoding="utf-8")
@@ -99,7 +97,7 @@ def _worker(files, qc_text, tmp) -> tuple:
 
 
 def _files(**materials) -> dict:
-    """{материал: (basetexture, цвет)} → содержимое архива."""
+    """{материал: (basetexture, цвет)} -> содержимое архива"""
     out = {}
     for mat, (base, color) in materials.items():
         out[f"materials/{CD}/{mat}.vmt"] = vmt(basetexture=base)
@@ -108,10 +106,10 @@ def _files(**materials) -> dict:
 
 
 def test_hat_blu_is_per_material():
-    """Команда переключает не все материалы: общие остаются собой.
+    """Команда переключает не все материалы: общие остаются собой
 
     Именно из-за одной общей BLU-текстуры линза Alcoholic Automaton получала
-    текстуру корпуса.
+    текстуру корпуса
     """
     with TemporaryDirectory() as tmp:
         files = _files(
@@ -135,7 +133,7 @@ def test_hat_blu_is_per_material():
 
 
 def test_identical_blu_reports_no_difference():
-    """BLU-материал есть, но он копия RED — панель должна об этом узнать."""
+    """BLU-материал есть, но он копия RED - панель должна об этом узнать"""
     with TemporaryDirectory() as tmp:
         files = _files(
             hat=("models/hat/color", (30, 30, 30, 255)),
@@ -148,7 +146,7 @@ def test_identical_blu_reports_no_difference():
         w._extract_hat_textures_via_qc_vmt(decomp, ["hat"])
         raw = w._extract_hat_blu_textures(decomp, ["hat"])
 
-        assert raw == {}, "различий нет — карту не отдаём"
+        assert raw == {}, "различий нет - карту не отдаём"
         assert fired, "но сообщаем, что команды выглядят одинаково"
 
 
@@ -170,10 +168,10 @@ def test_different_blu_texture_is_a_real_difference():
 
 
 def test_single_blu_fallback_still_works():
-    """Запасной путь (одна BLU-текстура на модель) не должен падать.
+    """Запасной путь (одна BLU-текстура на модель) не должен падать
 
     Он сравнивает BLU с RED, и когда вид RED стал объектом ResolvedMaterial,
-    сравнение молча роняло путь в except — BLU пропадал целиком.
+    сравнение молча роняло путь в except - BLU пропадал целиком
     """
     with TemporaryDirectory() as tmp:
         files = _files(
@@ -188,7 +186,7 @@ def test_single_blu_fallback_still_works():
 
 
 def test_team_tint_from_vmt_makes_blu_different():
-    """Одна текстура на обе команды, цвет — только в VMT: разница есть."""
+    """Одна текстура на обе команды, цвет - только в VMT: разница есть"""
     from PIL import Image
 
     with TemporaryDirectory() as tmp:
@@ -208,7 +206,7 @@ def test_team_tint_from_vmt_makes_blu_different():
         red = w._extract_hat_textures_via_qc_vmt(decomp, ["hat"])
         raw = w._extract_hat_blu_textures(decomp, ["hat"])
 
-        assert not fired, "цвета команд разные — это настоящая разница"
+        assert not fired, "цвета команд разные - это настоящая разница"
         with Image.open(red["hat"]) as img:
             red_px = img.convert("RGB").getpixel((0, 0))
         with Image.open(raw["hat"][0]) as img:
@@ -218,7 +216,7 @@ def test_team_tint_from_vmt_makes_blu_different():
 
 
 def test_styles_are_not_a_team():
-    """Второй скин — стиль (bloody), а не команда: BLU не собираем."""
+    """Второй скин - стиль (bloody), а не команда: BLU не собираем"""
     qc = QC_SIMPLE_TEAM.replace('"hat_blue"', '"hat_bloody"')
     with TemporaryDirectory() as tmp:
         files = _files(
@@ -231,7 +229,7 @@ def test_styles_are_not_a_team():
 
 
 def test_qc_is_parsed_once_per_run():
-    """Разбор QC кэшируется: раньше один и тот же файл читался по 11 раз."""
+    """Разбор QC кэшируется: раньше один и тот же файл читался по 11 раз"""
     from src.services import qc_skin_parser
 
     calls = []
@@ -250,10 +248,10 @@ def test_qc_is_parsed_once_per_run():
     assert len(calls) == 1, calls
 
 def test_single_material_hat_also_emits_a_blu_frame():
-    """Одноматериальная шапка: карточек нет, и панель ищет BLU кадром.
+    """Одноматериальная шапка: карточек нет, и панель ищет BLU кадром
 
-    Battle Balaclava «No Gloves» — ровно этот случай: покомпонентная карта
-    есть, а поле синей команды в панели оставалось пустым.
+    Battle Balaclava «No Gloves» - ровно этот случай: покомпонентная карта
+    есть, а поле синей команды в панели оставалось пустым
     """
     with TemporaryDirectory() as tmp:
         files = _files(
@@ -275,7 +273,7 @@ def test_single_material_hat_also_emits_a_blu_frame():
 
 
 def test_multi_material_hat_does_not_emit_a_single_frame():
-    """У многоматериальной шапки одиночный кадр лёг бы на все меши сразу."""
+    """У многоматериальной шапки одиночный кадр лёг бы на все меши сразу"""
     with TemporaryDirectory() as tmp:
         files = _files(
             auto_1=("models/hat/a1", (10, 0, 0, 255)),
@@ -294,24 +292,24 @@ def test_multi_material_hat_does_not_emit_a_single_frame():
         assert not frames, "только покомпонентная карта"
 
 def test_missing_blu_texture_is_treated_as_shared():
-    """BLU-материал есть в QC, а его текстуры в игре нет.
+    """BLU-материал есть в QC, а его текстуры в игре нет
 
-    Показать нечего; пометить материал командным — значит оставить у синей
-    команды пустое поле. Считаем его общим и оставляем RED-картинку.
+    Показать нечего, пометить материал командным - значит оставить у синей
+    команды пустое поле. Считаем его общим и оставляем RED-картинку
     """
     with TemporaryDirectory() as tmp:
         files = _files(hat=("models/hat/red", (40, 0, 0, 255)))
-        # VMT синего есть, а VTF, на который он ссылается, — нет
+        # VMT синего есть, а VTF, на который он ссылается, - нет
         files[f"materials/{CD}/hat_blue.vmt"] = vmt(basetexture="models/hat/nope")
         w, decomp = _worker(files, QC_SIMPLE_TEAM, tmp)
         w._extract_hat_textures_via_qc_vmt(decomp, ["hat"])
 
         raw = w._extract_hat_blu_textures(decomp, ["hat"])
-        assert raw == {}, "различий показать не можем — карты нет"
+        assert raw == {}, "различий показать не можем - карты нет"
 
 
 def test_missing_blu_texture_among_several_materials():
-    """Тот же случай, но материалов несколько: остальные не страдают."""
+    """Тот же случай, но материалов несколько: остальные не страдают"""
     with TemporaryDirectory() as tmp:
         files = _files(
             auto_1=("models/hat/a1", (10, 0, 0, 255)),
@@ -326,16 +324,16 @@ def test_missing_blu_texture_among_several_materials():
         raw = w._extract_hat_blu_textures(decomp, mats)
 
         assert raw["auto_1"][0], "у первого своя BLU-текстура"
-        assert raw["auto"] == (None, "auto"), "второй — общий, а не пустой"
+        assert raw["auto"] == (None, "auto"), "второй - общий, а не пустой"
 
 
 
-# ── Какой столбец даёт синюю текстуру предмета ────────────────────────────── #
+# Какой столбец даёт синюю текстуру предмета
 #
 # Строка $texturegroup описывает ВСЮ модель, а показываем мы иногда лишь её
 # часть: Dead Ringer рисуется вьюмоделью, где рядом с часами лежат руки шпиона.
-# Раньше синей текстурой предмета становился первый столбец, который удалось
-# найти, — то есть чужие руки.
+# Синей текстурой предмета не должен стать первый найденный столбец, то есть
+# чужие руки
 
 QC_VIEWMODEL_WITH_ARMS = """
 $modelname "v_watch_pocket_spy.mdl"
@@ -357,15 +355,15 @@ def _layout_model(qc_text: str, tmp: str):
 
 
 def test_blu_comes_from_the_column_of_our_own_material():
-    """Показываем только часы — синими стать могут лишь они, а не руки рядом."""
+    """Показываем только часы - синими стать могут лишь они, а не руки рядом"""
     with TemporaryDirectory() as tmp:
         model = _layout_model(QC_VIEWMODEL_WITH_ARMS, tmp)
         assert texture_locator.own_blu_names(model, ["c_pocket_watch"]) == [], \
-            "столбец часов в обеих строках один — команды у предмета нет"
+            "столбец часов в обеих строках один - команды у предмета нет"
 
 
 def test_blu_of_a_neighbouring_column_is_not_stolen():
-    """Руки командные, но красить пользователь просил не их."""
+    """Руки командные, но красить пользователь просил не их"""
     with TemporaryDirectory() as tmp:
         model = _layout_model(QC_VIEWMODEL_WITH_ARMS, tmp)
         names = texture_locator.own_blu_names(model, ["spy_hands_red"])
@@ -373,7 +371,7 @@ def test_blu_of_a_neighbouring_column_is_not_stolen():
 
 
 def test_unmatched_materials_leave_the_decision_open():
-    """Имена мешей с $texturegroup не сошлись — врать про команду нечем."""
+    """Имена мешей с $texturegroup не сошлись - врать про команду нечем"""
     with TemporaryDirectory() as tmp:
         model = _layout_model(QC_SIMPLE_TEAM, tmp)
         assert texture_locator.own_blu_names(model, ["чужой_материал"]) is None
@@ -381,8 +379,8 @@ def test_unmatched_materials_leave_the_decision_open():
 
 
 #: Команда меняет НЕ материал геометрии, а добавку из $texturegroup: у
-#: quadball это граната, у Loose Cannon — ядро, у часов шпиона — руки. Модель
-#: при этом одноматериальная.
+#: quadball это граната, у Loose Cannon - ядро, у часов шпиона - руки. Модель
+#: при этом одноматериальная
 QC_TEAM_ONLY_IN_EXTRA = r"""
 $modelname "gun.mdl"
 $cdmaterials "models\workshop\player\items\demo\hat\"
@@ -397,13 +395,13 @@ $texturegroup "skinfamilies"
 
 def test_team_material_outside_geometry_still_gets_blu():
     """
-    BLU ищется по КАРТОЧКАМ, а не только по материалам геометрии.
+    BLU ищется по КАРТОЧКАМ, а не только по материалам геометрии
 
     У quadball, Loose Cannon и часов шпиона командная текстура лежит в
     добавке из $texturegroup, а геометрия одноматериальная. Пока решение
     принималось по длине списка материалов модели, такое оружие уходило в
-    ветку одиночного BLU — и не получало его вовсе: переключатель RED/BLU
-    был, а картинка не менялась ни в 2D, ни в 3D.
+    ветку одиночного BLU - и не получало его вовсе: переключатель RED/BLU
+    был, а картинка не менялась ни в 2D, ни в 3D
     """
     with TemporaryDirectory() as tmp:
         files = _files(
@@ -411,7 +409,7 @@ def test_team_material_outside_geometry_still_gets_blu():
             ball_red=("models/gun/ball_red", (20, 0, 0, 255)),
             ball_blue=("models/gun/ball_blue", (0, 0, 20, 255)),
         )
-        # BLU ищется и прямым путём по имени материала — кладём VTF и туда.
+        # BLU ищется и прямым путём по имени материала - кладём VTF и туда
         files[f"materials/{CD}/ball_blue.vtf"] = _png_bytes((0, 0, 20, 255))
 
         w, decomp = _worker(files, QC_TEAM_ONLY_IN_EXTRA, tmp)
@@ -420,7 +418,7 @@ def test_team_material_outside_geometry_still_gets_blu():
         seen = {}
         w.blu_multi_material.connect(lambda pair: seen.update(blu=pair))
 
-        # Геометрия знает ровно один материал — как у настоящей модели.
+        # Геометрия знает ровно один материал - как у настоящей модели
         w._emit_weapon_textures(str(Path(tmp) / "model.obj"), ["gun"])
 
         assert "blu" in seen, "команда у добавки должна дать BLU-карту"
@@ -443,8 +441,8 @@ $texturegroup "skinfamilies"
 
 def test_single_texture_prefers_the_material_that_is_on_screen():
     """Звон смерти показывается вьюмоделью с руками, из которой оставлены одни
-    часы, а первая колонка строки — `spy_hands_red`: карточка часов показывала
-    руки шпиона. Текстура ищется прежде всего для материала в кадре."""
+    часы, а первая колонка строки - `spy_hands_red`: карточка часов показывала
+    руки шпиона. Текстура ищется прежде всего для материала в кадре"""
     with TemporaryDirectory() as tmp:
         files = _files(
             spy_hands_red=("models/spy/hands", (200, 30, 30, 255)),

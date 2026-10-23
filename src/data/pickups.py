@@ -1,20 +1,20 @@
 """
-Данные о моделях пикапов TF2: аптечки и патроны (models/items/).
+Данные о моделях пикапов TF2: аптечки и патроны (models/items/)
 
 Это мир-объекты (без команды RED/BLU и без skinfamilies), но мод строится
 через тот же pipeline, что у оружия/снарядов:
-  MDL из VPK → Crowbar декомпилирует → QC отдаёт текстуры.
+  MDL из VPK -> Crowbar декомпилирует -> QC отдаёт текстуры
 
-mode пикапа формируется как f"pickup_{key}" — _resolve_3d_weapon_key/сборка
+mode пикапа формируется как f"pickup_{key}" - _resolve_3d_weapon_key/сборка
 трактуют его как обычное оружие (weapon_key = key), путь берётся из
-PICKUP_MDL_PATHS (подмешан в WEAPON_MDL_PATHS).
+PICKUP_MDL_PATHS (подмешан в WEAPON_MDL_PATHS)
 
-Пути выверены по tf2_misc_dir.vpk (папка models/items/).
+Пути выверены по tf2_misc_dir.vpk (папка models/items/)
 """
 
 from typing import Dict
 
-# key → {ru, en, mdl_path}. key совпадает с weapon_key (basename без расширения).
+# key -> {ru, en, mdl_path}. key совпадает с weapon_key (basename без расширения)
 PICKUPS: Dict[str, dict] = {
     "medkit_small": {
         "ru": "Аптечка (малая)", "en": "Health Kit (Small)",
@@ -90,10 +90,10 @@ PICKUPS: Dict[str, dict] = {
     },
 }
 
-#: Префикс mode для пикапов (mode = f"{PICKUP_MODE_PREFIX}{key}").
+#: Префикс mode для пикапов (mode = f"{PICKUP_MODE_PREFIX}{key}")
 PICKUP_MODE_PREFIX = "pickup_"
 
-#: key → путь MDL (для подмешивания в WEAPON_MDL_PATHS).
+#: key -> путь MDL (для подмешивания в WEAPON_MDL_PATHS)
 PICKUP_MDL_PATHS: Dict[str, str] = {
     key: data["mdl_path"] for key, data in PICKUPS.items()
 }

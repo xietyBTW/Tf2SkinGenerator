@@ -13,11 +13,11 @@ logger = get_logger(__name__)
 
 class ExtractTextureWorker(StandardWorker):
     """
-    Воркер для выполнения извлечения текстуры в фоновом потоке.
+    Воркер для выполнения извлечения текстуры в фоновом потоке
 
     Поддерживает два режима:
-      • weapon_key задан, hand_textures=None → извлечение текстуры оружия
-      • hand_textures задан → извлечение текстур рук (materials/models/player/...)
+      • weapon_key задан, hand_textures=None -> извлечение текстуры оружия
+      • hand_textures задан -> извлечение текстур рук (materials/models/player/...)
     """
 
     def __init__(
@@ -35,14 +35,14 @@ class ExtractTextureWorker(StandardWorker):
         """
         Args:
             textures_vpk_path:  Путь к tf2_textures_dir.vpk
-            weapon_key:         Ключ оружия (например, c_scattergun) — используется
+            weapon_key:         Ключ оружия (например, c_scattergun) - используется
                                 только при hand_textures=None
             export_folder:      Папка для экспорта
             export_format:      Формат экспорта (VTF, PNG, TGA, JPG)
             language:           Язык для сообщений
-            hand_textures:      Если задан — список (folder, vtf_name) для рук;
+            hand_textures:      Если задан - список (folder, vtf_name) для рук;
                                 тогда weapon_key игнорируется
-            use_explicit_list:  True → извлекать только явно перечисленные файлы
+            use_explicit_list:  True -> извлекать только явно перечисленные файлы
                                 из hand_textures (не сканировать папки целиком).
                                 Используется при экспорте тел персонажей с диалогом.
             parent:             Родительский объект Qt
@@ -58,9 +58,9 @@ class ExtractTextureWorker(StandardWorker):
         self.misc_vpk_path      = misc_vpk_path
 
     def work(self) -> Tuple[bool, str]:
-        """Выполняет извлечение текстуры в фоновом потоке."""
+        """Выполняет извлечение текстуры в фоновом потоке"""
         if self.hand_textures is not None:
-            # ── Режим рук / тел персонажей ─────────────────────────────── #
+            # Режим рук / тел персонажей
             success, message, cancelled = TF2VPKExtractService.extract_hand_textures_with_progress(
                 self.textures_vpk_path,
                 self.hand_textures,
@@ -74,7 +74,7 @@ class ExtractTextureWorker(StandardWorker):
                 arm_model_key=self.weapon_key,
             )
         else:
-            # ── Режим оружия ───────────────────────────────────────────── #
+            # Режим оружия
             success, message, cancelled = TF2VPKExtractService.extract_texture_with_progress(
                 self.textures_vpk_path,
                 self.weapon_key,

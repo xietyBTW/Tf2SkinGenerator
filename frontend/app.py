@@ -1,19 +1,19 @@
 """
-Запуск нового интерфейса как приложения — в своём окне, без браузера.
+Запуск нового интерфейса как приложения - в своём окне, без браузера
 
 Что происходит: локальный сервер поднимается на свободном порту в фоновом
 потоке, а страница открывается в окне без адресной строки, вкладок и закладок.
-Внешне это обычное приложение; внутри — тот же движок Edge (WebView2), который
-и так стоит в Windows.
+Внешне это обычное приложение, внутри - тот же движок Edge (WebView2), который
+и так стоит в Windows
 
 Окно даёт, по порядку предпочтения:
 
-1. pywebview — настоящий хост (`pip install pywebview`). Именно он останется,
+1. pywebview - настоящий хост (`pip install pywebview`). Именно он останется,
    когда мост Python↔страница переедет с HTTP на `window.pywebview.api`.
-2. Edge или Chrome в режиме `--app` — окно без обвязки браузера. Ничего
+2. Edge или Chrome в режиме `--app` - окно без обвязки браузера. Ничего
    доустанавливать не нужно, поэтому это рабочий вариант уже сегодня.
-3. Браузер по умолчанию — если не нашлось ни того, ни другого. Тогда это
-   честно вкладка, а не окно приложения.
+3. Браузер по умолчанию - если не нашлось ни того, ни другого. Тогда это
+   честно вкладка, а не окно приложения
 
 Запуск:
     run.bat ui           (или python frontend/app.py)
@@ -22,7 +22,6 @@
 from __future__ import annotations
 
 import os
-import socket
 import subprocess
 import sys
 import threading
@@ -32,17 +31,17 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT.parent))
 
-from frontend.devserver import Handler, Server  # noqa: E402  — после правки sys.path
+from frontend.devserver import Handler, Server  # noqa: E402  - после правки sys.path
 from src.app import api  # noqa: E402
 
 TITLE = "TF2 Skin Generator"
 
 #: Фон страницы по темам (--bg из base.css): им красится окно до первого
-#: кадра страницы и полоска над ней у своего заголовка (titlebar.py).
+#: кадра страницы и полоска над ней у своего заголовка (titlebar.py)
 BACKGROUND = {'dark': '#0f0f0e', 'light': '#f2f1ee'}
 
 #: Где искать браузер для режима «окно приложения». Edge есть в Windows 11
-#: всегда, Chrome — как повезёт.
+#: всегда, Chrome - как повезёт
 _BROWSERS = (
     r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
     r"C:\Program Files\Microsoft\Edge\Application\msedge.exe",
@@ -51,59 +50,96 @@ _BROWSERS = (
 )
 
 
-def _free_port() -> int:
-    """Свободный порт у системы: фиксированный мог быть занят прошлым запуском."""
-    with socket.socket() as s:
-        s.bind(("127.0.0.1", 0))
-        return s.getsockname()[1]
+#: Постоянный порт. Кэш WebView2 (профиль в data_dir, см. _open_pywebview)
+#: привязан к адресу, и на случайном порту каждый запуск начинал с пустого:
+#: сотни иконок каталога снова шли через Python, в очередь к прогреву архивов
+#: за GIL. Не 5173 - тот у dev-сервера, а он бывает открыт параллельно
+_PORT = 47615
 
 
-def _serve(port: int) -> Server:
-    """Поднимает локальный сервер в фоновом потоке."""
-    server = Server(("127.0.0.1", port), Handler)
+def _serve() -> Server:
+    """Поднимает локальный сервер в фоновом потоке
+
+    Порт занят (второй экземпляр, чужая программа) - берём любой свободный:
+    без кэша браузера, но работает
+    """
+    try:
+        server = Server(("127.0.0.1", _PORT), Handler)
+    except OSError:
+        server = Server(("127.0.0.1", 0), Handler)
     threading.Thread(target=server.serve_forever, daemon=True).start()
     return server
 
 
 def _look() -> dict:
     """
-    Тема и анимации из конфига — для первого кадра окна.
+    Тема и анимации из конфига - для первого кадра окна
 
     Страница узнаёт настройки только запросом в Python, а до ответа рисуется
     светлой. Тема в адресе (index.html читает её до первого кадра) и цвет фона
-    окна убирают и это мигание, и белый кадр WebView2 до загрузки страницы.
+    окна убирают и это мигание, и белый кадр WebView2 до загрузки страницы
     """
     try:
         from src.config.app_config import AppConfig
         cfg = AppConfig.load_config()
-    except Exception:  # noqa: BLE001 — без конфига окно просто светлое
+    except Exception:  # noqa: BLE001 - без конфига окно просто светлое
         cfg = {}
     return {
-        # Без темы в конфиге страница берёт тёмную (api.settings) — и первый
-        # кадр тоже, иначе свежий запуск мигнул бы светлым.
+        # Без темы в конфиге страница берёт тёмную (api.settings) - и первый
+        # кадр тоже, иначе свежий запуск мигнул бы светлым
         'theme': 'light' if cfg.get('theme') == 'light' else 'dark',
         'motion': 'off' if cfg.get('ui_animations') is False else '',
     }
 
 
+def _drop_request_hooks() -> None:
+    """
+    Снимает перехват запросов, который pywebview ставит на всё
+
+    pywebview подписывается на каждый запрос и ответ страницы ради событий
+    request_sent и response_received, а мы их не читаем. С подпиской каждая
+    иконка и каждый вызов API сперва ждут поток окна и GIL, по одному. Пока
+    фон грузит модель, вызов API стоял в такой очереди сотни миллисекунд
+    """
+    try:
+        from webview.platforms import edgechromium
+        ready = edgechromium.EdgeChrome.on_webview_ready
+        context = edgechromium.CoreWebView2WebResourceContext.All
+    except Exception as exc:                  # noqa: BLE001 - нет WebView2 / другая версия
+        print(f"Перехват запросов pywebview не снят: {exc}")
+        return
+
+    def on_webview_ready(self, sender, args):
+        ready(self, sender, args)
+        try:
+            core = sender.CoreWebView2
+            core.RemoveWebResourceRequestedFilter('*', context)
+            core.WebResourceResponseReceived -= self.on_web_resource_response
+        except Exception as exc:              # noqa: BLE001 - с перехватом окно тоже работает
+            print(f"Перехват запросов pywebview не снят: {exc}")
+
+    edgechromium.EdgeChrome.on_webview_ready = on_webview_ready
+
+
 def _open_pywebview(url: str, look: dict) -> bool:
-    """Настоящее окно приложения. False — pywebview не установлен."""
+    """Настоящее окно приложения. False - pywebview не установлен"""
     try:
         import webview
     except ImportError:
         return False
-    from src.shared.paths import data_dir
+
+    _drop_request_hooks()
 
     # Свой заголовок окна вместо системного (frontend/titlebar.py). Не
-    # загрузился (старая Windows без нужных функций) — окно просто остаётся
-    # с системным: это не повод не открыться вовсе.
+    # загрузился (старая Windows без нужных функций) - окно просто остаётся
+    # с системным: это не повод не открыться вовсе
     try:
         from frontend import titlebar
     except Exception as exc:  # noqa: BLE001
         print(f"Свой заголовок окна недоступен: {exc}")
         titlebar = None
     if titlebar is not None:
-        # Признак для первого кадра страницы: шапка таскает окно ещё до модулей.
+        # Признак для первого кадра страницы: шапка таскает окно ещё до модулей
         url += '&frame=custom'
 
     window = webview.create_window(TITLE, url, width=1440, height=900,
@@ -111,27 +147,51 @@ def _open_pywebview(url: str, look: dict) -> bool:
                                    background_color=BACKGROUND[look['theme']])
     api.set_folder_picker(lambda start: _pick_folder(window, start))
     if titlebar is not None:
-        # Кнопки окна страница зовёт через api.window_control.
+        # Кнопки окна страница зовёт через api.window_control
         titlebar.attach(window, look['theme'], BACKGROUND)
         api.set_window_control(titlebar.control)
-    # Профиль WebView2 — в своей папке данных. Без storage_path pywebview
+    # Профиль WebView2 - в своей папке данных. Без storage_path pywebview
     # заводит его в %TEMP%\tmpXXXXXXXX (сотни файлов) и удаляет только при
-    # штатном закрытии окна: после выхода на обновление, краша или занятых
-    # файлов папка оставалась, и каждый запуск добавлял новую. Здесь папка
-    # одна и та же: приватный режим её по-прежнему чистит, а остаток прошлого
-    # раза просто перезапишется.
-    webview.start(storage_path=str(data_dir() / 'cache' / 'webview'))
+    # штатном закрытии окна, так что после выхода на обновление или краша
+    # каждый запуск оставлял бы новую папку. Здесь она одна и та же
+    #
+    # private_mode у pywebview по умолчанию True - это InPrivate WebView2: кэш
+    # браузера живёт в памяти и пропадает с выходом, и каждый запуск все
+    # иконки каталога снова шли через Python (постоянный порт ради кэша без
+    # этого ничего не давал). Устаревшего кода страницы бояться не надо: её
+    # файлы сервер отдаёт с no-store, долгий срок только у иконок
+    webview.start(private_mode=False, storage_path=str(_webview_profile()))
     return True
+
+
+def _webview_profile() -> Path:
+    """
+    Папка профиля WebView2
+
+    Из исходников data_dir() это папка репозитория, а она бывает на HDD. Кэш
+    браузера оттуда читался 50 мс на иконку против 1 мс на SSD, поэтому
+    профиль кладём в LOCALAPPDATA, как у собранного. Папка своя, а не общая с
+    установленным: ui.bat обходит мьютекс, а два WebView2 на одном профиле с
+    разными настройками не поднимаются
+    """
+    from src.shared.paths import APP_DIR_NAME, data_dir, is_frozen
+
+    if is_frozen():
+        return data_dir() / 'cache' / 'webview'
+    base = os.environ.get('LOCALAPPDATA')
+    if not base:
+        return (data_dir() / 'cache' / 'webview').resolve()
+    return Path(base) / APP_DIR_NAME / 'webview-dev'
 
 
 def _pick_folder(window, start: str) -> str:
     """
-    Системный выбор папки поверх окна. Отмена — пустая строка.
+    Системный выбор папки поверх окна. Отмена - пустая строка
 
     Вызов приходит из потока сервера, а диалог WinForms обязан открываться в
     потоке окна: pywebview сам туда не переходит, и `create_file_dialog` из
     чужого потока может намертво подвесить окно (pywebview #1823). Переходим
-    через Invoke — тем же путём, каким pywebview показывает и прячет окно.
+    через Invoke - тем же путём, каким pywebview показывает и прячет окно
     """
     from System import Action  # pythonnet: есть везде, где есть WinForms
     from webview import FileDialog
@@ -149,12 +209,12 @@ def _pick_folder(window, start: str) -> str:
 
 
 def _open_browser_app(url: str) -> bool:
-    """Окно браузера без адресной строки и вкладок. False — браузер не найден."""
+    """Окно браузера без адресной строки и вкладок. False - браузер не найден"""
     exe = next((p for p in _BROWSERS if os.path.isfile(p)), None)
     if exe is None:
         return False
     # Свой профиль: иначе окно прилипает к уже открытому браузеру пользователя
-    # и закрывается вместе с ним.
+    # и закрывается вместе с ним
     profile = Path(os.environ.get("LOCALAPPDATA", ".")) / "tf2skingen" / "webview"
     profile.mkdir(parents=True, exist_ok=True)
     proc = subprocess.Popen([
@@ -163,21 +223,21 @@ def _open_browser_app(url: str) -> bool:
         "--no-first-run", "--no-default-browser-check",
         "--window-size=1440,900",
     ])
-    proc.wait()          # окно закрыли — закрываем и приложение
+    proc.wait()          # окно закрыли - закрываем и приложение
     return True
 
 
 def _snappy_gil() -> None:
     """
-    Окно отзывчиво, пока фоновые потоки считают.
+    Окно отзывчиво, пока фоновые потоки считают
 
-    Обработчики сообщений окна — Python (свой заголовок, titlebar.py, и
+    Обработчики сообщений окна - Python (свой заголовок, titlebar.py, и
     события pywebview), и каждому сообщению нужен GIL. Пока фон разбирает
     архивы игры и items_game, ждущий поток на Windows получает GIL только на
     тике системного таймера, раз в 15,6 мс, а при нескольких занятых потоках
     через сотни мс: окно дёргалось, если его таскали во время загрузки. Таймер
     в 1 мс (только для этого процесса, Windows 10 2004+) и передача GIL раз в
-    1 мс сводят задержку к 2-3 мс; замер: 422 мс → 3 мс в худшем случае.
+    1 мс сводят задержку к 2-3 мс, замер: 422 мс -> 3 мс в худшем случае
     """
     sys.setswitchinterval(0.001)
     if sys.platform == 'win32':
@@ -190,9 +250,8 @@ def _snappy_gil() -> None:
 
 def main() -> None:
     _snappy_gil()
-    port = _free_port()
-    _serve(port)
-    # Индексы архивов игры греются, пока открывается окно.
+    port = _serve().server_address[1]
+    # Индексы архивов игры греются, пока открывается окно
     api.warm_up()
     look = _look()
     url = f"http://127.0.0.1:{port}/?theme={look['theme']}&motion={look['motion']}"
@@ -203,8 +262,8 @@ def main() -> None:
     if _open_browser_app(url):
         return
 
-    # Ни того, ни другого: открываем как обычную страницу и ждём Ctrl+C.
-    print("Окно приложения недоступно — открываю в браузере. "
+    # Ни того, ни другого: открываем как обычную страницу и ждём Ctrl+C
+    print("Окно приложения недоступно - открываю в браузере. "
           "Для своего окна: pip install pywebview")
     webbrowser.open(url)
     try:

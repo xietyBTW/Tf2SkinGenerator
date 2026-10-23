@@ -390,19 +390,19 @@ TF2_WEAPONS = {
     }
 }
 
-# Специальные режимы (эффекты). Только значения нужны везде (mode in SPECIAL_MODES).
+# Специальные режимы (эффекты). Только значения нужны везде (mode in SPECIAL_MODES)
 SPECIAL_MODES = (
     "critHIT",
     "spray",
     # Скины эффектов смерти (override игровых материалов рагдолла, client-side):
-    "death_ice",    # лёд (как от Sky-cicle)    → models/player/shared/ice_player
-    "death_gold",   # золото (Golden Pan/Saxxy) → models/player/shared/gold_player
-    "death_fire",   # огонь горящего игрока     → effects/tiledfire/fireLayeredSlowTiled512
+    "death_ice",    # лёд (как от Sky-cicle)    -> models/player/shared/ice_player
+    "death_gold",   # золото (Golden Pan/Saxxy) -> models/player/shared/gold_player
+    "death_fire",   # огонь горящего игрока     -> effects/tiledfire/fireLayeredSlowTiled512
 )
 
 # Спец-режимы, где пишем ТОЛЬКО VTF (без VMT): эти материалы используют особый
-# игровой шейдер/прокси (cloak/цвет/scroll), поэтому собственный VMT их сломает —
-# игровой VMT сам подхватит нашу текстуру по тому же пути.
+# игровой шейдер/прокси (cloak/цвет/scroll), поэтому собственный VMT их сломает -
+# игровой VMT сам подхватит нашу текстуру по тому же пути
 VTF_ONLY_SPECIAL_MODES = {"death_ice", "death_gold", "death_fire"}
 
 TF2_CLASSES = (
@@ -421,10 +421,10 @@ WEAPON_TYPES = {
     "Custom": {"ru": "Кастомный мод", "en": "Custom Mod"},
 }
 
-# Слоты оружия — то, что показывается в списке «Тип оружия» под категорией «Оружие».
-# PlayerSkin/Hands/Custom сюда НЕ входят: они теперь в других категориях.
+# Слоты оружия - то, что показывается в списке «Тип оружия» под категорией «Оружие».
+# PlayerSkin/Hands/Custom сюда НЕ входят: они в других категориях.
 # Watch (часы шпиона) и PDA (КПК инженера) показываются только у тех классов,
-# где они есть (фильтр по TF2_WEAPONS в main_window).
+# где они есть (по TF2_WEAPONS)
 WEAPON_SLOT_TYPES = ["Primary", "Secondary", "Melee", "Watch", "PDA"]
 
 #: Оружие, которое в игре - другая строка скина модели из таблицы, а не своя
@@ -442,18 +442,18 @@ WEAPON_SKIN_ITEMS = {
     },
 }
 
-# Типы оружия, которые относятся к категории «Персонаж» (тело + руки).
+# Типы оружия, которые относятся к категории «Персонаж» (тело + руки)
 CHARACTER_PART_TYPES = ["PlayerSkin", "Hands"]
 
 
 def get_character_parts(class_name: str, language: str = "ru") -> list:
     """
     Возвращает части персонажа (тело + руки) для категории «Персонаж»
-    как список (key, display_name).
+    как список (key, display_name)
 
     Объединяет записи PlayerSkin и Hands выбранного класса. mode для каждой
-    части строится как f"{class.lower()}_{key}" — те же ключи, что и раньше
-    (scout_body, scout_hands, engineer_mech_hands, spy_masks и т.д.).
+    части строится как f"{class.lower()}_{key}" (scout_body, scout_hands,
+    engineer_mech_hands, spy_masks и т.д.)
     """
     parts: list = []
     cls = TF2_WEAPONS.get(class_name, {})
@@ -488,7 +488,7 @@ def get_weapon_type_name(weapon_type: str, language: str = "ru") -> str:
 
 
 def get_weapon_type_key(type_name: str, language: str = "ru") -> Optional[str]:
-    """Обратный lookup: ключ типа оружия по его переведённому названию (или None)."""
+    """Обратный lookup: ключ типа оружия по его переведённому названию (или None)"""
     for key in WEAPON_TYPES:
         if get_weapon_type_name(key, language) == type_name:
             return key
@@ -497,10 +497,10 @@ def get_weapon_type_key(type_name: str, language: str = "ru") -> Optional[str]:
 
 def weapon_key_from_mode(mode: str) -> str:
     """
-    Извлекает ключ оружия из mode-строки обычного оружия.
+    Извлекает ключ оружия из mode-строки обычного оружия
 
     mode имеет вид "<class>_<weaponkey>" (например "scout_c_scattergun"),
-    поэтому берём часть после первого '_'. Если '_' нет — возвращаем mode как есть.
+    поэтому берём часть после первого '_'. Если '_' нет - возвращаем mode как есть
     """
     return mode.split('_', 1)[1] if '_' in mode else mode
 
@@ -512,7 +512,7 @@ for class_name, class_weapons in TF2_WEAPONS.items():
         for weapon_key in weapons.keys():
             WEAPON_MDL_PATHS[weapon_key] = f"models/weapons/c_models/{weapon_key}/{weapon_key}.mdl"
 
-# ── Нестандартные пути MDL (папка или имя файла не совпадают с ключом оружия) ──
+# Нестандартные пути MDL (папка или имя файла не совпадают с ключом оружия)
 
 # Праздничные Неумолимая сила и Банкате: файл прямо в c_models/, без папки
 WEAPON_MDL_PATHS["c_xms_double_barrel"] = "models/weapons/c_models/c_xms_double_barrel.mdl"
@@ -533,17 +533,17 @@ WEAPON_MDL_PATHS["c_axtinguisher_pyro"] = (
     "models/weapons/c_models/c_axtinguisher/c_axtinguisher_pyro.mdl"
 )
 
-# Знамёна в каталоге - рюкзаки (extra_wearable в items_game); в руке у них
+# Знамёна в каталоге - рюкзаки (extra_wearable в items_game), в руке у них
 # своя модель-горн, её вид от первого лица берёт по WeaponAnimInfo.held.
 # Battalion's Backup: игра берёт workshop-модель (c_batt_buffpack в
-# c_models - её старая копия, раньше по ошибке стояла как «Вдохновляющее знамя»).
+# c_models - её старая копия, не «Вдохновляющее знамя»)
 WEAPON_MDL_PATHS["c_battalion_buffpack"] = (
     "models/workshop/weapons/c_models/c_battalion_buffpack/c_battalion_buffpack.mdl"
 )
 
 # Горн Поддержки батальона: игра берёт workshop-модель (как и рюкзак).
 # Горны знамён - отдельные предметы: в игре это своя модель (model_player),
-# у рюкзака её не перекрасить.
+# у рюкзака её не перекрасить
 WEAPON_MDL_PATHS["c_battalion_bugle"] = (
     "models/workshop/weapons/c_models/c_battalion_bugle/c_battalion_bugle.mdl"
 )
@@ -606,8 +606,8 @@ WEAPON_MDL_PATHS["w_sd_sapper"] = (
     "models/weapons/w_models/w_sd_sapper.mdl"
 )
 
-# Часы шпиона: Invis Watch лежит плоским файлом, Dead Ringer и Cloak and Dagger —
-# в подпапке parts/. КПК инженера (c_builder, c_pda_engineer) совпадают с дефолтом.
+# Часы шпиона: Invis Watch лежит плоским файлом, Dead Ringer и Cloak and Dagger -
+# в подпапке parts/. КПК инженера (c_builder, c_pda_engineer) совпадают с дефолтом
 WEAPON_MDL_PATHS["c_spy_watch"] = (
     "models/weapons/c_models/c_spy_watch.mdl"
 )
@@ -618,29 +618,29 @@ WEAPON_MDL_PATHS["c_leather_watch"] = (
     "models/weapons/c_models/c_leather_watch/parts/c_leather_watch.mdl"
 )
 # Крякенптиц и Часы ярого поклонника: мировой модели у них нет, в игре только
-# вьюмодели (items_game: model_player = v_*). Крякенптиц - из workshop_partner.
+# вьюмодели (items_game: model_player = v_*). Крякенптиц - из workshop_partner
 WEAPON_MDL_PATHS["v_hm_watch"] = (
     "models/workshop_partner/weapons/v_models/v_hm_watch/v_hm_watch.mdl"
 )
 WEAPON_MDL_PATHS["v_ttg_watch_spy"] = "models/weapons/v_models/v_ttg_watch_spy.mdl"
 
-# ── Праздничные (xmas) модели ─────────────────────────────────────────────────
+# Праздничные (xmas) модели
 # Festive-модель лежит в папке БАЗОВОГО оружия (c_rocketlauncher/c_rocketlauncher_xmas),
-# а не в собственной. Точный путь всё равно берётся из items_game.txt первым; это —
-# фолбэк, когда items_game недоступен. Папка = ключ без суффикса _xmas, кроме особых.
+# а не в собственной. Точный путь всё равно берётся из items_game.txt первым, это -
+# фолбэк, когда items_game недоступен. Папка = ключ без суффикса _xmas, кроме особых
 _FESTIVE_BASE_FOLDER = {
-    "c_backburner_xmas": "c_flamethrower",  # дожигатель — в папке огнемёта
+    "c_backburner_xmas": "c_flamethrower",  # дожигатель - в папке огнемёта
 }
 for _k in [k for k in WEAPON_MDL_PATHS if k.endswith("_xmas")]:
     _folder = _FESTIVE_BASE_FOLDER.get(_k, _k[:-len("_xmas")])
     WEAPON_MDL_PATHS[_k] = f"models/weapons/c_models/{_folder}/{_k}.mdl"
-# Праздничный поводырь лежит прямо в c_models/ без подпапки.
+# Праздничный поводырь лежит прямо в c_models/ без подпапки
 WEAPON_MDL_PATHS["c_wrangler_xmas"] = "models/weapons/c_models/c_wrangler_xmas.mdl"
-# Цельные праздничные версии оружия из мастерской лежат в models/workshop/.
+# Цельные праздничные версии оружия из мастерской лежат в models/workshop/
 for _k in ("c_blackbox_xmas", "c_holymackerel_xmas", "c_crusaders_crossbow_xmas"):
     WEAPON_MDL_PATHS[_k] = f"models/workshop/weapons/c_models/{_k[:-len('_xmas')]}/{_k}.mdl"
 
-# ── Модели рук (c_class_arms) ─────────────────────────────────────────────────
+# Модели рук (c_class_arms)
 _ARM_CLASSES = [
     "c_scout_arms",
     "c_soldier_arms",
@@ -655,11 +655,11 @@ _ARM_CLASSES = [
 ]
 for _arm in _ARM_CLASSES:
     # Руки хранятся по плоскому пути (без подпапки), а не c_models/{arm}/{arm}.mdl.
-    # Это обеспечивает совпадение ключа кэша при повторных запусках.
+    # Это обеспечивает совпадение ключа кэша при повторных запусках
     WEAPON_MDL_PATHS[_arm] = f"models/weapons/c_models/{_arm}.mdl"
 
-# ── Модели тел персонажей (models/player/) ────────────────────────────────────
-# Используются для 3D Preview; в pipeline сборки VPK не задействованы.
+# Модели тел персонажей (models/player/)
+# Используются для 3D Preview; в pipeline сборки VPK не задействованы
 WEAPON_MDL_PATHS["player_scout"]    = "models/player/scout.mdl"
 WEAPON_MDL_PATHS["player_soldier"]  = "models/player/soldier.mdl"
 WEAPON_MDL_PATHS["player_pyro"]     = "models/player/pyro.mdl"
@@ -670,15 +670,15 @@ WEAPON_MDL_PATHS["player_medic"]    = "models/player/medic.mdl"
 WEAPON_MDL_PATHS["player_sniper"]   = "models/player/sniper.mdl"
 WEAPON_MDL_PATHS["player_spy"]      = "models/player/spy.mdl"
 
-# ── Снаряды (w_models): mode = projectile_<key>, weapon_key = <key> ───────────
-# Трактуются как обычное оружие, поэтому путь к MDL должен быть в WEAPON_MDL_PATHS.
+# Снаряды (w_models): mode = projectile_<key>, weapon_key = <key>
+# Трактуются как обычное оружие, поэтому путь к MDL должен быть в WEAPON_MDL_PATHS
 from src.data.projectiles import PROJECTILE_MDL_PATHS as _PROJECTILE_MDL_PATHS
 WEAPON_MDL_PATHS.update(_PROJECTILE_MDL_PATHS)
 
-# ── Пикапы (аптечки/патроны, models/items/): mode = pickup_<key> ──────────────
+# Пикапы (аптечки/патроны, models/items/): mode = pickup_<key>
 from src.data.pickups import PICKUP_MDL_PATHS as _PICKUP_MDL_PATHS
 WEAPON_MDL_PATHS.update(_PICKUP_MDL_PATHS)
 
-# ── Реквизит насмешек (taunt props): mode = taunt_<key> ───────────────────────
+# Реквизит насмешек (taunt props): mode = taunt_<key>
 from src.data.taunt_props import TAUNT_PROP_MDL_PATHS as _TAUNT_PROP_MDL_PATHS
 WEAPON_MDL_PATHS.update(_TAUNT_PROP_MDL_PATHS)

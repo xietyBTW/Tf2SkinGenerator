@@ -7,7 +7,7 @@ from src.data.weapons import SPECIAL_MODES
 
 def _read_vmt(path: str) -> Tuple[str, str]:
     """Текст VMT и его кодировка. Моды бывают в cp1251 (русские комментарии):
-    latin-1 читает любой байт и пишет его обратно тем же, файл не портится."""
+    latin-1 читает любой байт и пишет его обратно тем же, файл не портится"""
     with open(path, 'rb') as f:
         raw = f.read()
     try:
@@ -22,11 +22,11 @@ def _write_vmt(path: str, text: str, encoding: str) -> None:
 
 
 def _live_param(name: str) -> "re.Pattern":
-    """Строка параметра ``name`` (группа 1 — всё до значения) в VMT.
+    """Строка параметра ``name`` (группа 1 - всё до значения) в VMT
 
-    С начала строки — закомментированная (`//	"$bumpmap" …`) не параметр.
+    С начала строки - закомментированная (`//	"$bumpmap" …`) не параметр.
     Значение в кавычках или без них; ``$basetexture2`` и прочие соседи не
-    совпадают.
+    совпадают
     """
     return re.compile(r'^([ \t]*"?' + re.escape(name) + r'"?[ \t]+)(?:"[^"\n]*"|[^\s"{}]+)',
                       re.IGNORECASE | re.MULTILINE)
@@ -34,14 +34,14 @@ def _live_param(name: str) -> "re.Pattern":
 
 #: Ошибки синтаксиса VMT. Текст встраивается в чужие фразы (находка
 #: диагностики, «… (строка N)» редактора), поэтому переводится здесь, а не на
-#: странице: целиком такую фразу словарь страницы не узнал бы.
+#: странице: целиком такую фразу словарь страницы не узнал бы
 _SYNTAX_ERRORS = {
     "ru": {
         "quote": "Незакрытая кавычка",
         "extra": "Лишняя закрывающая скобка }",
         "open": "Незакрытая скобка {",
         "empty": "Пустой VMT",
-        "block": "Нет блока { } — VMT должен содержать тело шейдера",
+        "block": "Нет блока { } - VMT должен содержать тело шейдера",
         "shader": 'Не найдено имя шейдера (напр. "VertexLitGeneric")',
     },
     "en": {
@@ -59,36 +59,36 @@ class VMTService:
     """Сервис для работы с VMT файлами (материалы Source Engine: пути и шаблоны)"""
 
     # Спец-режимы: (относительный путь, имя файла без расширения).
-    # Режимы вне таблицы получают дефолт materials/effects/{mode}.
+    # Режимы вне таблицы получают дефолт materials/effects/{mode}
     _SPECIAL_MODE_RELPATHS: dict = {
         "critHIT": (("materials", "effects"), "crit"),
         "spray": (("materials", "vgui", "logos"), "spray"),
         # Лёд рагдолла (Sky-cicle). Override игрового материала по пути:
         "death_ice": (("materials", "models", "player", "shared"), "ice_player"),
-        # Золотая статуя (Golden Frying Pan / Saxxy).
+        # Золотая статуя (Golden Frying Pan / Saxxy)
         "death_gold": (("materials", "models", "player", "shared"), "gold_player"),
-        # Огонь горящего игрока (слоистый огонь).
+        # Огонь горящего игрока (слоистый огонь)
         "death_fire": (("materials", "effects", "tiledfire"), "fireLayeredSlowTiled512"),
     }
 
-    # ── Валидация синтаксиса ─────────────────────────────────────────────── #
+    # Валидация синтаксиса
 
     @staticmethod
     def validate_vmt_syntax(content: str, lang: str = "ru") -> Tuple[bool, str, int]:
         """
-        Проверяет базовый KeyValues-синтаксис VMT.
+        Проверяет базовый KeyValues-синтаксис VMT
 
         Ловит самые частые причины «невидимого материала» в игре:
           - незакрытые/лишние фигурные скобки { };
           - нечётные (незакрытые) кавычки в строке;
-          - отсутствие корневого блока шейдера.
+          - отсутствие корневого блока шейдера
 
         Комментарии (// ...) и содержимое строк в кавычках игнорируются,
-        чтобы скобка/кавычка внутри значения не считалась структурной.
+        чтобы скобка/кавычка внутри значения не считалась структурной
 
         Returns:
             (is_valid, error_message, error_line)
-            error_line — номер строки (1-based) или 0, если не привязано к строке.
+            error_line - номер строки (1-based) или 0, если не привязано к строке
         """
         msg = _SYNTAX_ERRORS.get(lang, _SYNTAX_ERRORS["en"])
         depth = 0
@@ -98,7 +98,7 @@ class VMTService:
         for line_no, raw in enumerate(content.split('\n'), 1):
             line = raw
 
-            # Обрезаем // комментарий, но только если он вне кавычек.
+            # Обрезаем // комментарий, но только если он вне кавычек
             q = 0
             cut = None
             i = 0
@@ -113,14 +113,14 @@ class VMTService:
             if cut is not None:
                 line = line[:cut]
 
-            # Нечётное число кавычек в строке → незакрытая строка
+            # Нечётное число кавычек в строке -> незакрытая строка
             if line.count('"') % 2 != 0:
                 return False, msg["quote"], line_no
 
             # Убираем строковые значения, чтобы скобки внутри них не считались
             structural = re.sub(r'"[^"]*"', '', line)
 
-            # Имя шейдера/секции — токен в кавычках в начале строки до открытия блока
+            # Имя шейдера/секции - токен в кавычках в начале строки до открытия блока
             if depth == 0 and re.search(r'"[^"]+"', line):
                 saw_shader = True
 
@@ -144,13 +144,13 @@ class VMTService:
 
         return True, "", 0
 
-    # ── Внутренние хелперы ───────────────────────────────────────────────── #
+    # Внутренние хелперы
 
     @staticmethod
     def _find_block_end(content: str, brace_pos: int) -> int | None:
         """
         Находит позицию закрывающей фигурной скобки блока, начинающегося с brace_pos.
-        Учитывает вложенность. Возвращает индекс '}' или None если не найдено.
+        Учитывает вложенность. Возвращает индекс '}' или None если не найдено
         """
         depth = 0
         for i in range(brace_pos, len(content)):
@@ -165,8 +165,8 @@ class VMTService:
     @staticmethod
     def _normalize_cdmaterials(path: str) -> str:
         """
-        Нормализует путь из $cdmaterials: обратные слеши → прямые, убирает пробелы,
-        trailing-слеш и префикс 'materials/' (если есть).
+        Нормализует путь из $cdmaterials: обратные слеши -> прямые, убирает пробелы,
+        trailing-слеш и префикс 'materials/' (если есть)
         """
         normalized = path.replace('\\', '/').strip().rstrip('/')
         if normalized.startswith('materials/'):
@@ -176,10 +176,10 @@ class VMTService:
     @staticmethod
     def get_weapon_relpaths(mode: str) -> Tuple[str, str, str]:
         """
-        Возвращает относительные пути для конкретного оружия (без basepath).
+        Возвращает относительные пути для конкретного оружия (без basepath)
         
         Для спец режимов (critHIT) - простая структура в effects/.
-        Для обычного оружия - используем VGUI структуру (костыль, но так работает в TF2).
+        Для обычного оружия - используем VGUI структуру (костыль, но так работает в TF2)
         
         Args:
             mode: Режим оружия
@@ -224,10 +224,10 @@ class VMTService:
     @staticmethod
     def _get_texture_path_from_cdmaterials(cdmaterials_path: str, weapon_key: str) -> str:
         """
-        Формирует путь для $baseTexture на основе пути из $cdmaterials.
+        Формирует путь для $baseTexture на основе пути из $cdmaterials
         
         В VMT файле путь $baseTexture должен быть БЕЗ префикса materials/ и с прямыми слешами.
-        Это путь относительно корня материалов игры — Source Engine требует именно такой формат.
+        Это путь относительно корня материалов игры - Source Engine требует именно такой формат
         
         Args:
             cdmaterials_path: Путь из $cdmaterials в QC файле
@@ -250,14 +250,14 @@ class VMTService:
     @staticmethod
     def create_vmt_template_from_cdmaterials(output_path: str, cdmaterials_path: str, weapon_key: str):
         """
-        Создает VMT файл на основе пути из $cdmaterials.
+        Создает VMT файл на основе пути из $cdmaterials
         
         Путь $baseTexture в VMT будет точно таким, как в QC файле в $cdmaterials,
         с добавлением имени файла (weapon_key).
         Например, если в QC: $cdmaterials "vgui\\replay\\thumbnails\\models\\workshop_partner\\weapons\\c_models\\"
         То в VMT будет: "$baseTexture" "vgui/replay/thumbnails/models/workshop_partner/weapons/c_models/c_claymore"
         
-        Это базовый шаблон, если нет оригинального VMT из игры (ничего особенного, просто работает).
+        Это базовый шаблон, если нет оригинального VMT из игры (ничего особенного, просто работает)
         """
         texture_path = VMTService._get_texture_path_from_cdmaterials(cdmaterials_path, weapon_key)
         
@@ -272,9 +272,9 @@ class VMTService:
     @staticmethod
     def update_vmt_basetexture_path(vmt_path: str, cdmaterials_path: str, weapon_key: str):
         """
-        Обновляет путь $baseTexture в существующем VMT файле на основе пути из $cdmaterials.
+        Обновляет путь $baseTexture в существующем VMT файле на основе пути из $cdmaterials
         
-        Нужно когда мы копируем VMT из игры, но путь к текстуре может быть другим (из-за патчинга QC).
+        Нужно когда мы копируем VMT из игры, но путь к текстуре может быть другим (из-за патчинга QC)
         
         Args:
             vmt_path: Путь к VMT файлу
@@ -294,8 +294,8 @@ class VMTService:
         # Паттерн ищет "$basetexture" или "$baseTexture" с любым путем в кавычках
         # Учитываем разные форматы: "$basetexture" "path" или $basetexture "path" (VMT может быть в разном формате)
         # Используем re.IGNORECASE потому что Valve пишет по-разному (иногда с большой буквы, иногда нет)
-        # С начала строки: закомментированная строка (//	"$basetexture" …) — не
-        # параметр, и правка её вместо живой молча оставляла игре старое.
+        # С начала строки: закомментированная строка (//	"$basetexture" …) - не
+        # параметр, и правка её вместо живой молча оставляла игре старое
         pattern = _live_param('$basetexture')
 
         def replace_path(match):
@@ -331,11 +331,11 @@ class VMTService:
 
     @staticmethod
     def enable_animated_bumpmap(vmt_path: str, fps: int) -> None:
-        """Анимирует $bumpmap через $bumpframe — для гифки с включённым normal map.
+        """Анимирует $bumpmap через $bumpframe - для гифки с включённым normal map
 
         Вызывать ПОСЛЕ update_vmt_bumpmap_path: $bumpframe вставляется рядом с
         уже существующим ключом $bumpmap. fps обязан совпадать с fps базовой
-        текстуры, иначе рельеф уедет по фазе от картинки.
+        текстуры, иначе рельеф уедет по фазе от картинки
         """
         VMTService.enable_animated_basetexture(
             vmt_path, fps, var="$bumpmap", framenumvar="$bumpframe")
@@ -344,7 +344,7 @@ class VMTService:
     def enable_animated_basetexture(vmt_path: str, fps: int,
                                     var: str = "$basetexture",
                                     framenumvar: str = "$frame") -> None:
-        """Добавляет прокси AnimatedTexture для var в VMT-ФАЙЛ."""
+        """Добавляет прокси AnimatedTexture для var в VMT-ФАЙЛ"""
         if not os.path.exists(vmt_path):
             return
         content, encoding = _read_vmt(vmt_path)
@@ -356,13 +356,13 @@ class VMTService:
     def add_animated_texture_proxy(content: str, fps: int,
                                    var: str = "$basetexture",
                                    framenumvar: str = "$frame") -> str:
-        """Добавляет (или обновляет fps у) прокси AnimatedTexture для var.
+        """Добавляет (или обновляет fps у) прокси AnimatedTexture для var
 
         Работает с ТЕКСТОМ VMT: редактор партиклов держит VMT в памяти
-        (custom_files), а сборка оружия — в файлах (enable_animated_basetexture).
+        (custom_files), а сборка оружия - в файлах (enable_animated_basetexture)
 
         var/framenumvar параметризованы, чтобы тем же кодом анимировать
-        $bumpmap/$bumpframe — см. enable_animated_bumpmap.
+        $bumpmap/$bumpframe - см. enable_animated_bumpmap
         """
         var_re = re.escape(var)
         framenum_re = re.escape(framenumvar)
@@ -392,9 +392,9 @@ class VMTService:
                     content = content[:end_root] + f'\n\t"{framenumvar}" "0"\n' + content[end_root:]
 
         # [ \t] вместо \s: \s захватывает переводы строк, из-за чего ^ уезжал на
-        # предыдущую (пустую) строку — тогда proxies_indent получался с '\n'
+        # предыдущую (пустую) строку - тогда proxies_indent получался с '\n'
         # внутри и каждая вставленная строка удваивала перевод, а .end() съедал
-        # '{' со следующей строки и прокси вставлялся ВНУТРЬ соседнего блока.
+        # '{' со следующей строки и прокси вставлялся ВНУТРЬ соседнего блока
         proxies_key = re.search(r'(?im)^[ \t]*"?proxies"?[ \t]*(\{)?[ \t]*$', content)
         if not proxies_key:
             end_root = content.rfind('}')
@@ -425,9 +425,9 @@ class VMTService:
                 if end is not None:
                     block = content[brace_pos:end + 1]
                     # Check if there's already an AnimatedTexture proxy specifically for var.
-                    # Some VMTs (e.g. Hypno-Eyes) have a default AnimatedTexture proxy for $detail —
+                    # Some VMTs (e.g. Hypno-Eyes) have a default AnimatedTexture proxy for $detail -
                     # that's a different variable and must not block us from adding our own.
-                    # По этой же причине прокси $basetexture не мешает добавить $bumpmap.
+                    # По этой же причине прокси $basetexture не мешает добавить $bumpmap
                     has_var_anim = bool(re.search(
                         r'(?si)"?AnimatedTexture"?\s*\{[^}]*"?animatedtexturevar"?\s+"?' + var_re + r'"?',
                         block,
@@ -457,9 +457,9 @@ class VMTService:
     @staticmethod
     def update_vmt_bumpmap_path(vmt_path: str, cdmaterials_path: str, weapon_key: str):
         """
-        Обновляет или добавляет путь $bumpmap в VMT файле на основе пути из $cdmaterials.
+        Обновляет или добавляет путь $bumpmap в VMT файле на основе пути из $cdmaterials
         
-        Нужно для нормалмапов (бампмаппинг) - добавляем путь к нормалмап текстуре с суффиксом _normal.
+        Нужно для нормалмапов (бампмаппинг) - добавляем путь к нормалмап текстуре с суффиксом _normal
         
         Args:
             vmt_path: Путь к VMT файлу
@@ -469,7 +469,7 @@ class VMTService:
         if not os.path.exists(vmt_path):
             return
         
-        # Мод бывает в cp1251 — строгое utf-8 падало и роняло все его карты.
+        # Мод бывает в cp1251 - строгое utf-8 падало и роняло все его карты
         content, encoding = _read_vmt(vmt_path)
 
         # Формируем путь для $bumpmap (тот же путь что и для $basetexture, но с _normal в имени файла)
@@ -478,7 +478,7 @@ class VMTService:
         # Ищем и заменяем путь в $bumpmap или $bumpMap (регистронезависимо, потому что Valve пишет по-разному)
         # Только живая строка: у 240 материалов игры $bumpmap есть лишь
         # закомментированный (у снайперской винтовки в том числе), и правка
-        # комментария оставляла модель без нормали.
+        # комментария оставляла модель без нормали
         pattern = _live_param('$bumpmap')
 
         def replace_path(match):
@@ -512,21 +512,20 @@ class VMTService:
     
     @staticmethod
     def has_live_param(content: str, param: str) -> bool:
-        """Задан ли параметр живой строкой (закомментированная не в счёт)."""
+        """Задан ли параметр живой строкой (закомментированная не в счёт)"""
         return bool(_live_param(param).search(content or ''))
 
     @staticmethod
     def _set_vmt_param(content: str, param: str, value: str) -> str:
         """
-        Идемпотентно ставит параметр VMT в корневой блок шейдера.
+        Идемпотентно ставит параметр VMT в корневой блок шейдера
 
-        Если параметр уже есть — заменяет значение; иначе вставляет новую строку
+        Если параметр уже есть - заменяет значение, иначе вставляет новую строку
         перед закрывающей скобкой корневого блока. Регистронезависимо
-        (Valve пишет $EnvMap/$envmap как попало).
+        (Valve пишет $EnvMap/$envmap как попало)
         """
-        # Значение в кавычках или без: моды пишут и `$rimlight 1`. Раньше
-        # такое не находилось, и строка дописывалась второй, а движок читает
-        # ПЕРВУЮ, так что правка молча не действовала.
+        # Значение в кавычках или без: моды пишут и `$rimlight 1`. Не найдя
+        # такую, дописали бы вторую строку, а движок читает ПЕРВУЮ
         new_content, n = _live_param(param).subn(
             lambda m: f'{m.group(1)}"{value}"', content, count=1)
         if n:
@@ -544,15 +543,15 @@ class VMTService:
     def add_material_map_params(vmt_path: str, cdmaterials_path: str, map_texture_key: str,
                                 path_param: str, extra_vmt: dict = None) -> bool:
         """
-        Вписывает в VMT файловую карту материала (Фаза 2): путь к карте + скаляры.
+        Вписывает в VMT файловую карту материала (Фаза 2): путь к карте + скаляры
 
-        path_param   — параметр-путь ($detail / $selfillummask / $phongexponenttexture);
-        map_texture_key — имя VTF-карты без расширения (например c_scattergun_detail);
-        extra_vmt    — сопутствующие параметры ($detailscale, $selfillum, $phong …).
+        path_param   - параметр-путь ($detail / $selfillummask / $phongexponenttexture);
+        map_texture_key - имя VTF-карты без расширения (например c_scattergun_detail);
+        extra_vmt    - сопутствующие параметры ($detailscale, $selfillum, $phong …)
 
-        Путь карты строится так же, как $basetexture/$bumpmap — от $cdmaterials.
+        Путь карты строится так же, как $basetexture/$bumpmap - от $cdmaterials.
         Работает только на VertexLitGeneric. Возвращает True, если VMT изменён.
-        Не пишет результат, если он не прошёл валидацию синтаксиса.
+        Не пишет результат, если он не прошёл валидацию синтаксиса
         """
         if not os.path.exists(vmt_path):
             return False
@@ -560,11 +559,11 @@ class VMTService:
         from src.services import vmt_parse
 
         content, encoding = _read_vmt(vmt_path)
-        # Шейдер разбором: перед ним бывают комментарий и BOM.
+        # Шейдер разбором: перед ним бывают комментарий и BOM
         if vmt_parse.parse(content.lstrip('﻿')).shader.lower() != 'vertexlitgeneric':
             return False
 
-        # path_param=None — карта без своей текстуры (только параметры, напр. rim light).
+        # path_param=None - карта без своей текстуры (только параметры, напр. rim light)
         if path_param:
             tex_path = VMTService._get_texture_path_from_cdmaterials(cdmaterials_path, map_texture_key)
             content = VMTService._set_vmt_param(content, path_param, tex_path)
@@ -580,7 +579,7 @@ class VMTService:
 
     @staticmethod
     def remove_param(vmt_path: str, param: str) -> bool:
-        """Снимает живую строку параметра (комментарии не трогает). True — снята."""
+        """Снимает живую строку параметра (комментарии не трогает). True - снята"""
         if not os.path.exists(vmt_path):
             return False
         content, encoding = _read_vmt(vmt_path)
@@ -595,11 +594,11 @@ class VMTService:
     def remove_material_map(vmt_path: str, map_id: str) -> bool:
         """
         Снимает карту материала (MATERIAL_MAPS) с VMT: строку её пути, а у
-        карты без текстуры (rim light) — выключает флаг.
+        карты без текстуры (rim light) - выключает флаг
 
         Сопутствующие числа ($detailscale, $phongboost…) остаются: без пути
         карты движок их не читает, а $phong и $envmap могли стоять в моде и до
-        неё. Только живые строки — закомментированные не трогаем.
+        неё. Только живые строки - закомментированные не трогаем
         """
         from src.data.material_maps import MATERIAL_MAPS
 
@@ -609,7 +608,7 @@ class VMTService:
         if cfg.get('path_param'):
             return VMTService.remove_param(vmt_path, cfg['path_param'])
         if map_id == 'phongcolor':
-            # Цвет блика — это $phongtint или $phongalbedotint, не обводка.
+            # Цвет блика - это $phongtint или $phongalbedotint, не обводка
             tint = VMTService.remove_param(vmt_path, '$phongtint')
             return VMTService.remove_param(vmt_path, '$phongalbedotint') or tint
         content, encoding = _read_vmt(vmt_path)
@@ -623,7 +622,7 @@ class VMTService:
     def remove_paint_proxies(vmt_path: str) -> None:
         """
         Removes game paint (tint color) proxies from a hat VMT file so that
-        the user's texture displays without TF2 paint coloring.
+        the user's texture displays without TF2 paint coloring
 
         Removes:
           - $blendtintbybasealpha, $blendtintcoloroverbase, $colortint_base,
@@ -633,7 +632,7 @@ class VMTService:
           - Multiply proxy block that references $color2
 
         Adds:
-          - Equals proxy: maps $yellow → $color2
+          - Equals proxy: maps $yellow -> $color2
         """
         if not os.path.exists(vmt_path):
             return
@@ -674,11 +673,11 @@ class VMTService:
 
     @staticmethod
     def _remove_vmt_blocks(content: str, name: str, condition) -> str:
-        """Все блоки `name { … }`, чьё тело проходит `condition`, — долой.
+        """Все блоки `name { … }`, чьё тело проходит `condition`, - долой.
         В отличие от _remove_named_vmt_block смотрит ВСЕ одноимённые блоки:
-        AnimatedTexture в одном VMT бывает и у основы, и у $detail."""
-        # Имя, затем { — на той же строке или ниже, с комментарием между:
-        # `"BurnLevel" {` и `"BurnLevel" // огонь` тоже встречаются.
+        AnimatedTexture в одном VMT бывает и у основы, и у $detail"""
+        # Имя, затем { - на той же строке или ниже, с комментарием между:
+        # `"BurnLevel" {` и `"BurnLevel" // огонь` тоже встречаются
         header_re = re.compile(r'^[ \t]*"?' + re.escape(name) + r'"?(?=[\s{/])',
                                re.IGNORECASE | re.MULTILINE)
         gap_re = re.compile(r'(?:\s+|//[^\n]*)*')
@@ -704,13 +703,13 @@ class VMTService:
     @staticmethod
     def release_detail(vmt_path: str) -> bool:
         """
-        Освобождает $detail от эффекта горения TF2.
+        Освобождает $detail от эффекта горения TF2
 
         У косметики $detail занят огнём: прокси BurnLevel каждый кадр пишет
         $detailblendfactor (0, пока предмет не горит), AnimatedTexture листает
         кадры огня в $detail. Своя detail-карта с ними невидима, а при горении
-        вместо огня. Снимаем оба прокси — предмет перестаёт показывать огонь
-        на себе, это цена своей detail-карты. True — VMT изменён.
+        вместо огня. Снимаем оба прокси - предмет перестаёт показывать огонь
+        на себе, это цена своей detail-карты. True - VMT изменён
         """
         if not os.path.exists(vmt_path):
             return False
@@ -731,7 +730,7 @@ class VMTService:
         """
         Remove the first matching named proxy block from VMT content.
         Handles both 'Name\\n{' and 'Name {' styles.
-        If condition is provided, only removes the block when condition(block_body) is True.
+        If condition is provided, only removes the block when condition(block_body) is True
         """
         header_re = re.compile(
             r'^[ \t]*"?' + re.escape(name) + r'"?[ \t]*\r?\n',
@@ -771,9 +770,9 @@ class VMTService:
     @staticmethod
     def _insert_equals_proxy(content: str) -> str:
         """
-        Insert an Equals proxy ($yellow → $color2) before the closing brace
+        Insert an Equals proxy ($yellow -> $color2) before the closing brace
         of the Proxies block.  Does nothing if Equals is already present or
-        if there is no Proxies block.
+        if there is no Proxies block
         """
         if re.search(r'"?Equals"?\s*[\r\n]', content, re.IGNORECASE):
             return content
@@ -826,8 +825,7 @@ class VMTService:
         """Создает шаблон для специальных режимов (critHIT и т.д., используют UnlitGeneric шейдер)"""
         if mode == "critHIT":
             # Анимированная crit-текстура: AnimatedTexture-прокси листает кадры
-            # ($frame) со скоростью 33 к/с. Раньше этот VMT копировался из
-            # tools/mod_data/crit.vmt — теперь генерируется здесь.
+            # ($frame) со скоростью 33 к/с
             return '''"UnlitGeneric"
 {
 \t"$baseTexture" "effects\\crit"

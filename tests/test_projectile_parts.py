@@ -1,10 +1,10 @@
 """
-Снаряд, заряженный в оружие (граната Loch-n-Load, ракета сигнальной, стрела).
+Снаряд, заряженный в оружие (граната Loch-n-Load, ракета сигнальной, стрела)
 
 Это бодигруппа «пусто | снаряд»: игра показывает его только в первом лице на
-перезарядке, а в кадре предмета он виден — его правят. Своя модель снаряда
+перезарядке, а в кадре предмета он виден - его правят. Своя модель снаряда
 садится на кость игрового (её двигает рука), а куски снаряда нумеруются после
-кусков самой модели, чтобы покраска по частям старых работ не съехала.
+кусков самой модели, чтобы покраска по частям старых работ не съехала
 """
 
 import os
@@ -53,7 +53,7 @@ class RuleTests(unittest.TestCase):
 class PartModelTests(unittest.TestCase):
     def test_own_projectile_sits_on_the_projectile_bone(self):
         # Своя граната без костей (`root`) садится на кость игровой гранаты:
-        # её двигает рука при перезарядке. Кэш разборки не трогаем.
+        # её двигает рука при перезарядке. Кэш разборки не трогаем
         with tempfile.TemporaryDirectory() as d:
             cache, out = os.path.join(d, "cache"), os.path.join(d, "copy")
             os.makedirs(cache)
@@ -75,7 +75,7 @@ class PartModelTests(unittest.TestCase):
 class LateNumberingTests(unittest.TestCase):
     def test_projectile_chunks_go_after_the_weapon(self):
         # Снаряд по площади развёртки больше куска ружья, но номера кусков
-        # ружья остаются такими, какими были без снаряда.
+        # ружья остаются такими, какими были без снаряда
         with tempfile.TemporaryDirectory() as d:
             gun = os.path.join(d, "c_gun.smd")
             Path(gun).write_text(smd(
@@ -109,8 +109,8 @@ class FitTests(unittest.TestCase):
 
 
 #: Оружие (квадрат слева) и снаряд после него (квадрат справа) одного
-#: материала; развёртка снаряда накрывает развёртку оружия, как у своей
-#: модели из интернета.
+#: материала, развёртка снаряда накрывает развёртку оружия, как у своей
+#: модели из интернета
 LATE_OBJ = """# Sources: ref.smd|shell.smd
 # Late: c_x=2
 v 0 0 0
@@ -139,12 +139,12 @@ f 5/5 7/7 8/8
 
 class ItemSwitchTests(unittest.TestCase):
     def test_projectile_stays_with_its_weapon(self):
-        # Снаряд Подкидыша уезжал в работу и сборку следующего открытого оружия.
+        # Снаряд Подкидыша уезжал в работу и сборку следующего открытого оружия
         from src.domain.preview.session import PreviewSession
         s = PreviewSession()
         s.begin_item("c_lochnload", "demoman_c_lochnload")
         s.part_models = {"c_lochnload_reload_bodygroup": "mine.smd"}
-        s.begin_item("c_lochnload", "demoman_c_lochnload")      # тот же — остаётся
+        s.begin_item("c_lochnload", "demoman_c_lochnload")      # тот же - остаётся
         self.assertTrue(s.part_models)
         s.begin_item("c_demo_cannon", "demoman_c_demo_cannon")
         self.assertEqual(s.part_models, {})
@@ -156,11 +156,11 @@ class FitsTests(unittest.TestCase):
         weapon = {'tris': [0, 1], 'total': 4, 'late': 2}
         shell = {'tris': [2, 3], 'total': 4, 'late': 2}
         self.assertTrue(pm.fits(weapon, 4, 2) and pm.fits(shell, 4, 2))   # та же модель
-        self.assertTrue(pm.fits(weapon, 30, 2))       # снаряд сменился — оружие то же
+        self.assertTrue(pm.fits(weapon, 30, 2))       # снаряд сменился - оружие то же
         self.assertFalse(pm.fits(shell, 30, 2))       # треугольники прежнего снаряда
         self.assertTrue(pm.fits(weapon, 2, 2))        # снаряд скрыт
         self.assertFalse(pm.fits(weapon, 30, 3))      # само оружие другое
-        # Выбрано до того, как снаряд появился в кадре: `late` нет, всё — оружие.
+        # Выбрано до того, как снаряд появился в кадре: `late` нет, всё - оружие
         self.assertTrue(pm.fits({'tris': [0], 'total': 2}, 4, 2))
         self.assertFalse(pm.fits({'tris': [0], 'total': 3}, 4, 2))
 
@@ -179,7 +179,7 @@ class FitsTests(unittest.TestCase):
 
 class EditorTests(unittest.TestCase):
     """Своя модель снаряда в общем с оружием материале: своя склейка, сброс
-    правок прежнего снаряда."""
+    правок прежнего снаряда"""
 
     def setUp(self):
         import threading
@@ -256,7 +256,7 @@ class EditorTests(unittest.TestCase):
                          (name, [2, 3], 4, 2))
         self.assertEqual(entry["card"], self.single)
         self.assertEqual(self.t.resolve_card(name), mine)
-        # Краска снаряда — на его материале; оружие под той же развёрткой цело.
+        # Краска снаряда - на его материале, оружие под той же развёрткой цело
         self.editor.set_part_colors('', {1: '#00ff00'})
         self.assertTrue(self.has(self.t.resolve_card(name), (0, 255, 0)))
         self.assertFalse(self.has(self.t.resolve_card(self.single), (0, 255, 0)))
@@ -270,7 +270,7 @@ class EditorTests(unittest.TestCase):
 
     def test_scissor_area_over_gun_and_shell_keeps_the_gun_paint(self):
         # Область [1, 3] задела и ружьё, и снаряд. Её обрезка до ружья сдвигает
-        # номера частей — мазок остатка ружья (треугольник 0) остаётся на нём.
+        # номера частей - мазок остатка ружья (треугольник 0) остаётся на нём
         p = self.host.preview
         p.part_regions = {"c_x": [[1, 3]]}
         from src.services import mesh_parts_service
@@ -286,7 +286,7 @@ class EditorTests(unittest.TestCase):
 
     def test_a_material_from_another_model_is_left_alone(self):
         # Выбран на другой версии модели (total не тот): «оживлять» его новым
-        # late нельзя — он лёг бы на чужие номера.
+        # late нельзя - он лёг бы на чужие номера
         p = self.host.preview
         p.part_materials = {"c_x": [{"name": "c_x_part1", "card": self.single,
                                      "tris": [0, 3], "total": 9,
@@ -297,8 +297,8 @@ class EditorTests(unittest.TestCase):
         self.assertNotIn("late", p.part_materials["c_x"][0])
 
     def test_new_projectile_forgets_the_paint_of_the_old_one(self):
-        # Области ножницами режут каждый квадрат надвое: части 0-1 — оружие,
-        # 2-3 — снаряд. Его части, область и материал уходят, оружия — нет.
+        # Области ножницами режут каждый квадрат надвое: части 0-1 - оружие,
+        # 2-3 - снаряд. Его части, область и материал уходят, оружия - нет
         p = self.host.preview
         p.part_regions = {"c_x": [[1], [3]]}
         p.part_materials = {"c_x": [
@@ -320,7 +320,7 @@ class EditorTests(unittest.TestCase):
 
 class HiddenOwnShellTests(EditorTests):
     """Скрытый снаряд со своим материалом (ракета Ракетницы): в кадре один
-    меш оружия, а мазки на карточке снаряда всё равно его."""
+    меш оружия, а мазки на карточке снаряда всё равно его"""
 
     def setUp(self):
         super().setUp()
@@ -342,7 +342,7 @@ class HiddenOwnShellTests(EditorTests):
         self.assertFalse(p.part_colors.get(shell_slot))
         self.assertTrue(p.part_colors.get(gun_slot))
 
-    # Остальные проверки EditorTests — про общий материал; здесь не нужны.
+    # Остальные проверки EditorTests - про общий материал, здесь не нужны
     test_own_projectile_gets_its_material_and_paint_stays_on_it = None
     test_without_a_picture_the_projectile_is_plain_grey = None
     test_new_projectile_forgets_the_paint_of_the_old_one = None
@@ -352,8 +352,8 @@ class HiddenOwnShellTests(EditorTests):
 
 class SessionTests(unittest.TestCase):
     def test_custom_weapon_model_drops_the_projectile(self):
-        # Своя модель оружия стирает части и материалы частей — и свой снаряд:
-        # его материал ушёл вместе с ними, а снаряд своей модели спросит сборка.
+        # Своя модель оружия стирает части и материалы частей - и свой снаряд:
+        # его материал ушёл вместе с ними, а снаряд своей модели спросит сборка
         from src.domain.preview.session import PreviewSession
         s = PreviewSession()
         s.part_models = {"c_lochnload_reload_bodygroup": "mine.smd"}
@@ -429,12 +429,12 @@ class BuildTests(unittest.TestCase):
                 part_models={"c_gun_reload_bodygroup": mine})
             merged = Path(decomp, "c_gun_reload_bodygroup.smd").read_text()
             self.assertIn(" 7 7 7 ", merged)
-            self.assertNotIn("\nx\n", merged)      # материал — игровой детали
+            self.assertNotIn("\nx\n", merged)      # материал - игровой детали
 
     def test_weapon_part_material_survives_a_new_projectile(self):
         # Материалы частей выбирали с игровой гранатой в кадре (1 + 1
         # треугольник), в сборке у снаряда своя модель на 2: материал на
-        # самом оружии собирается, а на прежней гранате — нет, с предупреждением.
+        # самом оружии собирается, а на прежней гранате - нет, с предупреждением
         from src.services import part_materials as pm
 
         with tempfile.TemporaryDirectory() as d:
@@ -459,7 +459,7 @@ class BuildTests(unittest.TestCase):
     def test_old_material_without_the_shell_file_does_not_hide_the_shell(self):
         # Материал на оружии выбран до того, как граната попала в кадр: его
         # `sources` без SMD гранаты. Первым в группе он не должен отрезать
-        # материал своей гранаты (её треугольники — во втором файле).
+        # материал своей гранаты (её треугольники - во втором файле)
         from src.services import part_materials as pm
 
         with tempfile.TemporaryDirectory() as d:

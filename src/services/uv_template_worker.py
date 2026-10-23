@@ -7,11 +7,11 @@ from src.services.extract_model_service import ExtractModelService
 class UVTemplateWorker(StandardWorker):
     """
     По запросу (кнопкой) декомпилирует модель (cache-aware) и рисует UV-шаблон
-    в папку экспорта — без полной сборки мода. Путь готового PNG доступен в
-    self.output_path после успешного finished.
+    в папку экспорта - без полной сборки мода. Путь готового PNG доступен в
+    self.output_path после успешного finished
 
     Сигналы (наследуются от StandardWorker): finished(bool, str),
-    progress(int, str), error(str).
+    progress(int, str), error(str)
     """
 
     def __init__(
@@ -32,7 +32,7 @@ class UVTemplateWorker(StandardWorker):
         self.export_folder = export_folder
         self.language = language
         self.output_path: Optional[str] = None
-        #: Все нарисованные файлы: у многоматериальной модели их несколько.
+        #: Все нарисованные файлы: у многоматериальной модели их несколько
         self.output_paths: List[str] = []
 
     def work(self) -> Tuple[bool, str]:

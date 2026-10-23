@@ -1,6 +1,6 @@
 """
 Текстуры карт материала: нормаль с маской в альфе, Phong-карта по
-каналам, авто-нормаль и $phong там, где без него эффект не считается.
+каналам, авто-нормаль и $phong там, где без него эффект не считается
 """
 
 import os
@@ -18,7 +18,7 @@ def ensure_phong(vmt_path: Path, cdmaterials: str) -> bool:
     """$phong там, где без него эффект не считается: с силой 0, чтобы
     блика не появилось (вики Valve, $phongboost: «phong boost of zero is
     visually identical to no phong, and can be used to work around certain
-    shader parameter combinations that require phong»)."""
+    shader parameter combinations that require phong»)"""
     from src.services import vmt_parse
     doc = vmt_parse.parse(Path(vmt_path).read_text(encoding="utf-8", errors="ignore"))
     if doc.flag("$phong"):
@@ -33,7 +33,7 @@ def ensure_phong(vmt_path: Path, cdmaterials: str) -> bool:
 def mask_png(spec: dict, kind: str, base_image_path: Optional[str],
               out_dir: Path, stem: str, size: Tuple[int, int]) -> Optional[Path]:
     """Маска (L) из записи карты: из базы по яркости (derive, с порогом) или
-    из файла. None — не из чего."""
+    из файла. None - не из чего"""
     png = Path(out_dir) / f"{stem}.png"
     try:
         if spec.get("derive"):
@@ -58,12 +58,12 @@ def normal_with_mask(mask_png: Path, mat: str, vmt_path: Path, out_dir: Path,
                       base_image_path: Optional[str],
                       read_texture: Optional[Callable[[str], Optional[bytes]]]) -> bool:
     """
-    {mat}_normal.vtf = нормаль (RGB) + маска в альфе; $bumpmap — на неё.
+    {mat}_normal.vtf = нормаль (RGB) + маска в альфе; $bumpmap - на неё
 
-    RGB нормали — по старшинству: уже собранная нами (галка Normal Map,
+    RGB нормали - по старшинству: уже собранная нами (галка Normal Map,
     рельеф поверх родного), родная нормаль материала (`read_texture` по
-    его $bumpmap — из мода или игры), иначе построенная из базы. Так маска
-    не стирает рельеф предмета, как стёрла бы «нормаль из диффуза».
+    его $bumpmap - из мода или игры), иначе построенная из базы. Так маска
+    не стирает рельеф предмета, как стёрла бы «нормаль из диффуза»
     """
     import numpy as np
     from PIL import Image
@@ -74,8 +74,8 @@ def normal_with_mask(mask_png: Path, mat: str, vmt_path: Path, out_dir: Path,
     ours = out_dir / f"{mat}_normal.vtf"
     if ours.exists() and _vtf_frames(ours) > 1:
         # Многокадровый рельеф (гифка + Normal Map): маска на первом кадре
-        # заморозила бы его. Оставляем как есть.
-        logger.warning(f"[{mat}] нормаль анимирована — маску в её альфу не кладём")
+        # заморозила бы его. Оставляем как есть
+        logger.warning(f"[{mat}] нормаль анимирована - маску в её альфу не кладём")
         return False
     rgba = None
     try:
@@ -99,7 +99,7 @@ def normal_with_mask(mask_png: Path, mat: str, vmt_path: Path, out_dir: Path,
         rgba[..., 3] = alpha
         png = out_dir / f"{mat}_normal.png"
         Image.fromarray(rgba, "RGBA").save(png)
-        # DXT5 хранит альфу; флаг NORMAL — как у нормалей Valve.
+        # DXT5 хранит альфу, флаг NORMAL - как у нормалей Valve
         TextureService.create_vtf(str(png), str(out_dir), "DXT5", ["NORMAL"], {})
         png.unlink(missing_ok=True)
     except Exception as e:                              # noqa: BLE001
@@ -113,7 +113,7 @@ def normal_with_mask(mask_png: Path, mat: str, vmt_path: Path, out_dir: Path,
 
 
 def _vtf_frames(path: Path) -> int:
-    """Число кадров VTF из заголовка (uint16 по смещению 24, VTF 7.x)."""
+    """Число кадров VTF из заголовка (uint16 по смещению 24, VTF 7.x)"""
     try:
         with open(path, "rb") as f:
             head = f.read(26)
@@ -127,7 +127,7 @@ def mask_params(vmt_path: Path, cdmaterials: str, mat: str, extra: dict,
     """Параметры для маски в альфе нормали. $basemapalphaphongmask (у 2105
     материалов TF2) снимается: при нём движок берёт и маску отражения из
     альфы основы (вики Valve, $normalmapalphaenvmapmask), и наша маска
-    молча не работала бы. Синий VMT смотрит на ту же нормаль красного."""
+    молча не работала бы. Синий VMT смотрит на ту же нормаль красного"""
     if not (Path(out_dir) / f"{mat}_normal.vtf").exists():
         return False
     VMTService.update_vmt_bumpmap_path(str(vmt_path), cdmaterials, f"{mat}_normal")
@@ -137,7 +137,7 @@ def mask_params(vmt_path: Path, cdmaterials: str, mat: str, extra: dict,
         from src.services import vmt_parse
         text = Path(vmt_path).read_text(encoding="utf-8", errors="ignore")
         if vmt_parse.parse(text).get("$envmap") is not None:
-            # Окружение предмета (золото, студийный блик) не подменяем.
+            # Окружение предмета (золото, студийный блик) не подменяем
             extra = {k: v for k, v in extra.items() if k != "$envmap"}
     if extra:
         VMTService.add_material_map_params(str(vmt_path), cdmaterials, None, None, extra)
@@ -154,11 +154,11 @@ def ensure_derived_normal(
     is_normal_map: bool,
 ) -> None:
     """
-    Гарантирует наличие карты нормалей для phong (без неё блик не считается).
+    Гарантирует наличие карты нормалей для phong (без неё блик не считается)
 
-    Если normal уже сгенерирован (галочка Normal Map) или файл уже есть —
+    Если normal уже сгенерирован (галочка Normal Map) или файл уже есть -
     ничего не делает. Иначе строит {texture}_normal.vtf из базовой текстуры
-    (normal_map, формат DXT5) и прописывает $bumpmap в VMT.
+    (normal_map, формат DXT5) и прописывает $bumpmap в VMT
     """
     normal_vtf = vtf_output_path / f"{texture_filename}_normal.vtf"
     if is_normal_map or normal_vtf.exists():
@@ -183,16 +183,16 @@ def compose_exponent(mat: str, vmt_path: Path, out_dir: Path,
                       read_texture: Optional[Callable[[str], Optional[bytes]]],
                       albedo: Optional[float], rim_mask: Optional[Path],
                       own_exp: bool = False) -> bool:
-    """{mat}_exp.vtf с G = сила окраски и A = маска обводки.
+    """{mat}_exp.vtf с G = сила окраски и A = маска обводки
 
-    Основа (R — размер блика) — по старшинству: Phong-карта, собранная
-    этой же сборкой (`own_exp`; файл с тем же именем из мода — не наш, он
+    Основа (R - размер блика) - по старшинству: Phong-карта, собранная
+    этой же сборкой (`own_exp`; файл с тем же именем из мода - не наш, он
     мог быть снят), Phong-карта материала (`read_texture`), иначе ровная из
     его $phongexponent (R = (e − 1) / 149, обратная к 1 + 149·R шейдера;
-    при заданном $phongexponent R всё равно не читается).
+    при заданном $phongexponent R всё равно не читается)
 
-    G: у родной Phong-карты с $phongalbedotint зелёный — поканальная маска
-    Valve (металл окрашен, дерево нет): её масштабируем, а не заливаем."""
+    G: у родной Phong-карты с $phongalbedotint зелёный - поканальная маска
+    Valve (металл окрашен, дерево нет): её масштабируем, а не заливаем"""
     import numpy as np
     from PIL import Image
 

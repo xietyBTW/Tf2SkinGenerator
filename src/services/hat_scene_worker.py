@@ -1,24 +1,24 @@
 """
-Воркер сцены «На персонаже»: персонаж класса в игровой стойке, на нём предмет.
+Воркер сцены «На персонаже»: персонаж класса в игровой стойке, на нём предмет
 
 Предмет - шапка или надеваемое оружие без модели в руке (ботинки, щит,
-парашют): игра сажает его на персонажа так же, по именам костей.
+парашют): игра сажает его на персонажа так же, по именам костей
 
 Шапку в игре не видят висящей в пустоте: она на голове, а персонаж держит
 оружие. Сцена собирается той же `viewmodel_animation.build_scene`, что насмешка:
-«руки» — это персонаж, «оружие» — шапка (её кости сливаются с одноимёнными
-костями персонажа, как делает игра, EF_BONEMERGE), а стоковое оружие слота —
-носитель: в кадре, но не в правке.
+«руки» - это персонаж, «оружие» - шапка (её кости сливаются с одноимёнными
+костями персонажа, как делает игра, EF_BONEMERGE), а стоковое оружие слота -
+носитель: в кадре, но не в правке
 
 Что откуда:
-  * модель класса и модель его анимаций — общий кэш декомпиляции, те же ключи,
-    что у насмешки (`__player_*`, `__anims_full_*`), — разобранное один раз
+  * модель класса и модель его анимаций - общий кэш декомпиляции, те же ключи,
+    что у насмешки (`__player_*`, `__anims_full_*`), - разобранное один раз
     годится обеим сценам;
-  * стойка — последовательность по активности `ACT_MP_STAND_<слот>`;
-  * оружие слота — стоковое из items_game ([stock_loadout]);
-  * текстуры — MaterialResolver по `$cdmaterials` каждой из трёх моделей.
+  * стойка - последовательность по активности `ACT_MP_STAND_<слот>`;
+  * оружие слота - стоковое из items_game ([stock_loadout]);
+  * текстуры - MaterialResolver по `$cdmaterials` каждой из трёх моделей
 
-Сигналы — как у TauntPreviewWorker: страница уже умеет показывать такую сцену.
+Сигналы - как у TauntPreviewWorker: страница уже умеет показывать такую сцену
 """
 
 from __future__ import annotations
@@ -43,16 +43,16 @@ logger = get_logger(__name__)
 
 
 class HatScenePreviewWorker(BaseWorker):
-    """Готовит сцену «персонаж в стойке с шапкой» и текстуры к ней."""
+    """Готовит сцену «персонаж в стойке с шапкой» и текстуры к ней"""
 
     animated_ready = Signal(object)
     multi_material = Signal(object)
-    #: Материалы ШАПКИ: только их человек правит; персонаж и оружие — фон.
+    #: Материалы ШАПКИ: только их человек правит, персонаж и оружие - фон
     editable_materials = Signal(object)
     render_hints = Signal(object)
-    #: Классы, которые носят эту шапку.
+    #: Классы, которые носят эту шапку
     classes_available = Signal(object)
-    #: Слоты стокового оружия выбранного класса и какой из них показан.
+    #: Слоты стокового оружия выбранного класса и какой из них показан
     slots_available = Signal(object)
     progress = Signal(str)
     failed = Signal(str)
@@ -62,7 +62,7 @@ class HatScenePreviewWorker(BaseWorker):
             'hat': 'Загрузка шапки…',
             'player': 'Загрузка модели класса…',
             'anims': 'Загрузка анимаций класса…',
-            'anims_slow': 'Распаковка анимаций класса (первый раз — до полуминуты)…',
+            'anims_slow': 'Распаковка анимаций класса (первый раз - до полуминуты)…',
             'weapon': 'Загрузка оружия…',
             'scene': 'Сборка сцены…',
             'texture': 'Загрузка текстур…',
@@ -92,18 +92,18 @@ class HatScenePreviewWorker(BaseWorker):
                  custom_smd: str = '', custom_keep: bool = False,
                  parent=None):
         super().__init__(parent)
-        #: Надеваемое оружие вместо шапки (ботинки, щит): ключ предмета.
+        #: Надеваемое оружие вместо шапки (ботинки, щит): ключ предмета
         self.weapon_key = weapon_key or ''
         #: Своя модель предмета (SMD) - слитая со скелетом игровой, как в
-        #: сборке: на персонаже видно то, что уйдёт в мод.
+        #: сборке: на персонаже видно то, что уйдёт в мод
         self.custom_smd = custom_smd or ''
         self.custom_keep = bool(custom_keep)
-        #: Что шапка прячет у персонажа ({бодигруппа: вариант}) — каска
-        #: солдата под шапкой на голову. Без этого она торчала сквозь шапку.
+        #: Что шапка прячет у персонажа ({бодигруппа: вариант}) - каска
+        #: солдата под шапкой на голову. Без этого она торчала сквозь шапку
         self.hidden_bodygroups = dict(hidden_bodygroups or {})
         #: {класс: модель шапки}; у одномодельной шапки модель у всех одна.
         #: Путь как есть: он же ключ кэша декомпиляции у превью шапки. У
-        #: оружия - список путей-кандидатов (ключ кэша тогда - weapon_key).
+        #: оружия - список путей-кандидатов (ключ кэша тогда - weapon_key)
         self.hat_models = {c.lower(): m for c, m in (hat_models or {}).items() if m}
         self.misc_vpk_path = misc_vpk_path
         self.textures_vpk_path = textures_vpk_path
@@ -113,7 +113,7 @@ class HatScenePreviewWorker(BaseWorker):
         self._p = self._PROGRESS.get(lang, self._PROGRESS['en'])
         self._preview_dir: Optional[str] = None
 
-    # ── Точка входа ───────────────────────────────────────────────────────── #
+    # Точка входа
 
     def run(self) -> None:
         reader = GameVpkReader([self.textures_vpk_path, self.misc_vpk_path])
@@ -135,8 +135,8 @@ class HatScenePreviewWorker(BaseWorker):
 
             self.progress.emit(self._p['hat'])
             hat_mdl = self.hat_models[cls]
-            # Ключ — путь модели, как у превью шапки: распакованное там
-            # берётся отсюда же, без второго Crowbar. У оружия - его ключ.
+            # Ключ - путь модели, как у превью шапки: распакованное там
+            # берётся отсюда же, без второго Crowbar. У оружия - его ключ
             if isinstance(hat_mdl, (list, tuple)):
                 hat_dir = self._decompile(self.weapon_key, list(hat_mdl))
                 item_stem = self.weapon_key
@@ -180,13 +180,13 @@ class HatScenePreviewWorker(BaseWorker):
                 arms_extra_smds=_default_body_parts(player_dir, player_ref,
                                                     self.hidden_bodygroups),
                 weapon_ref_smd=hat_ref,
-                # Оружие в руке — фон сцены: видно, но не правится.
+                # Оружие в руке - фон сцены: видно, но не правится
                 weapon_carrier_smd=weapon_ref or '',
                 anim_smd=sequence.smd_path,
                 clip_name=sequence.name,
                 fps=sequence.fps,
                 loop=True,
-                # Шапку игра надевает целиком, по именам костей.
+                # Шапку игра надевает целиком, по именам костей
                 merge_by_name=True,
                 root_rotation_x=root_rotation(player_dir),
                 anim_rotation_x=anim_rotation - root_rotation(player_dir),
@@ -200,7 +200,7 @@ class HatScenePreviewWorker(BaseWorker):
             self.progress.emit(self._p['texture'])
             self._emit_scene(reader, scene, (hat_dir, weapon_dir, player_dir))
             logger.info(f"[wear] {item_stem}: класс {cls}, "
-                        f"слот {weapon.slot if weapon else '—'}, стойка {sequence.name}")
+                        f"слот {weapon.slot if weapon else '-'}, стойка {sequence.name}")
 
         except mds.DecompileError as exc:
             logger.warning(f"[wear] {exc}")
@@ -211,11 +211,11 @@ class HatScenePreviewWorker(BaseWorker):
         finally:
             reader.close()
 
-    # ── Шаги ──────────────────────────────────────────────────────────────── #
+    # Шаги
 
     def _decompile(self, cache_key: str, mdl: str, slow: str = '') -> Optional[str]:
-        """Папка распакованной модели; `slow` — подпись на случай, когда
-        Crowbar и правда пошёл (из кэша это мгновенно)."""
+        """Папка распакованной модели; `slow` - подпись на случай, когда
+        Crowbar и правда пошёл (из кэша это мгновенно)"""
         def stage(step) -> None:
             if slow and step is mds.Stage.DECOMPILING:
                 self.progress.emit(self._p[slow])
@@ -231,7 +231,7 @@ class HatScenePreviewWorker(BaseWorker):
         return result.directory
 
     def _custom_ref(self, game_ref: str) -> str:
-        """Своя модель предмета, слитая со скелетом игровой (как в сборке)."""
+        """Своя модель предмета, слитая со скелетом игровой (как в сборке)"""
         if not (self.custom_smd and game_ref and os.path.exists(self.custom_smd)):
             return game_ref
         merged = os.path.join(self._preview_dir or '', 'custom_reference.smd')
@@ -246,12 +246,12 @@ class HatScenePreviewWorker(BaseWorker):
 
     def _stance_of(self, cls: str, stem: str, weapon, weapons):
         """
-        (стойка слота, поворот модели её анимаций) или (None, 0.0).
+        (стойка слота, поворот модели её анимаций) или (None, 0.0)
 
         Из своей копии (anim_store), иначе из распаковки модели анимаций
-        класса — тогда в копию ложатся стойки ВСЕХ слотов класса: смена
+        класса - тогда в копию ложатся стойки ВСЕХ слотов класса: смена
         оружия на сцене дальше обходится без Crowbar, даже когда 150 МБ
-        распаковки вытеснит кэш декомпиляции.
+        распаковки вытеснит кэш декомпиляции
         """
         want = (weapon.anim if weapon else 'MELEE').upper()
         stored = anim_store.get(f'stand/{cls}/{want}', self.misc_vpk_path)
@@ -273,7 +273,7 @@ class HatScenePreviewWorker(BaseWorker):
 
     @staticmethod
     def _stance(anims_dir: Optional[str], anim: str):
-        """Стойка слота: по активности, по имени, в крайнем случае — любая."""
+        """Стойка слота: по активности, по имени, в крайнем случае - любая"""
         catalog = anim_catalog.load(anims_dir) if anims_dir else None
         if catalog is None:
             return None
@@ -286,11 +286,11 @@ class HatScenePreviewWorker(BaseWorker):
         return None
 
     def _emit_scene(self, reader, scene: dict, dirs) -> None:
-        """Текстуры всех трёх моделей сцены и сама сцена.
+        """Текстуры всех трёх моделей сцены и сама сцена
 
         Имя материала у шапки, оружия и персонажа своё, а искать его надо по
         `$cdmaterials` той модели, откуда он: пробуем по очереди, найденное
-        второй раз не ищем.
+        второй раз не ищем
         """
         from src.services.viewmodel_worker import _cdmaterials, _scene_materials
 

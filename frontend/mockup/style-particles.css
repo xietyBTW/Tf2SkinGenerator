@@ -1,19 +1,19 @@
 /*
  * Эффекты: параметры, экспертный режим, дерево систем, контрольные точки;
- * контекстное меню и краска из игры.
+ * контекстное меню и краска из игры
  *
  * Часть стилей страницы: файлы подключены в index.html в порядке каскада
  * (style.css первым), порядок менять нельзя.
  */
 
-/* ── Параметры эффекта ─────────────────────────────────────────────────
-   Список «подпись — поле», а не сетка колонок: у крутилок частиц одна
-   природа, и разносить их по столбцам нечем. */
+/* Параметры эффекта
+   Список «подпись - поле», а не сетка колонок: у крутилок частиц одна
+   природа, и разносить их по столбцам нечем */
 .params { overflow: auto; }
 .params__note { margin: 0; color: var(--ink-mute); font-size: 12px; }
-/* Плавающая панель разворачивается на всю ширину экрана — одна колонка
+/* Плавающая панель разворачивается на всю ширину экрана - одна колонка
    растянула бы подпись и поле по разным краям. Прибитая узкая, и та же
-   сетка сама сворачивается в столбец. */
+   сетка сама сворачивается в столбец */
 .params__list {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
@@ -36,15 +36,15 @@
 .params__in { display: flex; gap: 6px; align-items: center; }
 .pair { display: flex; align-items: center; gap: 8px; flex: 1; min-width: 0; }
 
-/* Колонка узкая: подпись, дорожка и поле в одну строку не встают — подпись
-   съедалась до «Час…». Кладём её строкой выше. */
+/* Колонка узкая: подпись, дорожка и поле в одну строку не встают - подпись
+   съедалась до «Час…». Кладём её строкой выше */
 .params__row { grid-template-columns: minmax(0, 1fr); gap: 3px; }
 .params__list { gap: 12px; }
-/* Диапазон — две пары «дорожка + поле»; рядом они не помещаются, и поле
-   обрезалось до «0,0». Ставим их одну под другой. */
+/* Диапазон - две пары «дорожка + поле», рядом они не помещаются, и поле
+   обрезалось до «0,0». Ставим их одну под другой */
 .params__in { flex-direction: column; align-items: stretch; }
 .params__in > .colorfield { align-self: flex-start; }
-/* А в экспертном дереве значение короткое и подпись рядом читается лучше. */
+/* А в экспертном дереве значение короткое и подпись рядом читается лучше */
 .expert .params__row {
   grid-template-columns: minmax(0, 1fr) auto;
   gap: 4px 12px;
@@ -55,24 +55,24 @@
 
 /* Имена атрибутов в PCF длинные («control point to disable rendering if it is
    the camera»). Многоточие превращало соседние в одинаковые огрызки, поэтому
-   здесь они переносятся целиком. */
+   здесь они переносятся целиком */
 .expert .params__name { white-space: normal; overflow: visible; line-height: 1.35; }
 
-/* Строка и вектор: подпись сверху, поле во всю ширину — рядом они не влезали,
-   и третья компонента вектора уезжала за край панели. */
+/* Строка и вектор: подпись сверху, поле во всю ширину - рядом они не влезали,
+   и третья компонента вектора уезжала за край панели */
 .expert .params__row--wide { grid-template-columns: minmax(0, 1fr); }
 .expert .params__row--wide .params__in { justify-content: flex-start; gap: 8px; }
 .expert .params__row--wide .input { width: 100%; }
 .expert .params__row--wide .input--num { flex: 1; width: auto; min-width: 0; }
 
 .input--num { width: 74px; text-align: right; }
-/* Системные стрелки счётчика рисует браузер — они выбиваются из оформления
+/* Системные стрелки счётчика рисует браузер - они выбиваются из оформления
    (рамка, фон, скругления) и съедают треть поля. Шаг с клавиатуры и колесом
-   работает и без них. */
+   работает и без них */
 .input--num { appearance: textfield; -moz-appearance: textfield; }
 .input--num::-webkit-outer-spin-button,
 .input--num::-webkit-inner-spin-button { appearance: none; margin: 0; }
-/* Заготовка: модуля под параметром ещё нет, показано умолчание игры. */
+/* Заготовка: модуля под параметром ещё нет, показано умолчание игры */
 .input--num.is-placeholder { color: var(--ink-mute); border-bottom-style: dashed; }
 .input--num:disabled { color: var(--ink-mute); border-bottom-color: var(--hairline); }
 
@@ -85,8 +85,8 @@
   cursor: pointer;
 }
 
-/* Ползунок: волосяная дорожка и квадратная ручка — как и всё остальное,
-   без скруглений и заливок. */
+/* Ползунок: волосяная дорожка и квадратная ручка - как и всё остальное,
+   без скруглений и заливок */
 .slider {
   flex: 1;
   min-width: 70px;
@@ -114,12 +114,12 @@
   width: 9px; height: 9px; border: 0; border-radius: 0; background: var(--ink);
 }
 
-/* Переключатель «обычный / эксперт» — над списком, той же строкой. */
+/* Переключатель «обычный / эксперт» - над списком, той же строкой */
 .params__modes { display: flex; gap: 16px; margin-bottom: 4px; }
 
-/* ── Экспертный режим ──────────────────────────────────────────────────
-   Модуль — свёрнутый блок: групп шесть, модулей в каждой до десятка, и
-   развёрнутое дерево целиком не читается. */
+/* Экспертный режим
+   Модуль - свёрнутый блок: групп шесть, модулей в каждой до десятка, и
+   развёрнутое дерево целиком не читается */
 .expert { display: flex; flex-direction: column; }
 .expert__mod { border-bottom: 1px solid var(--hairline); padding: 7px 0; }
 .expert__mod summary {
@@ -134,11 +134,11 @@
 .expert__head { margin: 14px 0 2px; }
 .expert__block:first-child .expert__head { margin-top: 0; }
 .expert__name { font-size: 12px; }
-/* Раскрытый модуль отмечаем линией слева — видно, к чему относятся строки. */
+/* Раскрытый модуль отмечаем линией слева - видно, к чему относятся строки */
 .expert__mod[open] { border-left: 1px solid var(--accent); padding-left: 9px; }
 .expert__warn { margin-left: auto; font-size: 10px; color: var(--accent); }
-/* Отличия от игры: точка у строки, метка у модуля, убранные — списком.
-   Точка, а не цвет текста: цветом уже говорит «не в превью». */
+/* Отличия от игры: точка у строки, метка у модуля, убранные - списком.
+   Точка, а не цвет текста: цветом уже говорит «не в превью» */
 .params__row.is-changed .params__name::before,
 .tree__name.is-changed::before,
 .tree__name.is-added::before {
@@ -159,7 +159,7 @@
 
 /* Эффект правят, ГЛЯДЯ на него: шторка снизу закрывала ровно то, ради чего
    правка и затевалась. Поэтому в разделе частиц панель всегда колонка справа,
-   даже когда панели откреплены. */
+   даже когда панели откреплены */
 [data-section="particles"][data-panels="float"] .stage {
   grid-template-columns: minmax(0, 1fr) var(--pw, 300px);
 }
@@ -171,7 +171,7 @@
   border-left: 1px solid var(--hairline);
   background: none;
 }
-/* Узкое окно: колонка съедает кадр, и там шторка честнее. */
+/* Узкое окно: колонка съедает кадр, и там шторка честнее */
 @media (max-width: 900px) {
   [data-section="particles"][data-panels="float"] .stage {
     grid-template-columns: minmax(0, 1fr);
@@ -190,7 +190,7 @@
 .params__find { margin-bottom: 4px; }
 
 /* Действия живут в контекстных меню, как в панели приложения. Подсказка
-   нужна: правая кнопка — не самая заметная дверь. */
+   нужна: правая кнопка - не самая заметная дверь */
 .params__hint {
   margin: 0 0 6px;
   padding-bottom: 8px;
@@ -200,11 +200,11 @@
   color: var(--ink-mute);
 }
 
-/* Контекстное меню — тот же список, что у «Инструментов», только у курсора. */
+/* Контекстное меню - тот же список, что у «Инструментов», только у курсора */
 /* right: auto обязателен: у .menu__list он прибит к правому краю родителя,
-   и меню растягивалось от курсора до края экрана. */
-/* Меню — popover (верхний слой, см. menu.js): у popover свои поля и
-   центровка от браузера, возвращаем наши. Где стоять, задаёт скрипт. */
+   и меню растягивалось от курсора до края экрана */
+/* Меню - popover (верхний слой, см. menu.js): у popover свои поля и
+   центровка от браузера, возвращаем наши. Где стоять, задаёт скрипт */
 .ctx {
   position: fixed;
   inset: auto;
@@ -216,9 +216,9 @@
 }
 .ctx:popover-open { display: flex; }
 
-/* ── Краска из игры ───────────────────────────────────────────────────── */
+/* Краска из игры */
 .paint { display: inline-flex; align-items: center; gap: 7px; }
-/* Точка цвета банки; у командной — две половины. */
+/* Точка цвета банки, у командной - две половины */
 .paint__dot, .swatch {
   background: linear-gradient(135deg, var(--c) 50%, var(--c2, var(--c)) 50%);
 }
@@ -250,11 +250,11 @@
 .ctx__sep { height: 1px; background: var(--hairline-strong); }
 .ctx .menu__item:disabled { color: var(--ink-mute); cursor: default; }
 .ctx .menu__item:disabled:hover { background: none; }
-/* Длинное меню (готовые эффекты VMT) не должно уходить за край окна. */
+/* Длинное меню (готовые эффекты VMT) не должно уходить за край окна */
 .ctx { max-height: calc(100vh - 16px); overflow-y: auto; }
 .ctx__head { padding: 12px 14px 6px; color: var(--accent); }
 /* Пояснение под подписью пункта: мельче и тише, чтобы список читался по
-   подписям, а пояснение — когда глаз на пункте. */
+   подписям, а пояснение - когда глаз на пункте */
 .ctx__hint {
   display: block;
   max-width: 360px;
@@ -265,9 +265,9 @@
   white-space: normal;
 }
 
-/* ── Дерево систем эффекта ─────────────────────────────────────────────
-   Ребёнок под родителем с отступом, у родителя — знак свёртки. Плоским
-   списком 104 системы одного файла читаются как свалка. */
+/* Дерево систем эффекта
+   Ребёнок под родителем с отступом, у родителя - знак свёртки. Плоским
+   списком 104 системы одного файла читаются как свалка */
 .catalog--tree .catalog__grid {
   display: block;
   border-top: 1px solid var(--hairline);
@@ -315,13 +315,13 @@
 }
 .tree__name:hover { color: var(--ink); }
 /* Имя эффекта из игры при имени системы: «Burning Flames» рядом с
-   `superrare_burning1`. */
+   `superrare_burning1` */
 .tree__fx { margin-left: 10px; color: var(--ink-mute); font-size: 11px; }
 .tree__name.is-active .tree__fx { color: var(--ink-soft); }
 
-/* Каталог эффектов игры: имя, система, файл. */
+/* Каталог эффектов игры: имя, система, файл */
 .fx__head { margin: 14px 0 4px; }
-/* Число при кнопке фильтра: «Лицо 212». */
+/* Число при кнопке фильтра: «Лицо 212» */
 .underlined__n { margin-left: 5px; font-style: normal; font-size: 10px;
                  color: var(--ink-mute); }
 .fx {
@@ -343,13 +343,13 @@
 }
 .fx:hover { color: var(--ink); }
 .fx.is-active { color: var(--ink); box-shadow: inset 2px 0 0 var(--accent); }
-/* В строке с разворачивалкой линию рисует сама строка. */
+/* В строке с разворачивалкой линию рисует сама строка */
 .tree__row > .fx { border-bottom: 0; }
 .fx--kid { color: var(--ink-mute); }
 .fx__what { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
 .fx__name { flex: none; font-weight: 500; overflow: hidden; text-overflow: ellipsis;
             white-space: nowrap; max-width: 100%; }
-/* Чем вызывается: «Огнемёт», «Турель» — приглушённо при имени. */
+/* Чем вызывается: «Огнемёт», «Турель» - приглушённо при имени */
 .fx__who { color: var(--ink-mute); font-size: 11px; overflow: hidden;
            text-overflow: ellipsis; white-space: nowrap; }
 .fx__sys, .fx__file { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -360,8 +360,8 @@
   padding-left: 8px;
 }
 
-/* ── Контрольные точки ──────────────────────────────────────────────────
-   Полоса под кадром: правят точку — смотрят на эффект. */
+/* Контрольные точки
+   Полоса под кадром: правят точку - смотрят на эффект */
 .cp {
   flex: none;
   display: flex;
@@ -381,7 +381,7 @@
 .cp__pick { display: flex; gap: 4px; }
 .cp__pick .tag { padding: 3px 9px; }
 /* Точка, которую эффект действительно использует: без подсказки узнать,
-   что ему важна CP 9, можно только вычитав это в дереве свойств. */
+   что ему важна CP 9, можно только вычитав это в дереве свойств */
 .cp__pick .tag.is-used { border-color: var(--accent); color: var(--accent); }
 .cp__pick .tag.is-used.is-active { background: var(--accent); color: var(--surface); }
 .cp__used { color: var(--accent); }

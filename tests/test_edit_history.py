@@ -1,8 +1,8 @@
 """
-История правок предмета: Ctrl+Z / Ctrl+Y в редакторе.
+История правок предмета: Ctrl+Z / Ctrl+Y в редакторе
 
-Одна лента на всё — текстуры, части, свою модель: две ленты (у частей была
-своя) разъезжались, и отменённый в одной мазок другая помнила последним шагом.
+Одна лента на всё - текстуры, части, свою модель: две ленты (у частей была
+своя) разъезжались, и отменённый в одной мазок другая помнила последним шагом
 """
 
 from __future__ import annotations
@@ -18,7 +18,7 @@ from src.app.session import AppSession
 
 
 class StackTests(unittest.TestCase):
-    """Сам стек снимков, без сеанса."""
+    """Сам стек снимков, без сеанса"""
 
     def test_steps_dedupe_branch_and_limit(self):
         h = EditHistory(lambda: '')
@@ -47,7 +47,7 @@ class _Session(unittest.TestCase):
         self.session._mode = 'scout_c_scattergun'
         self.session.preview.weapon_key = 'c_scattergun'
         self.session.preview.textures.material_names = ['weapon']
-        # Автосохранение на диск — не предмет проверки.
+        # Автосохранение на диск - не предмет проверки
         p = mock.patch('src.services.work_keeper.save', return_value=False)
         p.start()
         self.addCleanup(p.stop)
@@ -82,7 +82,7 @@ class UndoRedoTests(_Session):
         self.assertIn('error', self.session.undo_edits(1))
 
     def test_same_state_twice_is_one_step(self):
-        """Правка, не изменившая ничего, не должна стоить нажатия Ctrl+Z."""
+        """Правка, не изменившая ничего, не должна стоить нажатия Ctrl+Z"""
         self.session.set_texture('weapon', self.tex)
         self.session.set_texture('weapon', self.tex)
         self.session.undo_edits(-1)
@@ -103,8 +103,8 @@ class UndoRedoTests(_Session):
 
 
 class GeometryTests(_Session):
-    """Своя модель — тоже правка: её приход и уход откатываются, и кадр
-    обязан идти за состоянием."""
+    """Своя модель - тоже правка: её приход и уход откатываются, и кадр
+    обязан идти за состоянием"""
 
     def setUp(self):
         super().setUp()
@@ -148,7 +148,7 @@ class GeometryTests(_Session):
         self.session._on_model_ready.assert_called_once()
 
     def test_the_obj_survives_an_unrelated_undo(self):
-        """OBJ живёт один запуск: терять его на отмене текстуры нельзя."""
+        """OBJ живёт один запуск: терять его на отмене текстуры нельзя"""
         self._put_own_model()
         self.session.set_texture('own', self.tex)
         self.session.undo_edits(-1)
@@ -158,7 +158,7 @@ class GeometryTests(_Session):
 
 class WorkFilesTests(_Session):
     """Автосохранение убирает из папки работы всё, на что правки больше не
-    ссылаются, — а Ctrl+Z обязан вернуть снятую текстуру."""
+    ссылаются, - а Ctrl+Z обязан вернуть снятую текстуру"""
 
     def test_snapshot_keeps_its_own_copy_of_a_work_file(self):
         from src.services import work_store

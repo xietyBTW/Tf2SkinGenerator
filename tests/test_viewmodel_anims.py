@@ -1,10 +1,10 @@
 """
-Данные вьюмодели: пути моделей классов и разбор items_game.txt.
+Данные вьюмодели: пути моделей классов и разбор items_game.txt
 
-items_game — единственный авторитетный источник того, какую анимацию играет
+items_game - единственный авторитетный источник того, какую анимацию играет
 конкретное оружие. Проверяется то, на чём наивный разбор ломается:
 наследование через prefab (у стокового оружия и модель, и класс объявлены в
-prefab, а не в предмете) и приоритет anim_slot над слотом инвентаря.
+prefab, а не в предмете) и приоритет anim_slot над слотом инвентаря
 """
 
 import json
@@ -121,7 +121,7 @@ class ClassModelPathTests(unittest.TestCase):
             self.assertTrue(viewmodel_anims.animations_mdl(tf2_class))
 
     def test_demoman_models_are_named_demo(self):
-        """Склейка по названию класса дала бы c_demoman_arms.mdl, которого нет."""
+        """Склейка по названию класса дала бы c_demoman_arms.mdl, которого нет"""
         self.assertEqual(viewmodel_anims.arms_mdl("demoman"),
                          "models/weapons/c_models/c_demo_arms.mdl")
         self.assertEqual(viewmodel_anims.animations_mdl("demoman"),
@@ -156,39 +156,39 @@ class ItemsGameParsingTests(unittest.TestCase):
         self._tmp.cleanup()
 
     def test_stock_weapon_inherits_model_and_class_from_prefab(self):
-        """У стокового оружия в самом предмете нет ни модели, ни item_class."""
+        """У стокового оружия в самом предмете нет ни модели, ни item_class"""
         info = viewmodel_anims.anim_info("c_scattergun", "root")
         self.assertEqual(info, WeaponAnimInfo(item_class="tf_weapon_scattergun",
                                               anim_slot="", item_slot="primary"))
         self.assertEqual(info.slot, "primary")
 
     def test_anim_slot_wins_over_inventory_slot(self):
-        """Неумолимая сила лежит в primary, а анимируется как item2."""
+        """Неумолимая сила лежит в primary, а анимируется как item2"""
         info = viewmodel_anims.anim_info("c_double_barrel", "root")
         self.assertEqual(info.item_slot, "primary")
         self.assertEqual(info.anim_slot, "item2")
         self.assertEqual(info.slot, "item2")
 
     def test_animation_replacement_is_read(self):
-        """Слот не единственный источник: у куная он melee, а набор — ITEM2.
+        """Слот не единственный источник: у куная он melee, а набор - ITEM2
 
         Пока подмена не читалась, почти все ножи шпиона показывали анимацию
-        обычного ножа-бабочки.
+        обычного ножа-бабочки
         """
         info = viewmodel_anims.anim_info("c_shogun_kunai", "root")
         # Средняя пара записана слитно, как у Valve в Shortstop: пока разбор
-        # требовал пробел, всё ниже неё съезжало на одну позицию.
+        # требовал пробел, всё ниже неё съезжало на одну позицию
         self.assertEqual(info.replacement, {
             "ACT_VM_IDLE": "ACT_ITEM2_VM_IDLE",
             "ACT_VM_DRAW": "ACT_ITEM2_VM_DRAW",
             "ACT_VM_HITCENTER": "ACT_ITEM2_VM_HITCENTER",
         })
-        # У обычного оружия подмены нет — слота достаточно.
+        # У обычного оружия подмены нет - слота достаточно
         self.assertEqual(
             viewmodel_anims.anim_info("c_scattergun", "root").replacement, {})
 
     def test_replacement_survives_the_cache(self):
-        """JSON не знает кортежей — на возврате из кэша легко потерять форму."""
+        """JSON не знает кортежей - на возврате из кэша легко потерять форму"""
         viewmodel_anims.anim_index("root")
         viewmodel_anims._MEM.clear()
         with patch.object(viewmodel_anims.items_game_kv.ItemsGame, "parse",
@@ -197,7 +197,7 @@ class ItemsGameParsingTests(unittest.TestCase):
         self.assertEqual(info.replacement["ACT_VM_IDLE"], "ACT_ITEM2_VM_IDLE")
 
     def test_festive_variant_falls_back_to_the_base_weapon(self):
-        """c_scattergun_xmas в items_game нет — анимации те же, что у базы."""
+        """c_scattergun_xmas в items_game нет - анимации те же, что у базы"""
         self.assertEqual(viewmodel_anims.anim_info("c_scattergun_xmas", "root"),
                          viewmodel_anims.anim_info("c_scattergun", "root"))
 
@@ -206,26 +206,26 @@ class ItemsGameParsingTests(unittest.TestCase):
         self.assertEqual(len(viewmodel_anims.anim_index("root")), 7)
 
     def test_worn_banner_knows_what_is_held(self):
-        """Знамя в каталоге - рюкзак (extra_wearable), а в руке - дудка.
+        """Знамя в каталоге - рюкзак (extra_wearable), а в руке - дудка
 
         Без этого вид от первого лица сажал в руку рюкзак и писал, что
-        анимаций нет.
+        анимаций нет
         """
         pack = viewmodel_anims.anim_info("c_buffpack", "root")
         self.assertEqual((pack.held, pack.item_class), ("c_bugle", "tf_weapon_buff_item"))
         self.assertEqual(viewmodel_anims.anim_info("c_bugle", "root").held, "")
 
     def test_loadout_slot_depends_on_the_class(self):
-        """Одна модель дробовика - у инженера основной, у остальных вторичный.
+        """Одна модель дробовика - у инженера основной, у остальных вторичный
 
-        Слоты собираются со всех предметов модели, первый предмет не решает.
+        Слоты собираются со всех предметов модели, первый предмет не решает
         """
         self.assertEqual(viewmodel_anims.loadout_slot("c_shotgun", "root", "engineer"),
                          "primary")
         for tf2_class in ("soldier", "heavy"):
             self.assertEqual(viewmodel_anims.slot_for("c_shotgun", "root", tf2_class),
                              "secondary", tf2_class)
-        # Без класса - общий слот первого предмета, как было.
+        # Без класса - общий слот первого предмета, как было
         self.assertEqual(viewmodel_anims.slot_for("c_shotgun", "root"), "primary")
 
     def test_class_slots_survive_the_cache(self):
@@ -235,9 +235,9 @@ class ItemsGameParsingTests(unittest.TestCase):
                          "secondary")
 
     def test_own_empty_anim_slot_cancels_the_prefab(self):
-        """Полу-Дзатоити: `"anim_slot" ""` при префабе с другим слотом.
+        """Полу-Дзатоити: `"anim_slot" ""` при префабе с другим слотом
 
-        По префабу солдат махал катаной анимациями Знамени (item1).
+        По префабу солдат махал катаной анимациями Знамени (item1)
         """
         self.assertEqual(viewmodel_anims.anim_info("c_shogun_katana", "root").anim_slot, "")
         self.assertEqual(viewmodel_anims.slot_for("c_shogun_katana", "root", "soldier"),
@@ -253,7 +253,7 @@ class ItemsGameParsingTests(unittest.TestCase):
         self.assertIn("c_scattergun",
                       json.loads(self.cache.read_text(encoding="utf-8"))["items"])
 
-        # Разбор из кэша обязан дать тот же результат — без чтения items_game.
+        # Разбор из кэша обязан дать тот же результат - без чтения items_game
         viewmodel_anims._MEM.clear()
         with patch.object(viewmodel_anims.items_game_kv.ItemsGame, "parse",
                           side_effect=AssertionError("items_game читать не должны")):
@@ -263,16 +263,16 @@ class ItemsGameParsingTests(unittest.TestCase):
     def test_stale_cache_is_ignored(self):
         viewmodel_anims.anim_index("root")
         viewmodel_anims._MEM.clear()
-        # items_game новее кэша — данные обязаны перечитаться.
+        # items_game новее кэша - данные обязаны перечитаться
         import os
         os.utime(self.items, (self.cache.stat().st_mtime + 100,) * 2)
         self.assertIsNotNone(viewmodel_anims.anim_info("c_scattergun", "root"))
 
     def test_slot_prefers_items_game_over_our_own_table(self):
-        """У шпиона револьвер у нас во вкладке Primary, а в игре — secondary.
+        """У шпиона револьвер у нас во вкладке Primary, а в игре - secondary
 
         Последовательности `primary_*` у шпиона нет вовсе, так что верить надо
-        игре, иначе поза не найдётся.
+        игре, иначе поза не найдётся
         """
         self.assertEqual(viewmodel_anims.slot_for("c_double_barrel", "root"),
                          "item2")
@@ -280,7 +280,7 @@ class ItemsGameParsingTests(unittest.TestCase):
                          "primary")
 
     def test_slot_falls_back_to_our_table_when_the_game_has_no_such_model(self):
-        """Ганслингер и ещё десяток моделей items_game зовёт иначе, чем мы."""
+        """Ганслингер и ещё десяток моделей items_game зовёт иначе, чем мы"""
         self.assertEqual(viewmodel_anims.slot_for("c_scattergun_xmas", "root"),
                          "primary")               # через базовое оружие
         self.assertEqual(viewmodel_anims.slot_for("c_bat", "root"), "melee")
@@ -294,7 +294,7 @@ class ItemsGameParsingTests(unittest.TestCase):
 
 
 class KeyValuesTests(unittest.TestCase):
-    """Примитивы разбора: на них же держится парсер шапок."""
+    """Примитивы разбора: на них же держится парсер шапок"""
 
     def test_sections_are_found_at_the_top_level_only(self):
         pos = items_game_kv.find_section(ITEMS_GAME, "items")

@@ -1,5 +1,5 @@
 """
-Свой заголовок окна вместо системного.
+Свой заголовок окна вместо системного
 
 Окно остаётся обычным окном Windows: изменение размера за края, прилипание к
 краям экрана, Win+стрелки, тень и скругления Windows 11 работают как у всех
@@ -7,17 +7,17 @@
 (WM_NCCALCSIZE). Таскают окно за шапку страницы средствами самого WebView2
 (CSS `app-region: drag`): двойной щелчок разворачивает, правый открывает
 системное меню. Кнопки «свернуть / развернуть / закрыть» рисует страница
-(titlebar.js) и зовёт сюда через api.window_control.
+(titlebar.js) и зовёт сюда через api.window_control
 
 Края. Слева, справа и снизу рамка изменения размера остаётся системной: это
 невидимая полоса за видимым краем окна. Сверху её место заняла страница, а
 WebView2 забирает себе все щелчки над ней. Поэтому над ним оставлена полоска
 формы в несколько пикселей цвета фона: на ней окно отвечает «здесь верхний
 край» (WM_NCHITTEST). У развёрнутого окна полоски нет: кнопки окна должны
-доставать до края экрана.
+доставать до края экрана
 
 Без поддержки перетаскивания в WebView2 окно без заголовка нельзя было бы
-сдвинуть, поэтому тогда системный заголовок возвращается.
+сдвинуть, поэтому тогда системный заголовок возвращается
 """
 
 from __future__ import annotations
@@ -29,10 +29,10 @@ from ctypes import wintypes
 logger = logging.getLogger(__name__)
 
 #: Фон страницы по темам (--bg из base.css, передаёт app.py): полоска над
-#: WebView2 не должна выделяться.
+#: WebView2 не должна выделяться
 _colors: dict = {}
 
-#: Высота полоски под верхний край окна, логические пиксели.
+#: Высота полоски под верхний край окна, логические пиксели
 TOP_GRIP = 4
 
 _ID = 1
@@ -77,12 +77,12 @@ class _MONITORINFO(ctypes.Structure):
                 ('rcWork', wintypes.RECT), ('dwFlags', wintypes.DWORD)]
 
 
-# Самопрячущаяся панель задач: её состояние и края (shellapi.h).
+# Самопрячущаяся панель задач: её состояние и края (shellapi.h)
 _ABM_GETSTATE, _ABM_GETAUTOHIDEBAREX = 0x04, 0x0B
 _ABS_AUTOHIDE = 0x01
 _ABE_LEFT, _ABE_TOP, _ABE_RIGHT, _ABE_BOTTOM = 0, 1, 2, 3
 _MONITOR_DEFAULTTONEAREST = 2
-#: Сколько пикселей оставить панели у её края, чтобы она могла выехать.
+#: Сколько пикселей оставить панели у её края, чтобы она могла выехать
 _AUTOHIDE_GAP = 2
 
 
@@ -122,11 +122,11 @@ _user32.MonitorFromWindow.restype = wintypes.HMONITOR
 _user32.GetMonitorInfoW.argtypes = [wintypes.HMONITOR, ctypes.POINTER(_MONITORINFO)]
 _user32.GetMonitorInfoW.restype = wintypes.BOOL
 
-#: Окно со своим заголовком: (pywebview-окно, его HWND). Пусто — заголовок системный.
+#: Окно со своим заголовком: (pywebview-окно, его HWND). Пусто - заголовок системный
 _active: dict = {}
 
 #: Состояние окна при прошлом перемещении и размер, который держим, пока
-#: WinForms возвращает окно в обычное состояние (см. _wndproc).
+#: WinForms возвращает окно в обычное состояние (см. _wndproc)
 _shown = {'state': 'normal', 'hold': None}
 
 
@@ -135,7 +135,7 @@ def _scaled(hwnd, logical: int) -> int:
 
 
 def _frame(hwnd) -> int:
-    """Толщина рамки изменения размера в физических пикселях."""
+    """Толщина рамки изменения размера в физических пикселях"""
     dpi = _user32.GetDpiForWindow(hwnd) or 96
     return (_user32.GetSystemMetricsForDpi(_SM_CYSIZEFRAME, dpi)
             + _user32.GetSystemMetricsForDpi(_SM_CXPADDEDBORDER, dpi))
@@ -143,11 +143,11 @@ def _frame(hwnd) -> int:
 
 def _top_edge(hwnd, lparam: int) -> int:
     """
-    Код верхнего края под курсором или 0.
+    Код верхнего края под курсором или 0
 
     Над WebView2 окно этого сообщения не получает (его забирает WebView2),
-    так что «клиентская» точка окна — это и есть полоска. Высоту сверяем с
-    запасом: WinForms при запуске может ещё раз отмасштабировать отступ.
+    так что «клиентская» точка окна - это и есть полоска. Высоту сверяем с
+    запасом: WinForms при запуске может ещё раз отмасштабировать отступ
     """
     x = ctypes.c_short(lparam & 0xFFFF).value
     y = ctypes.c_short((lparam >> 16) & 0xFFFF).value
@@ -164,7 +164,7 @@ def _top_edge(hwnd, lparam: int) -> int:
 
 
 def _autohide_edges(hwnd) -> list:
-    """Края монитора окна, у которых прячется панель задач."""
+    """Края монитора окна, у которых прячется панель задач"""
     state = _APPBARDATA(cbSize=ctypes.sizeof(_APPBARDATA))
     if not _shell32.SHAppBarMessage(_ABM_GETSTATE, ctypes.byref(state)) & _ABS_AUTOHIDE:
         return []
@@ -182,13 +182,13 @@ def _autohide_edges(hwnd) -> list:
 
 def _client_rect(hwnd, rect, top: int) -> None:
     """
-    Клиентская область после системного расчёта рамки.
+    Клиентская область после системного расчёта рамки
 
     Бока и низ рамка оставила себе, верх отдаём странице. Развёрнутое окно
     выходит за экран на толщину рамки: без поправки шапка уехала бы за
     верхний край монитора. А если панель задач прячется сама, развёрнутое окно
     не должно закрывать монитор целиком: оболочка сочтёт его полноэкранным, и
-    панель перестанет выезжать (на этом спотыкались Windows Terminal и Chromium).
+    панель перестанет выезжать (на этом спотыкались Windows Terminal и Chromium)
     """
     if not _user32.IsZoomed(hwnd):
         rect.top = top
@@ -207,13 +207,13 @@ def _client_rect(hwnd, rect, top: int) -> None:
 
 def _restore_hold(hwnd):
     """
-    Размер, который надо удержать на этом перемещении, или None.
+    Размер, который надо удержать на этом перемещении, или None
 
     Уходя из обычного состояния, WinForms запоминает размер клиентской области,
-    а возвращаясь, пересчитывает по нему окно — так, будто заголовок на месте:
-    каждое «развернуть — свернуть в окно» растило окно на его высоту. Пока
+    а возвращаясь, пересчитывает по нему окно - так, будто заголовок на месте:
+    каждое «развернуть - свернуть в окно» растило окно на его высоту. Пока
     WinForms это делает (вложенно, внутри перемещения), держим размер, который
-    уже вернула сама Windows.
+    уже вернула сама Windows
     """
     now = ('max' if _user32.IsZoomed(hwnd)
            else 'min' if _user32.IsIconic(hwnd) else 'normal')
@@ -228,7 +228,7 @@ def _restore_hold(hwnd):
 @_SUBCLASSPROC
 def _wndproc(hwnd, msg, wparam, lparam, _id, _data):
     # Ошибка в своей поправке не должна ломать окно: каждая ветка в худшем
-    # случае оставляет системный ответ как есть.
+    # случае оставляет системный ответ как есть
     if msg == _WM_NCCALCSIZE and wparam:
         params = _NCCALCSIZE_PARAMS.from_address(lparam)
         top = params.rgrc[0].top
@@ -264,7 +264,7 @@ def _wndproc(hwnd, msg, wparam, lparam, _id, _data):
     if msg == _WM_NCDESTROY:
         _comctl32.RemoveWindowSubclass(hwnd, _wndproc, _ID)
         # Окна больше нет, а номер его может достаться другому: кнопки
-        # страницы не должны слать ему команды.
+        # страницы не должны слать ему команды
         _active.pop('window', None)
     return res
 
@@ -275,13 +275,13 @@ def _form(window):
 
 
 def _set_grip(form, hwnd) -> None:
-    """Полоска над WebView2 под верхний край; у развёрнутого окна её нет."""
+    """Полоска над WebView2 под верхний край, у развёрнутого окна её нет"""
     from System.Windows.Forms import Padding
     form.Padding = Padding(0, 0 if _user32.IsZoomed(hwnd) else _scaled(hwnd, TOP_GRIP), 0, 0)
 
 
 def _set_theme(form, hwnd, theme: str) -> None:
-    """Цвет полоски и тёмная рамка окна — под тему страницы."""
+    """Цвет полоски и тёмная рамка окна - под тему страницы"""
     from System.Drawing import ColorTranslator
     form.BackColor = ColorTranslator.FromHtml(_colors.get(theme) or _colors['dark'])
     dark = ctypes.c_int(1 if theme == 'dark' else 0)
@@ -290,13 +290,13 @@ def _set_theme(form, hwnd, theme: str) -> None:
 
 
 def _on_ui(form, fn) -> None:
-    """Выполняет fn в потоке окна: формой можно пользоваться только оттуда."""
+    """Выполняет fn в потоке окна: формой можно пользоваться только оттуда"""
     from System import Action
     form.Invoke(Action(fn))
 
 
 def _remove(window) -> None:
-    """Возвращает системный заголовок (зовётся в потоке окна)."""
+    """Возвращает системный заголовок (зовётся в потоке окна)"""
     item = _active.pop('window', None)
     if item is None:
         return
@@ -310,24 +310,24 @@ def _remove(window) -> None:
 
 def _enable_app_region(window) -> bool:
     """
-    Включает в WebView2 CSS app-region: перетаскивание окна за шапку.
+    Включает в WebView2 CSS app-region: перетаскивание окна за шапку
 
     Настройка действует со следующей навигации, а первую pywebview начинает
     сразу по готовности WebView2. Поэтому ставим её раньше него: подменяем
     его обработчик готовности до того, как окно его подпишет. Без этой
-    настройки окно без заголовка не сдвинуть — тогда заголовок возвращается.
+    настройки окно без заголовка не сдвинуть - тогда заголовок возвращается
     """
     try:
         from webview.platforms import edgechromium
         ready = edgechromium.EdgeChrome.on_webview_ready
-    except Exception as exc:                  # noqa: BLE001 — нет WebView2 / другая версия
+    except Exception as exc:                  # noqa: BLE001 - нет WebView2 / другая версия
         logger.warning(f"свой заголовок окна: нет WebView2 ({exc})")
         return False
 
     def on_webview_ready(self, sender, args):
         # Не поднялся WebView2 (CoreWebView2 тогда пуст) или он слишком стар
-        # для этой настройки — окно без заголовка нельзя было бы ни сдвинуть,
-        # ни развернуть. Возвращаем системный.
+        # для этой настройки - окно без заголовка нельзя было бы ни сдвинуть,
+        # ни развернуть. Возвращаем системный
         try:
             sender.CoreWebView2.Settings.IsNonClientRegionSupportEnabled = True
         except Exception as exc:              # noqa: BLE001
@@ -344,9 +344,9 @@ def _enable_app_region(window) -> bool:
 
 
 def attach(window, theme: str, colors: dict) -> None:
-    """Подключает свой заголовок к окну pywebview (до webview.start).
+    """Подключает свой заголовок к окну pywebview (до webview.start)
 
-    `colors` — фон страницы по темам: им красится полоска над WebView2.
+    `colors` - фон страницы по темам: им красится полоска над WebView2
     """
     _colors.update(colors)
     if not _enable_app_region(window):
@@ -355,7 +355,7 @@ def attach(window, theme: str, colors: dict) -> None:
     def before_show(window):
         # В потоке окна, форма создана и ещё не показана: системный заголовок
         # не успеет мелькнуть. Без WebView2 (pywebview откатился на старый
-        # движок) таскать окно было бы нечем — тогда заголовок не трогаем.
+        # движок) таскать окно было бы нечем - тогда заголовок не трогаем
         from webview.platforms import winforms
         if not getattr(winforms, 'is_chromium', False):
             logger.warning("свой заголовок окна: движок не WebView2, заголовок системный")
@@ -383,10 +383,10 @@ def attach(window, theme: str, colors: dict) -> None:
 
 def control(action: str = '', theme: str = '') -> dict:
     """
-    api.window_control: кнопки страницы → окно.
+    api.window_control: кнопки страницы -> окно
 
-    Ответ — есть ли свой заголовок (`custom`) и развёрнуто ли окно: по нему
-    страница показывает кнопки и рисует «развернуть» или «свернуть в окно».
+    Ответ - есть ли свой заголовок (`custom`) и развёрнуто ли окно: по нему
+    страница показывает кнопки и рисует «развернуть» или «свернуть в окно»
     """
     item = _active.get('window')
     if item is None:
@@ -394,11 +394,11 @@ def control(action: str = '', theme: str = '') -> dict:
     window, hwnd = item
     # Те же команды, что шлют системные кнопки заголовка. WindowState формы
     # не годится: WinForms считает размер так, будто заголовок на месте, и
-    # после «развернуть — свернуть в окно» окно вырастало на его высоту.
+    # после «развернуть - свернуть в окно» окно вырастало на его высоту
     if action == 'minimize':
         # Свёрнутое окно не «развёрнуто» для Windows, а страница после
         # возврата не узнает об этом сама (размер её не меняется). Отвечаем
-        # тем, во что окно вернётся.
+        # тем, во что окно вернётся
         was = bool(_user32.IsZoomed(hwnd))
         _user32.SendMessageW(hwnd, _WM_SYSCOMMAND, _SC_MINIMIZE, 0)
         return {'custom': True, 'maximized': was}
@@ -406,7 +406,7 @@ def control(action: str = '', theme: str = '') -> dict:
         command = _SC_RESTORE if _user32.IsZoomed(hwnd) else _SC_MAXIMIZE
         _user32.SendMessageW(hwnd, _WM_SYSCOMMAND, command, 0)
     elif action == 'close':
-        # Как Alt+F4: закрытие идёт обычным путём окна, ответ не ждём.
+        # Как Alt+F4: закрытие идёт обычным путём окна, ответ не ждём
         _user32.PostMessageW(hwnd, _WM_SYSCOMMAND, _SC_CLOSE, 0)
         return {'custom': True, 'maximized': False}
     elif action == 'theme':

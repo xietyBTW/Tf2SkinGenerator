@@ -1,8 +1,6 @@
-"""Тесты PreviewSession: правила перехода между моделями превью.
+"""Тесты PreviewSession: правила перехода между моделями превью
 
-Раньше эти правила лежали в теле PreviewPanel._start_3d_worker и проверить их
-можно было только через живой Qt-виджет. Теперь они в домене — тесты идут
-без Qt.
+Правила живут в домене, поэтому проверяются без интерфейса
 """
 
 import unittest
@@ -14,7 +12,7 @@ from src.shared.constants import Team
 
 
 def _loaded_session() -> PreviewSession:
-    """Сеанс, как после полной загрузки кастомной модели с командами и стилями."""
+    """Сеанс, как после полной загрузки кастомной модели с командами и стилями"""
     s = PreviewSession()
     s.custom_smd_path = "C:/models/my.smd"
     s.custom_obj_path = "C:/models/my.obj"
@@ -50,7 +48,7 @@ def _loaded_session() -> PreviewSession:
 
 
 class HasCustomModelTests(unittest.TestCase):
-    """Кастомность определяется по четырём независимым признакам."""
+    """Кастомность определяется по четырём независимым признакам"""
 
     def test_clean_session_is_not_custom(self):
         self.assertFalse(PreviewSession().has_custom_model)
@@ -66,7 +64,7 @@ class HasCustomModelTests(unittest.TestCase):
         self.assertTrue(s.has_custom_model)
 
     def test_skin_info_alone_is_enough(self):
-        """Определённые стили оригинала — тоже след кастомной модели."""
+        """Определённые стили оригинала - тоже след кастомной модели"""
         s = PreviewSession()
         s.textures.skin_info = {"num_skins": 2}
         self.assertTrue(s.has_custom_model)
@@ -79,7 +77,7 @@ class HasCustomModelTests(unittest.TestCase):
 
 class BeginGameModelTests(unittest.TestCase):
     def test_reports_previous_show_was_custom(self):
-        """Признак снимается ДО сбросов — иначе он всегда был бы False."""
+        """Признак снимается ДО сбросов - иначе он всегда был бы False"""
         self.assertTrue(_loaded_session().begin_game_model())
 
     def test_reports_false_when_previous_was_stock(self):
@@ -119,10 +117,10 @@ class BeginGameModelTests(unittest.TestCase):
         self.assertEqual(s.applied_3d_tex, {})
 
     def test_forgets_misc_and_main_material(self):
-        """Имя главного материала обязано уйти вместе с «Прочее».
+        """Имя главного материала обязано уйти вместе с «Прочее»
 
         Иначе у одно-текстурной игровой модели команда и вариант привязались бы
-        к карточке предыдущей модели.
+        к карточке предыдущей модели
         """
         s = _loaded_session()
         s.begin_game_model()
@@ -132,7 +130,7 @@ class BeginGameModelTests(unittest.TestCase):
 
     def test_forgets_material_names(self):
         """Имена материалов принадлежат модели: пережив переход, они заставили
-        бы разрешать текстуры для чужих материалов."""
+        бы разрешать текстуры для чужих материалов"""
         s = _loaded_session()
         s.begin_game_model()
         self.assertEqual(s.textures.material_names, [])
@@ -143,21 +141,21 @@ class BeginGameModelTests(unittest.TestCase):
         self.assertFalse(s.pending_2d_refresh)
 
     def test_keeps_mode(self):
-        """Режим переключают явные переходы, а не загрузка модели."""
+        """Режим переключают явные переходы, а не загрузка модели"""
         s = PreviewSession()
         s.mode.enter(PreviewMode.SPY_MASKS)
         s.begin_game_model()
         self.assertEqual(s.mode.mode, PreviewMode.SPY_MASKS)
 
     def test_is_idempotent(self):
-        """Повторный вызов ничего не ломает: панель зовёт сбросы и порознь."""
+        """Повторный вызов ничего не ломает: панель зовёт сбросы и порознь"""
         s = _loaded_session()
         s.begin_game_model()
         self.assertFalse(s.begin_game_model())
 
 
 class BeginItemTests(unittest.TestCase):
-    """Смена ПРЕДМЕТА забывает пользовательское; перезагрузка того же — нет."""
+    """Смена ПРЕДМЕТА забывает пользовательское, перезагрузка того же - нет"""
 
     def test_same_item_keeps_uploaded_textures(self):
         s = PreviewSession()
@@ -168,7 +166,7 @@ class BeginItemTests(unittest.TestCase):
         self.assertTrue(s.textures.textures[Team.RED])
 
     def test_other_item_forgets_uploaded_textures(self):
-        """Иначе скин одного оружия переезжает на следующее выбранное."""
+        """Иначе скин одного оружия переезжает на следующее выбранное"""
         s = PreviewSession()
         s.begin_item("c_scattergun", "scout_c_scattergun")
         s.textures.set_texture("mat_a", "C:/tex/user.png")
@@ -186,7 +184,7 @@ class BeginItemTests(unittest.TestCase):
 
 
 class PartialResetTests(unittest.TestCase):
-    """Половинки сбросов не должны задевать чужое состояние."""
+    """Половинки сбросов не должны задевать чужое состояние"""
 
     def test_reset_skins_keeps_team_data(self):
         s = _loaded_session()
@@ -201,10 +199,10 @@ class PartialResetTests(unittest.TestCase):
         self.assertEqual(s.textures.skin_info, {"num_skins": 3})
 
     def test_reset_custom_model_keeps_loaded_textures(self):
-        """Забыть подставленную геометрию — не то же самое, что забыть текстуры.
+        """Забыть подставленную геометрию - не то же самое, что забыть текстуры
 
         Текстура здесь уезжает в skin_overrides активного стиля (так работает
-        маршрутизация set_texture при skin > 0), и сброс модели её не трогает.
+        маршрутизация set_texture при skin > 0), и сброс модели её не трогает
         """
         s = _loaded_session()
         s.textures.set_texture("mat_a", "C:/tex/user.png")
@@ -213,7 +211,7 @@ class PartialResetTests(unittest.TestCase):
         self.assertEqual(s.textures.skin_overrides[2]["mat_a"], "C:/tex/user.png")
 
     def test_reset_custom_model_keeps_team_textures(self):
-        """Тот же сброс без активного стиля: текстура лежит по командам."""
+        """Тот же сброс без активного стиля: текстура лежит по командам"""
         s = PreviewSession()
         s.custom_smd_path = "C:/m.smd"
         s.textures.set_texture("mat_a", "C:/tex/user.png")
@@ -222,10 +220,10 @@ class PartialResetTests(unittest.TestCase):
 
 
 class MiscAndForceTeamTests(unittest.TestCase):
-    """«Прочее» и «сделать командным» — правила, которые держала панель."""
+    """«Прочее» и «сделать командным» - правила, которые держала панель"""
 
     def _model(self, tmp) -> PreviewSession:
-        """Сеанс с двумя карточками и одним служебным материалом на диске."""
+        """Сеанс с двумя карточками и одним служебным материалом на диске"""
         import os
         s = PreviewSession()
         s.weapon_key = "c_scattergun"
@@ -243,8 +241,8 @@ class MiscAndForceTeamTests(unittest.TestCase):
         return s
 
     def test_misc_mode_swaps_only_cards(self):
-        """«Прочее» меняет карточки, но не состав модели: главный материал —
-        основа ключа хранения и командных кадров, подменять его нельзя."""
+        """«Прочее» меняет карточки, но не состав модели: главный материал -
+        основа ключа хранения и командных кадров, подменять его нельзя"""
         import tempfile
         with tempfile.TemporaryDirectory() as tmp:
             s = self._model(tmp)
@@ -259,7 +257,7 @@ class MiscAndForceTeamTests(unittest.TestCase):
                              ["scattergun", "scattergun_extra"])
 
     def test_scene_textures_include_service_materials(self):
-        """В 3D едут ВСЕ материалы: без служебных глаза и зубы серые."""
+        """В 3D едут ВСЕ материалы: без служебных глаза и зубы серые"""
         import tempfile
         with tempfile.TemporaryDirectory() as tmp:
             s = self._model(tmp)
@@ -267,7 +265,7 @@ class MiscAndForceTeamTests(unittest.TestCase):
                              ["eyeball_r", "scattergun", "scattergun_extra"])
 
     def test_misc_toggle_drops_variant(self):
-        """Активный австралий гасится: он перекрыл бы главный материал."""
+        """Активный австралий гасится: он перекрыл бы главный материал"""
         import tempfile
         with tempfile.TemporaryDirectory() as tmp:
             s = self._model(tmp)
@@ -276,7 +274,7 @@ class MiscAndForceTeamTests(unittest.TestCase):
             self.assertFalse(s.textures.australium_active)
 
     def test_force_team_offered_only_without_native_variant(self):
-        """Есть свой BLU — предлагать синтез незачем."""
+        """Есть свой BLU - предлагать синтез незачем"""
         s = PreviewSession()
         s.weapon_key = "c_scattergun"
         s.weapon_mode = "scout_c_scattergun"
@@ -285,7 +283,7 @@ class MiscAndForceTeamTests(unittest.TestCase):
         self.assertFalse(s.can_force_team())
 
     def test_force_team_not_offered_twice(self):
-        """После включения кнопка уходит — её место занимают RED/BLU."""
+        """После включения кнопка уходит - её место занимают RED/BLU"""
         s = PreviewSession()
         s.weapon_key = "c_scattergun"
         s.weapon_mode = "scout_c_scattergun"
@@ -295,7 +293,7 @@ class MiscAndForceTeamTests(unittest.TestCase):
         self.assertFalse(s.can_force_team())
 
     def test_force_team_offered_with_australium(self):
-        """Австралий не мешает: сборка трогает только синие строки пар."""
+        """Австралий не мешает: сборка трогает только синие строки пар"""
         s = PreviewSession()
         s.weapon_key = "c_sniperrifle"
         s.weapon_mode = "sniper_c_sniperrifle"
@@ -305,7 +303,7 @@ class MiscAndForceTeamTests(unittest.TestCase):
 
     def test_force_team_gold_shared_by_both_teams(self):
         """Под «сделать командным» золото одно на обе команды, как в игре:
-        загруженное на BLU видно и на RED, и в сборку уходит оно же."""
+        загруженное на BLU видно и на RED, и в сборку уходит оно же"""
         s = PreviewSession()
         s.weapon_key = "c_sniperrifle"
         s.weapon_mode = "sniper_c_sniperrifle"
@@ -315,12 +313,12 @@ class MiscAndForceTeamTests(unittest.TestCase):
         t.active_team = Team.BLU
         t.set_texture("c_sniperrifle_gold", "gold.png")
         self.assertEqual(t.textures[Team.RED].get("c_sniperrifle_gold"), "gold.png")
-        # А командный материал по-прежнему у каждой команды свой.
+        # А командный материал по-прежнему у каждой команды свой
         t.set_texture("c_sniperrifle", "blu.png")
         self.assertNotIn("c_sniperrifle", t.textures.get(Team.RED, {}))
 
     def test_force_team_not_offered_when_second_row_is_style(self):
-        """Кровь тесака во второй строке: синюю туда не вписать."""
+        """Кровь тесака во второй строке: синюю туда не вписать"""
         s = PreviewSession()
         s.weapon_key = "c_sd_cleaver"
         s.weapon_mode = "scout_c_sd_cleaver"
@@ -328,7 +326,7 @@ class MiscAndForceTeamTests(unittest.TestCase):
         self.assertFalse(s.can_force_team())
 
     def test_force_team_not_offered_for_hats_and_hands(self):
-        """Шапки, руки и тела персонажей синтез команды не получают."""
+        """Шапки, руки и тела персонажей синтез команды не получают"""
         from src.data.player_hands import HAND_MODE_KEYS
         s = PreviewSession()
         s.weapon_key = "c_scattergun"
@@ -338,22 +336,22 @@ class MiscAndForceTeamTests(unittest.TestCase):
 
 
 class VpkModStylesTests(unittest.TestCase):
-    """Стили чужого мода: его текстуры должны лечь переопределениями."""
+    """Стили чужого мода: его текстуры должны лечь переопределениями"""
 
     def test_mod_style_textures_become_overrides(self):
         """Иначе переключение стиля показывало бы пустые карточки вместо того,
-        что лежит в файле мода."""
+        что лежит в файле мода"""
         from src.app.preview_controller import VpkModController
 
         session = PreviewSession()
         controller = VpkModController(session)
         controller._on_skins({
             'skins': [{'index': 0}, {'index': 1}],
-            # Базовый стиль карточки показывают сами — его пропускаем.
+            # Базовый стиль карточки показывают сами - его пропускаем
             'skin_textures': {0: {'mat': __file__}, 1: {'mat': __file__}},
         })
-        # Оригиналы мода — не правки человека: в skin_overrides (они уходят в
-        # сохранённую работу и в сборку) им делать нечего.
+        # Оригиналы мода - не правки человека: в skin_overrides (они уходят в
+        # сохранённую работу и в сборку) им делать нечего
         self.assertEqual(session.textures.style_texture(1, 'mat'), __file__)
         self.assertEqual(session.textures.skin_overrides, {})
         self.assertIn('mat', session.skin_chosen.get(1, set()))
@@ -371,7 +369,7 @@ class VpkModStylesTests(unittest.TestCase):
 
 
 class CardMeshTests(unittest.TestCase):
-    """Одна геометрия, много карточек: маски маскировки шпиона."""
+    """Одна геометрия, много карточек: маски маскировки шпиона"""
 
     def _session(self, mode: str) -> PreviewSession:
         s = PreviewSession()
@@ -380,7 +378,7 @@ class CardMeshTests(unittest.TestCase):
         return s
 
     def test_spy_masks_name_the_mesh_that_wears_the_card(self):
-        """Девять текстур на одну голову: какую надеть — решает альбом."""
+        """Девять текстур на одну голову: какую надеть - решает альбом"""
         from src.data.player_characters import SPY_MASK_MODE_KEY
 
         self.assertEqual(self._session(SPY_MASK_MODE_KEY).card_mesh(),
@@ -388,7 +386,7 @@ class CardMeshTests(unittest.TestCase):
 
     def test_misc_cards_wear_the_place_of_their_skin(self):
         """Убер и зомби своей геометрии не имеют: в скине они стоят на месте
-        тела, головы и глаз, и модель должна показать их там."""
+        тела, головы и глаз, и модель должна показать их там"""
         s = self._session("scout_body")
         s.textures.skin_info = {"rows": [
             ["scout_red", "scout_head_red", "eyeball_l", "eyeball_r", "scout_red_invun"],
@@ -403,12 +401,12 @@ class CardMeshTests(unittest.TestCase):
             self.assertEqual(s.card_mesh(), [])          # пока «Прочее» не открыто
             s.misc_mode = True
             # Глаза своей текстуры в сцене не имеют: уберовские остались бы
-            # на них и после выхода из «Прочего».
+            # на них и после выхода из «Прочего»
             self.assertEqual(s.card_mesh(), {"scout_red_invun": ["scout_red"],
                                              "scout_head_red_invun": ["scout_head_red"]})
 
     def test_ordinary_item_wears_nothing_extra(self):
-        """У всех остальных карточка — это материал, надевать нечего."""
+        """У всех остальных карточка - это материал, надевать нечего"""
         for mode in ("scout_c_scattergun", "hat", "spy_body", ""):
             self.assertEqual(self._session(mode).card_mesh(), [], mode)
 

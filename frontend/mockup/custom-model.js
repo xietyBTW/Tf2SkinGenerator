@@ -1,5 +1,5 @@
 /*
- * Своя модель и её QC.
+ * Своя модель и её QC
  *
  * Замена включается самим фактом загрузки - отдельной галочки нет ни здесь, ни
  * в приложении. Тип модели («готова» / «только геометрия») решает всё
@@ -10,17 +10,17 @@ import * as api from './api.js';
 import { ask } from './ask.js';
 import { chooseFiles } from './util.js';
 import { t } from './i18n.js';
-import { say, viewer, withViewer } from './stage.js';
+import { say, sayError, viewer, withViewer } from './stage.js';
 import { applyView, lastView, refreshView, reloadSceneIfFp } from './preview.js';
 import { closeParts } from './parts.js';
 
-//: Гирлянды оружия - отдельные модели, и заменить можно каждую.
+//: Гирлянды оружия - отдельные модели, и заменить можно каждую
 const GARLANDS = { xmas: 'Праздничная гирлянда', festivizer: 'Гирлянда фестивайзера' };
 
-//: Приставка цели «снаряд» в выборе, что заменить: `shell:<группа>`.
+//: Приставка цели «снаряд» в выборе, что заменить: `shell:<группа>`
 const SHELL = 'shell:';
 
-/** Группы-снаряды показанной модели: все (замена) или со своей моделью (возврат). */
+/** Группы-снаряды показанной модели: все (замена) или со своей моделью (возврат) */
 function shellGroups(st, ownOnly) {
   return (st.bodygroups || []).filter((g) => g.projectile && (!ownOnly || g.custom))
     .map((g) => g.name);
@@ -35,14 +35,14 @@ async function pickTarget(title, withModel, kinds, ok, shells = []) {
     ...(withModel ? [{ label: 'Само оружие', value: '' }] : []),
     ...kinds.map((kind) => ({ label: GARLANDS[kind] || kind, value: kind })),
     // Снаряд, заряженный в оружие (граната, ракета, стрела): своя деталь
-    // модели, меняется отдельно от самого оружия.
+    // модели, меняется отдельно от самого оружия
     ...shells.map((group) => ({ label: 'Снаряд в оружии', value: `${SHELL}${group}` })),
   ];
   if (list.length < 2) return list.length ? list[0].value : null;
   return ask({ title, list, ok });
 }
 
-/** Возвращает игровую модель (или стоковую гирлянду) вместо своей. */
+/** Возвращает игровую модель (или стоковую гирлянду) вместо своей */
 export async function dropModel() {
   const st = lastView || {};
   const kind = await pickTarget('Что вернуть к игровому?', Boolean(st.has_custom),
@@ -50,7 +50,7 @@ export async function dropModel() {
   if (kind === null) return;
   if (kind.startsWith(SHELL)) {
     const res = await api.dropPartModel(kind.slice(SHELL.length));
-    if (res.error) { say(res.error); return; }
+    if (res.error) { sayError(res.error); return; }
     applyView(res);
     say('Снаряд снова игровой');
     return;
@@ -58,23 +58,23 @@ export async function dropModel() {
   if (kind) {
     await leaveDecorFit();
     const res = await api.dropDecorModel(kind);
-    if (res.error) { say(res.error); return; }
+    if (res.error) { sayError(res.error); return; }
     applyView(res);            // сцену в руках пересоберёт приезд гирлянды
     say('Гирлянда снова стоковая');
     return;
   }
   dropFitSave();            // подгонки больше не будет - и записывать нечего
   const res = await api.dropCustomModel();
-  if (res.error) { say(res.error); return; }
+  if (res.error) { sayError(res.error); return; }
   say('Своя модель убрана');
   refreshView();
   await reloadSceneIfFp();
 }
 
-// ── Своя модель и её QC ─────────────────────────────────────────────────
+// Своя модель и её QC
 // Замена включается самим фактом загрузки: отдельной галочки нет ни здесь, ни
 // в приложении. Тип модели («готова» / «только геометрия») решает всё
-// дальнейшее, поэтому спрашиваем до показа.
+// дальнейшее, поэтому спрашиваем до показа
 
 /**
  * SMD - из Blender; OBJ/GLB/glTF - «из интернета», их приложение разбирает
@@ -83,7 +83,7 @@ export async function dropModel() {
  */
 export async function replaceModel() {
   // У оружия с гирляндами заменить можно и её: каждая замена своя, так что
-  // оружие и гирлянда меняются вместе - просто двумя заходами.
+  // оружие и гирлянда меняются вместе - просто двумя заходами
   const kind = await pickTarget('Что заменить?', true,
                                 (lastView || {}).festive_options || [], 'Выбрать файл',
                                 shellGroups(lastView || {}, false));
@@ -91,7 +91,7 @@ export async function replaceModel() {
   const files = await chooseFiles(
     '.smd,.obj,.glb,.gltf,.mtl,.bin,.png,.jpg,.jpeg,.webp,.tga');
   const file = files.find((f) => /\.(smd|obj|glb|gltf)$/i.test(f.name));
-  if (!file) { if (files.length) say('Среди выбранных файлов нет модели'); return; }
+  if (!file) { if (files.length) sayError('Среди выбранных файлов нет модели'); return; }
 
   say(`Конвертация ${file.name}…`);
   for (const extra of files) if (extra !== file) await api.upload(extra);
@@ -99,7 +99,7 @@ export async function replaceModel() {
   if (kind.startsWith(SHELL)) { await replaceShell(kind.slice(SHELL.length), path); return; }
   if (kind) { await replaceGarland(kind, path); return; }
   const first = await api.loadCustomModel(path);
-  if (first.error) { say(first.error); return; }
+  if (first.error) { sayError(first.error); return; }
 
   let keep = true;
   if (first.ask_keep) {
@@ -123,16 +123,16 @@ export async function replaceModel() {
   }
 
   const res = await api.loadCustomModel(path, keep);
-  if (res.error) { say(res.error); return; }
+  if (res.error) { sayError(res.error); return; }
   const notes = [keep ? 'Своя модель: материалы её собственные'
                       : 'Своя модель: геометрия ваша, текстуры игровые'];
   // Что приложение сделало само: скульпт из интернета упрощён до лимита
-  // игры, базовый цвет из файла лёг в слоты.
+  // игры, базовый цвет из файла лёг в слоты
   if (res.simplified) {
     notes.push(`упрощено: ${res.simplified[0]} → ${res.simplified[1]} треугольников`);
   }
   if (res.textures) notes.push(`текстур из файла: ${res.textures}`);
-  // Каждую заметку переводим отдельно: склеенную строку словарь не узнаёт.
+  // Каждую заметку переводим отдельно: склеенную строку словарь не узнаёт
   say(notes.map(t).join('; '));
   refreshView();
   await reloadSceneIfFp();
@@ -140,41 +140,41 @@ export async function replaceModel() {
 
 /** Своя модель снаряда: кость игрового. SMD - как выставлен, на материале
  *  оружия; OBJ/GLB - по габаритам игрового, со своим материалом и картинкой
- *  из файла, когда приедет модель (Python: load_part_model). */
+ *  из файла, когда приедет модель (Python: load_part_model) */
 async function replaceShell(group, path) {
   const res = await api.loadPartModel(group, path);
-  if (res.error) { say(res.error); return; }
+  if (res.error) { sayError(res.error); return; }
   applyView(res);
   const notes = [res.texture ? 'Свой снаряд в оружии: текстура из файла'
                              : 'Свой снаряд в оружии'];
   if (res.simplified) {
     notes.push(`упрощено: ${res.simplified[0]} → ${res.simplified[1]} треугольников`);
   }
-  // Каждую заметку переводим отдельно: склеенную строку словарь не узнаёт.
+  // Каждую заметку переводим отдельно: склеенную строку словарь не узнаёт
   say(notes.map(t).join('; '));
 }
 
-/** Своя модель гирлянды: кости стоковой, материалы свои. */
+/** Своя модель гирлянды: кости стоковой, материалы свои */
 async function replaceGarland(kind, path) {
   await leaveDecorFit();
   const res = await api.loadDecorModel(kind, path);
-  if (res.error) { say(res.error); return; }
+  if (res.error) { sayError(res.error); return; }
   applyView(res);            // сцену в руках пересоберёт приезд гирлянды
   say(res.textures ? t(`Своя гирлянда; текстур из файла: ${res.textures}`) : 'Своя гирлянда');
 }
 
-// ── Подгонка своей модели и гирлянды ─────────────────────────────────────
+// Подгонка своей модели и гирлянды
 // Значения - в осях SMD оружия (Y вверх, ствол по +Z), теми же, что запекает
 // Python. Вьювер крутит модель сам и сразу (гизмо в кадре, как в Blender);
 // SMD пересобирается после паузы в правке - он нужен только сборке и виду от
 // первого лица. Кнопка «Масштабировать» включает режим: призрак оригинала в
 // кадре, гизмо и палитра поверх кадра, как у частей. Режимы частей и
-// подгонки взаимоисключающие: у обоих свой захват мыши в кадре.
+// подгонки взаимоисключающие: у обоих свой захват мыши в кадре
 //
 // Цель подгонки две: своя модель ('model') и гирлянда праздничной версии
 // ('decor') - её сдвигают под свою модель, чтобы огоньки легли на неё, а не
 // висели там, где их повесила бы стоковая. Панель и клавиши у них общие,
-// числа и запись - у каждой свои.
+// числа и запись - у каждой свои
 
 const fitPanel = document.getElementById('fitpanel');
 const fitBtn = document.getElementById('fitbtn');
@@ -184,7 +184,7 @@ const fitEl = (id) => document.getElementById(id);
 let fitTimer = null;
 let fitOn = false;
 let fitAvailable = false;
-//: Что подгоняют сейчас и последние числа каждой цели (null - единица).
+//: Что подгоняют сейчас и последние числа каждой цели (null - единица)
 let fitTarget = 'model';
 const fitValues = { model: null, decor: null };
 
@@ -205,13 +205,13 @@ function fitWrite(fit) {
   FIT_FIELDS.forEach((id, i) => { fitEl(id).value = vals[i]; });
 }
 
-/** Кнопка подгонки доступна, когда в кадре своя модель; `fit` - её числа. */
+/** Кнопка подгонки доступна, когда в кадре своя модель; `fit` - её числа */
 export function showFit(fit) {
   fitAvailable = Boolean(fit);
   if (!fit && fitTarget === 'model') setFitMode(false);
   fitButtons();
   // Без подгонки вьювер тоже надо вернуть в ноль: иначе старый трансформ
-  // пережил бы смену модели.
+  // пережил бы смену модели
   applyTarget('model', fit);
 }
 
@@ -226,7 +226,7 @@ export function showDecorFit(fit, available) {
 }
 
 /** Числа цели - во вьювер, а в поля только если её сейчас и правят. Пока
- *  человек крутит гизмо, ответ сервера его не перебивает. */
+ *  человек крутит гизмо, ответ сервера его не перебивает */
 function applyTarget(target, fit) {
   fitValues[target] = fit || null;
   if (fitOn && fitTarget === target) {
@@ -238,21 +238,21 @@ function applyTarget(target, fit) {
     && w.setFitTransform(f.scale, f.rotate, f.offset, false, target));
 }
 
-/** Закрывает подгонку гирлянды, дождавшись записи её чисел. */
+/** Закрывает подгонку гирлянды, дождавшись записи её чисел */
 export async function leaveDecorFit() {
   const writing = flushFitSave();           // забирает отложенное сразу
   if (fitOn && fitTarget === 'decor') setFitMode(false);
   await writing;
 }
 
-/** Подгонка гирлянды: включает режим с целью «гирлянда» или гасит его. */
+/** Подгонка гирлянды: включает режим с целью «гирлянда» или гасит его */
 export function toggleDecorFit() {
   if (fitOn && fitTarget === 'decor') { setFitMode(false); return; }
   setFitMode(false);
   setFitMode(true, 'decor');
 }
 
-/** Кнопки режимов: каждая прячется, пока включён другой режим. */
+/** Кнопки режимов: каждая прячется, пока включён другой режим */
 function fitButtons() {
   fitBtn.hidden = !fitAvailable || partsOpen();
   if (fitOn) partsBtn.hidden = true;
@@ -266,7 +266,7 @@ function setFitMode(on, target = 'model') {
     fitTarget = target === 'decor' ? 'decor' : 'model';
     closeParts();
     fitWrite(fitValues[fitTarget]);
-    // «Гнуть» и «Выпрямить» - только у гирлянды.
+    // «Гнуть» и «Выпрямить» - только у гирлянды
     fitPanel.querySelectorAll('[data-decor]').forEach(
       (b) => { b.hidden = fitTarget !== 'decor'; });
     if (fitTarget !== 'decor' && currentTool() === 'bend') markTool('scale');
@@ -281,7 +281,7 @@ function setFitMode(on, target = 'model') {
   });
   if (fitOn) fitButtons();
   // «Разделить на части» возвращается по общему правилу. Строго после записи:
-  // иначе состояние вернуло бы числа до последнего движения гизмо.
+  // иначе состояние вернуло бы числа до последнего движения гизмо
   else {
     fitTarget = 'model';
     flushFitSave().then(refreshView);
@@ -291,7 +291,7 @@ function setFitMode(on, target = 'model') {
 
 fitBtn.addEventListener('click', () => setFitMode(!fitOn));
 fitEl('fit-done').addEventListener('click', () => setFitMode(false));
-// Части открываются - подгонка уходит первой (capture: раньше их обработчика).
+// Части открываются - подгонка уходит первой (capture: раньше их обработчика)
 partsBtn.addEventListener('click', () => setFitMode(false), true);
 document.addEventListener('parts:changed', fitButtons);
 
@@ -316,7 +316,7 @@ fitPanel.addEventListener('click', (e) => {
 let fitPending = null;    // {target, fit} - числа, которые ждут записи
 
 function fitSave(f) {
-  // Другая цель - сначала записать прежнюю: иначе её правка потерялась бы.
+  // Другая цель - сначала записать прежнюю: иначе её правка потерялась бы
   if (fitPending && fitPending.target !== fitTarget) flushFitSave();
   clearTimeout(fitTimer);
   fitValues[fitTarget] = f;
@@ -339,9 +339,9 @@ export async function flushFitSave() {
     const res = pending.target === 'decor'
       ? await api.setDecorFit(pending.fit)
       : await api.setCustomFit(pending.fit);
-    if (res && res.error) say(res.error);
+    if (res && res.error) sayError(res.error);
   } catch (err) {
-    say(err.message);
+    sayError(err.message);
   }
 }
 
@@ -365,14 +365,14 @@ function fitPush(save = true, animate = false) {
 }
 
 for (const id of FIT_FIELDS) fitEl(id).addEventListener('input', () => fitPush());
-// Сброс - с движением: видно, откуда и куда вернулась модель.
+// Сброс - с движением: видно, откуда и куда вернулась модель
 fitEl('fit-reset').addEventListener('click', () => { fitWrite(null); fitPush(true, true); });
 
 // Те же клавиши на странице: фокус после щелчка по кнопке остаётся у неё, а
 // не у кадра. Как в Blender: G/R/S начинают операцию - модель идёт за
 // мышью, X/Y/Z ограничивают ось, клик подтверждает, Esc отменяет; Esc без
 // операции (или Enter) закрывает подгонку. В полях ввода буквы - текст, там
-// не перехватываем.
+// не перехватываем
 const FIT_KEYS = { KeyG: 'translate', KeyR: 'rotate', KeyS: 'scale' };
 const FIT_AXES = { KeyX: 'x', KeyY: 'y', KeyZ: 'z' };
 document.addEventListener('keydown', (e) => {
@@ -389,13 +389,13 @@ document.addEventListener('keydown', (e) => {
   w.startFitOp(tool);
 });
 
-// ── Изгибы гирлянды ─────────────────────────────────────────────────────
-// Вьювер гнёт сам и после каждого движения присылает весь список; пишем его
-// по очереди - ответы не должны обгонять друг друга.
+// Изгибы гирлянды
+// Вьювер гнёт сам и после каждого движения присылает весь список, пишем его
+// по очереди - ответы не должны обгонять друг друга
 let bendWrite = Promise.resolve();
 //: Сколько списков ещё пишется. Пока > 0, состояние от Python старше того,
 //: что во вьювере, и отдавать его вьюверу нельзя: он откатил бы последний
-//: изгиб, а следующий дописал бы к откаченному - и тот пропал бы совсем.
+//: изгиб, а следующий дописал бы к откаченному - и тот пропал бы совсем
 let bendsPending = 0;
 
 function saveBends(bends) {
@@ -404,7 +404,7 @@ function saveBends(bends) {
     try {
       await api.setDecorBends(bends);
     } catch (err) {
-      say(err.message);
+      sayError(err.message);
     } finally {
       bendsPending -= 1;
     }
@@ -421,13 +421,13 @@ fitEl('fit-radius').addEventListener('input', () => {
   withViewer((w) => w.setBendRadius && w.setBendRadius(r));
 });
 
-/** Изгибы из состояния - вьюверу (отмена, возврат работы, новая гирлянда). */
+/** Изгибы из состояния - вьюверу (отмена, возврат работы, новая гирлянда) */
 export function showDecorBends(bends) {
   if (bendsPending) return;
   withViewer((w) => w.setDecorBends && w.setDecorBends(bends || []));
 }
 
-/** Гизмо в кадре сдвинули: числа и SMD - за ним. */
+/** Гизмо в кадре сдвинули: числа и SMD - за ним */
 export function bindFitViewer(w) {
   w.onDecorBends = (bends) => saveBends(bends);
   w.onBendRadius = (r) => { fitEl('fit-radius').value = Math.round(r * 10) / 10; };
@@ -439,7 +439,7 @@ export function bindFitViewer(w) {
   w.onFitTool = (tool) => markTool(tool);
 }
 
-// ── Редактор QC ─────────────────────────────────────────────────────────
+// Редактор QC
 const qcDlg = document.getElementById('qcdlg');
 const qcText = document.getElementById('qc-text');
 
@@ -451,7 +451,7 @@ function qcSay(text, kind = '') {
 
 export async function openQcEditor() {
   const res = await api.qcText();
-  if (res.error) { say(res.error); return; }
+  if (res.error) { sayError(res.error); return; }
   qcText.value = res.text;
   document.getElementById('qc-state').textContent =
     res.edited ? 'своя правка' : 'авто-QC';
@@ -481,7 +481,7 @@ document.getElementById('qc-reset').addEventListener('click', async () => {
 
 document.getElementById('qc-close').addEventListener('click', () => qcDlg.close());
 
-// По коду клавиши, а не по символу: в русской раскладке S - это «ы».
+// По коду клавиши, а не по символу: в русской раскладке S - это «ы»
 qcText.addEventListener('keydown', (e) => {
   if ((e.ctrlKey || e.metaKey) && e.code === 'KeyS') {
     e.preventDefault();
@@ -489,7 +489,7 @@ qcText.addEventListener('keydown', (e) => {
   }
 });
 
-// Действия над моделью под вьюпортом.
+// Действия над моделью под вьюпортом
 document.getElementById('model-acts').addEventListener('click', (e) => {
   const btn = e.target.closest('.textbtn');
   if (!btn) return;

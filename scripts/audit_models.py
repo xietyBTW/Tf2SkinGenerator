@@ -1,16 +1,16 @@
 """
 Аудит детекта моделей: для каждой модели оружия/персонажа/снаряда/пикапа/насмешки
-определяет, что приложение «думает» про неё —
+определяет, что приложение «думает» про неё -
   • сколько будет карточек материалов (editable_material_cards по мешу),
   • нужен ли переключатель команд RED/BLU (layout.blu_is_team),
   • есть ли австралий/вариант (pick_preview_variant),
-и помечает подозрительные случаи (ложный австралий, команда при 1 материале и т.п.).
+и помечает подозрительные случаи (ложный австралий, команда при 1 материале и т.п.)
 
 Запуск:
   python scripts/audit_models.py            # все модели (декомпилирует недостающие)
   python scripts/audit_models.py --cached   # только уже декомпилированные (быстро)
 
-Результат печатается и пишется в scripts/audit_report.tsv.
+Результат печатается и пишется в scripts/audit_report.tsv
 """
 import os
 import sys
@@ -33,7 +33,7 @@ CACHED_ONLY = "--cached" in sys.argv
 
 
 def targets():
-    """[(label, weapon_key, mode)] всех анализируемых моделей."""
+    """[(label, weapon_key, mode)] всех анализируемых моделей"""
     out = []
     for cls, slots in TF2_WEAPONS.items():
         for slot, items in slots.items():
@@ -60,7 +60,7 @@ def targets():
 
 
 def find_qc(tf2_root, wkey, mode):
-    """QC-путь: сперва кэш, иначе декомпиляция (если не --cached)."""
+    """QC-путь: сперва кэш, иначе декомпиляция (если не --cached)"""
     qc = decompile_cache.find_cached_qc_for_weapon(wkey)
     if qc:
         return qc, os.path.dirname(qc)
@@ -90,7 +90,7 @@ def analyze(label, wkey, mode, tf2_root):
     rows = layout.all_rows or []
     row["cols"] = max((len(r) for r in rows), default=0)
     row["skins"] = len(layout.unique_base_rows or rows)
-    # Единый авторитет селекторов (как будет видеть UI после унификации).
+    # Единый авторитет селекторов (как будет видеть UI после унификации)
     spec = qsp.selector_spec(layout)
     row["team"] = "TEAM" if spec.team else ""
     row["variant"] = spec.variant or ""

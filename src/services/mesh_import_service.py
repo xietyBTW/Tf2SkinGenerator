@@ -1,27 +1,27 @@
 """
-Импорт «интернетных» моделей (OBJ, glTF/GLB) в SMD «только геометрия».
+Импорт «интернетных» моделей (OBJ, glTF/GLB) в SMD «только геометрия»
 
 Человеку, который нашёл модель на сайте, не нужен Blender ради экспорта в
 SMD: приложение читает файл само, кладёт все вершины на одну кость `root`
 (дальше её сажает на хват оружия `SMDService.replace_model_sections`) и
-запекает подгонку — масштаб, поворот, сдвиг — прямо в вершины. Через QC
+запекает подгонку - масштаб, поворот, сдвиг - прямо в вершины. Через QC
 (`$scale`/`$origin`) подгонять нельзя: `$scale` растягивает и скелет, и
-attachment'ы (дульная вспышка, гильзы, unusual_0), оружие уезжает из рук.
+attachment'ы (дульная вспышка, гильзы, unusual_0), оружие уезжает из рук
 
 Оси. OBJ и glTF живут в Y-up (у glTF вперёд −Z). Оружие TF2 в SMD тоже Y-up,
 но стволом в +Z (см. `$attachment "muzzle" ... rotate -90 0 0` у c_-моделей).
-Поэтому импорт разворачивает модель на 180° вокруг Y: (x, y, z) → (−x, y, −z).
-Это собственный поворот (det = +1), обход треугольников сохраняется — у
-glTF/OBJ лицевая сторона против часовой, как и у SMD из Blender.
+Поэтому импорт разворачивает модель на 180° вокруг Y: (x, y, z) -> (−x, y, −z).
+Это собственный поворот (det = +1), обход треугольников сохраняется - у
+glTF/OBJ лицевая сторона против часовой, как и у SMD из Blender
 
 Лимиты studiomdl (public/studio.h): MAXSTUDIOVERTS = MAXSTUDIOTRIANGLES =
 65536. Вершины считаются после разрезания по нормалям и UV-швам, поэтому
-модель на 40k треугольников с острыми гранями легко даёт 80k вершин — считаем
-именно так, а не по числу позиций. Что выше лимита — упрощаем (`simplify`,
-meshoptimizer с сохранением UV: см. tools/meshoptimizer).
+модель на 40k треугольников с острыми гранями легко даёт 80k вершин - считаем
+именно так, а не по числу позиций. Что выше лимита - упрощаем (`simplify`,
+meshoptimizer с сохранением UV: см. tools/meshoptimizer)
 
 Геометрия хранится в numpy: у скульпта из интернета миллионы треугольников,
-и кортежи Python на них съедали бы гигабайты и десятки секунд.
+и кортежи Python на них съедали бы гигабайты и десятки секунд
 """
 
 import base64
@@ -46,9 +46,9 @@ logger = get_logger(__name__)
 #: public/studio.h: MAXSTUDIOVERTS / MAXSTUDIOTRIANGLES (не Xbox)
 MAX_STUDIO_VERTS = 65536
 MAX_STUDIO_TRIANGLES = 65536
-#: MAXSTUDIOSKINS — материалов на модель
+#: MAXSTUDIOSKINS - материалов на модель
 MAX_STUDIO_SKINS = 32
-#: Куда упрощаем: чуть ниже лимита, чтобы вершины после разрезания влезли.
+#: Куда упрощаем: чуть ниже лимита, чтобы вершины после разрезания влезли
 SIMPLIFY_TARGET_TRIANGLES = 60000
 
 SUPPORTED_EXTENSIONS = ('.obj', '.gltf', '.glb')
@@ -60,26 +60,26 @@ _COLS = 8
 
 
 class MeshImportError(ValueError):
-    """Файл не прочитан или не годится для studiomdl. Текст — человеку."""
+    """Файл не прочитан или не годится для studiomdl. Текст - человеку"""
 
 
 @dataclass
 class Mesh:
-    """Треугольники подряд по материалам, уже в осях SMD оружия.
+    """Треугольники подряд по материалам, уже в осях SMD оружия
 
-    `corners` — (3·T, 8) float32: позиция, нормаль, UV каждого угла;
-    `groups` — (материал, первый треугольник, сколько), в порядке файла.
+    `corners` - (3·T, 8) float32: позиция, нормаль, UV каждого угла;
+    `groups` - (материал, первый треугольник, сколько), в порядке файла
     """
     corners: np.ndarray = field(default_factory=lambda: np.zeros((0, _COLS), np.float32))
     groups: List[Tuple[str, int, int]] = field(default_factory=list)
     has_uv: bool = True
-    #: Базовый цвет из MTL (`map_Kd`) / glTF (`baseColorTexture`): материал → файл.
+    #: Базовый цвет из MTL (`map_Kd`) / glTF (`baseColorTexture`): материал -> файл
     textures: Dict[str, str] = field(default_factory=dict)
-    #: Скиннинг из glTF: имена костей и на каждый угол (3T, 8) — четыре номера
-    #: кости в `bones` и четыре веса. None — костей в файле нет, всё на `root`.
+    #: Скиннинг из glTF: имена костей и на каждый угол (3T, 8) - четыре номера
+    #: кости в `bones` и четыре веса. None - костей в файле нет, всё на `root`.
     #: Кости сопоставляются с игровыми ПО ИМЕНИ (SMDService._bone_mapping):
     #: назвав их как в игре (weapon_bone, weapon_bone_1…), получают анимацию
-    #: частей; чужие имена садятся на хват.
+    #: частей, чужие имена садятся на хват
     bones: List[str] = field(default_factory=list)
     skin: Optional[np.ndarray] = None
 
@@ -92,21 +92,21 @@ class Mesh:
         return [g[0] for g in self.groups]
 
     def triangles(self, material: str) -> np.ndarray:
-        """(n, 3, 8) — треугольники одного материала."""
+        """(n, 3, 8) - треугольники одного материала"""
         for name, first, count in self.groups:
             if name == material:
                 return self.corners[first * 3:(first + count) * 3].reshape(-1, 3, _COLS)
         return np.zeros((0, 3, _COLS), np.float32)
 
     def vertex_count(self) -> int:
-        """Вершины по-studiomdl: уникальные (позиция, нормаль, UV, кости)."""
+        """Вершины по-studiomdl: уникальные (позиция, нормаль, UV, кости)"""
         rows = self.corners if self.skin is None else np.hstack([self.corners, self.skin])
         return len(_unique_rows(rows)[0])
 
 
 def _unique_rows(rows: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
-    """(уникальные строки, номер строки для каждого угла) — по округлённым
-    значениям: studiomdl сваривает то, что совпало после квантования."""
+    """(уникальные строки, номер строки для каждого угла) - по округлённым
+    значениям: studiomdl сваривает то, что совпало после квантования"""
     if len(rows) == 0:
         return rows, np.zeros(0, np.int64)
     keyed = np.ascontiguousarray(np.round(rows, 4).astype(np.float32))
@@ -118,7 +118,7 @@ def _unique_rows(rows: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
 @dataclass(frozen=True)
 class Fit:
     """Подгонка в осях SMD оружия: масштаб, повороты вокруг X/Y/Z в градусах
-    (применяются X → Y → Z), сдвиг в юнитах."""
+    (применяются X -> Y -> Z), сдвиг в юнитах"""
     scale: float = 1.0
     rotate: Vec3 = (0.0, 0.0, 0.0)
     offset: Vec3 = (0.0, 0.0, 0.0)
@@ -147,7 +147,7 @@ class Fit:
                 'offset': list(self.offset)}
 
     def matrix(self) -> List[List[float]]:
-        """3×3: Rz · Ry · Rx (без масштаба — он отдельно, нормали не трогает)."""
+        """3×3: Rz · Ry · Rx (без масштаба - он отдельно, нормали не трогает)"""
         rx, ry, rz = (math.radians(a) for a in self.rotate)
         cx, sx = math.cos(rx), math.sin(rx)
         cy, sy = math.cos(ry), math.sin(ry)
@@ -158,10 +158,10 @@ class Fit:
         return (mz @ my @ mx).tolist()
 
 
-# ── Чтение ───────────────────────────────────────────────────────────────── #
+# Чтение
 
 def load_mesh(path: str) -> Mesh:
-    """OBJ или glTF/GLB → Mesh в осях SMD оружия. Ошибки — MeshImportError."""
+    """OBJ или glTF/GLB -> Mesh в осях SMD оружия. Ошибки - MeshImportError"""
     ext = os.path.splitext(path)[1].lower()
     if ext not in SUPPORTED_EXTENSIONS:
         raise MeshImportError(
@@ -175,7 +175,7 @@ def load_mesh(path: str) -> Mesh:
 
 
 def check_limits(mesh: Mesh) -> Optional[str]:
-    """Текст ошибки, если studiomdl такое не скомпилирует; None — в лимитах."""
+    """Текст ошибки, если studiomdl такое не скомпилирует; None - в лимитах"""
     tris, verts = mesh.triangle_count, mesh.vertex_count()
     mats, limit = len(mesh.groups), MAX_STUDIO_VERTS
     if tris > MAX_STUDIO_TRIANGLES:
@@ -188,14 +188,14 @@ def check_limits(mesh: Mesh) -> Optional[str]:
 
 
 def over_limits(mesh: Mesh) -> bool:
-    """Не влезает по треугольникам или вершинам — то, что лечится упрощением."""
+    """Не влезает по треугольникам или вершинам - то, что лечится упрощением"""
     return (mesh.triangle_count > MAX_STUDIO_TRIANGLES
             or mesh.vertex_count() > MAX_STUDIO_VERTS)
 
 
 def _to_weapon_axes(rows: np.ndarray) -> np.ndarray:
-    """Y-up, вперёд −Z (glTF/OBJ) → SMD оружия: Y-up, стволом в +Z.
-    Годится и позициям, и нормалям (меняют знак столбцы x и z)."""
+    """Y-up, вперёд −Z (glTF/OBJ) -> SMD оружия: Y-up, стволом в +Z.
+    Годится и позициям, и нормалям (меняют знак столбцы x и z)"""
     out = rows.astype(np.float32, copy=True)
     out[:, 0] *= -1
     out[:, 2] *= -1
@@ -205,13 +205,13 @@ def _to_weapon_axes(rows: np.ndarray) -> np.ndarray:
 def _material_name(raw: str, index: int) -> str:
     from src.services.smd_service import SMDService
     name = SMDService._sanitize_material_name(raw)
-    # studiomdl имя не пустое и без пробелов/слэшей: это имя VMT-файла.
+    # studiomdl имя не пустое и без пробелов/слэшей: это имя VMT-файла
     name = ''.join(ch if (ch.isalnum() or ch in '_-') else '_' for ch in name)
     return name or f'material_{index}'
 
 
 def _flat_normals(pos: np.ndarray) -> np.ndarray:
-    """(3T, 3) позиций → (3T, 3) плоских нормалей по треугольникам."""
+    """(3T, 3) позиций -> (3T, 3) плоских нормалей по треугольникам"""
     tri = pos.reshape(-1, 3, 3)
     n = np.cross(tri[:, 1] - tri[:, 0], tri[:, 2] - tri[:, 0])
     length = np.linalg.norm(n, axis=1, keepdims=True)
@@ -221,10 +221,10 @@ def _flat_normals(pos: np.ndarray) -> np.ndarray:
 
 def _assemble(pos: np.ndarray, nrm: Optional[np.ndarray], uv: Optional[np.ndarray],
               missing_nrm: Optional[np.ndarray] = None) -> np.ndarray:
-    """Углы (3T, 8) в осях SMD из массивов в осях файла.
+    """Углы (3T, 8) в осях SMD из массивов в осях файла
 
-    `missing_nrm` — маска углов без нормали в файле (OBJ разрешает смешивать):
-    им достаётся плоская нормаль треугольника.
+    `missing_nrm` - маска углов без нормали в файле (OBJ разрешает смешивать):
+    им достаётся плоская нормаль треугольника
     """
     flat = _flat_normals(pos)
     if nrm is None:
@@ -241,12 +241,12 @@ def _load_obj(path: str) -> Mesh:
     positions: List[float] = []
     uvs: List[float] = []
     normals: List[float] = []
-    #: Углы по материалам: имя → array из троек (v, vt, vn); -1 — нет
+    #: Углы по материалам: имя -> array из троек (v, vt, vn); -1 - нет
     faces: Dict[str, array] = {}
     order: List[str] = []
     material = 'material_0'
     mat_index = 0
-    mtl_names: Dict[str, str] = {}      # имя после чистки → как в файле
+    mtl_names: Dict[str, str] = {}      # имя после чистки -> как в файле
     mtllib: List[str] = []
 
     def index(raw: str, count: int) -> int:
@@ -286,7 +286,7 @@ def _load_obj(path: str) -> Mesh:
                         faces[material] = array('q')
                         order.append(material)
                     dst = faces[material]
-                    # Полигон → веер треугольников (OBJ разрешает n-угольники).
+                    # Полигон -> веер треугольников (OBJ разрешает n-угольники)
                     for k in range(1, len(corners) - 1):
                         dst.extend(corners[0])
                         dst.extend(corners[k])
@@ -322,7 +322,7 @@ def _load_obj(path: str) -> Mesh:
 
 
 def _obj_textures(obj_path: str, mtllib: List[str], names: Dict[str, str]) -> Dict[str, str]:
-    """map_Kd из MTL рядом с OBJ: материал → путь к картинке (если файл есть)."""
+    """map_Kd из MTL рядом с OBJ: материал -> путь к картинке (если файл есть)"""
     base = os.path.dirname(obj_path)
     by_raw = {raw: clean for clean, raw in names.items()}
     out: Dict[str, str] = {}
@@ -340,7 +340,7 @@ def _obj_textures(obj_path: str, mtllib: List[str], names: Dict[str, str]) -> Di
                     if parts[0] == 'newmtl':
                         current = by_raw.get(' '.join(parts[1:]))
                     elif parts[0].lower() == 'map_kd' and current and len(parts) > 1:
-                        # Опции (-s, -o …) идут перед именем файла: берём последнее.
+                        # Опции (-s, -o …) идут перед именем файла: берём последнее
                         img = os.path.join(base, parts[-1].replace('\\', '/'))
                         if os.path.isfile(img):
                             out[current] = img
@@ -349,7 +349,7 @@ def _obj_textures(obj_path: str, mtllib: List[str], names: Dict[str, str]) -> Di
     return out
 
 
-# glTF: componentType → numpy dtype
+# glTF: componentType -> numpy dtype
 _GLTF_DTYPES = {5120: np.int8, 5121: np.uint8, 5122: np.int16,
                 5123: np.uint16, 5125: np.uint32, 5126: np.float32}
 _GLTF_TYPE_SIZE = {'SCALAR': 1, 'VEC2': 2, 'VEC3': 3, 'VEC4': 4,
@@ -364,7 +364,7 @@ def _load_gltf(path: str) -> Mesh:
     base_dir = os.path.dirname(path)
     buffers: List[bytes] = []
     if data[:4] == b'glTF':
-        # GLB: заголовок 12 байт, дальше чанки (длина, тип, данные).
+        # GLB: заголовок 12 байт, дальше чанки (длина, тип, данные)
         _, _, total = struct.unpack_from('<III', data, 0)
         pos, doc, bin_chunk = 12, None, b''
         while pos + 8 <= min(total, len(data)):
@@ -419,13 +419,13 @@ def _load_gltf(path: str) -> Mesh:
     materials = doc.get('materials') or []
     has_uv = [False]
     # Один материал может прийти из нескольких примитивов: сливаем в одну
-    # группу по имени, чтобы studiomdl не получил дубли.
+    # группу по имени, чтобы studiomdl не получил дубли
     pending: Dict[str, List[np.ndarray]] = {}
     pending_skin: Dict[str, List[np.ndarray]] = {}
     order: List[str] = []
 
-    # Кости: все суставы всех скинов, по имени узла. Номер в `bones` —
-    # общий для модели; у примитива JOINTS_0 нумерует суставы своего скина.
+    # Кости: все суставы всех скинов, по имени узла. Номер в `bones` -
+    # общий для модели, у примитива JOINTS_0 нумерует суставы своего скина
     nodes = doc.get('nodes') or []
     bones: List[str] = []
     bone_of_node: Dict[int, int] = {}
@@ -438,7 +438,7 @@ def _load_gltf(path: str) -> Mesh:
 
     def skin_rows(prim: dict, node: dict, idx: np.ndarray,
                   bone_parent: Optional[int]) -> np.ndarray:
-        """(3T, 8): 4 номера костей + 4 веса на угол."""
+        """(3T, 8): 4 номера костей + 4 веса на угол"""
         attrs = prim.get('attributes') or {}
         rows = np.zeros((len(idx), 8), np.float32)
         if 'skin' in node and 'JOINTS_0' in attrs and 'WEIGHTS_0' in attrs:
@@ -451,8 +451,8 @@ def _load_gltf(path: str) -> Mesh:
             rows[:, :4] = lut[jn][idx]
             rows[:, 4:] = wt[idx]
         else:
-            # Меш без скина, но под костью (в Blender — «parent to bone»):
-            # целиком на неё; без кости — на первую, дальше её пересадит хват.
+            # Меш без скина, но под костью (в Blender - «parent to bone»):
+            # целиком на неё, без кости - на первую, дальше её пересадит хват
             rows[:, 0] = bone_parent if bone_parent is not None else 0
             rows[:, 4] = 1.0
         return rows
@@ -466,13 +466,13 @@ def _load_gltf(path: str) -> Mesh:
         if 'mesh' in node:
             for prim in doc['meshes'][node['mesh']].get('primitives') or []:
                 if prim.get('mode', 4) != 4:
-                    continue                 # линии/точки/полосы — не наш случай
+                    continue                 # линии/точки/полосы - не наш случай
                 attrs = prim.get('attributes') or {}
                 if 'POSITION' not in attrs:
                     continue
                 if 'skin' in node:
                     # По спецификации glTF скиннутый меш лежит в пространстве
-                    # скелета, трансформ его узла не применяется.
+                    # скелета, трансформ его узла не применяется
                     world = np.eye(4)
                     rot = world[:3, :3]
                 pos = accessor(attrs['POSITION'])[:, :3] @ rot.T + world[:3, 3]
@@ -538,8 +538,8 @@ def _load_gltf(path: str) -> Mesh:
 
 def _gltf_textures(doc: dict, base_dir: str, view_bytes, materials: list,
                    wanted: set) -> Dict[str, str]:
-    """baseColorTexture каждого материала → файл картинки (встроенную пишем во
-    временный файл: приложение кладёт текстуры по пути)."""
+    """baseColorTexture каждого материала -> файл картинки (встроенную пишем во
+    временный файл: приложение кладёт текстуры по пути)"""
     out: Dict[str, str] = {}
     images = doc.get('images') or []
     textures = doc.get('textures') or []
@@ -615,20 +615,20 @@ def _gltf_node_matrix(node: dict) -> np.ndarray:
     return m
 
 
-# ── Упрощение ────────────────────────────────────────────────────────────── #
+# Упрощение
 
 _MESHOPT_DLL = 'tools/meshoptimizer/meshoptimizer.dll'
 _SIMPLIFY_LOCK_BORDER = 1 << 0
 _simplify_fn = None
 
-#: Вес UV в метрике упрощения (позиции meshoptimizer нормирует сам).
+#: Вес UV в метрике упрощения (позиции meshoptimizer нормирует сам)
 _UV_WEIGHTS = np.array([1.0, 1.0], np.float32)
-#: Ребро острее этого угла остаётся жёстким при пересчёте нормалей.
+#: Ребро острее этого угла остаётся жёстким при пересчёте нормалей
 _SMOOTH_ANGLE_DEG = 60.0
 
 
 def _meshopt():
-    """meshopt_simplifyWithAttributes из своей сборки DLL (scripts/build_meshoptimizer.ps1)."""
+    """meshopt_simplifyWithAttributes из своей сборки DLL (scripts/build_meshoptimizer.ps1)"""
     global _simplify_fn
     if _simplify_fn is None:
         path = str(install_dir() / _MESHOPT_DLL)
@@ -651,12 +651,12 @@ def _meshopt():
 
 def _weld_pos_uv(corners: np.ndarray, skin: Optional[np.ndarray]) -> Tuple[np.ndarray, np.ndarray]:
     """Сварка по (позиция, UV[, кости]) без нормали: (вершины (V, 5 или 13),
-    номер для угла).
+    номер для угла)
 
     Нормаль в ключ не входит нарочно. У плоско-затенённой модели каждый угол
-    со своей нормалью, и meshoptimizer видел бы в вершине шесть «клиньев» —
+    со своей нормалью, и meshoptimizer видел бы в вершине шесть «клиньев» -
     такие он запирает, и упрощать становится нечего. Нормали после упрощения
-    считаются заново (`_recompute_normals`)."""
+    считаются заново (`_recompute_normals`)"""
     rows = corners[:, [0, 1, 2, 6, 7]]
     if skin is not None:
         rows = np.hstack([rows, skin])
@@ -668,8 +668,8 @@ def _weld_pos_uv(corners: np.ndarray, skin: Optional[np.ndarray]) -> Tuple[np.nd
 
 def _recompute_normals(corners: np.ndarray) -> np.ndarray:
     """Нормали углов по новой геометрии: среднее по граням в той же точке,
-    но только по тем, чей наклон к грани угла меньше `_SMOOTH_ANGLE_DEG` —
-    так скруглённое остаётся гладким, а грани оружия — острыми."""
+    но только по тем, чей наклон к грани угла меньше `_SMOOTH_ANGLE_DEG` -
+    так скруглённое остаётся гладким, а грани оружия - острыми"""
     pos = corners[:, :3]
     face_n = _flat_normals(pos)[::3]                          # (T, 3)
     face_of = np.repeat(np.arange(len(face_n)), 3)             # (3T,)
@@ -696,7 +696,7 @@ def _recompute_normals(corners: np.ndarray) -> np.ndarray:
 def simplify(mesh: Mesh, target_triangles: int = SIMPLIFY_TARGET_TRIANGLES) -> Mesh:
     """Упрощает до `target_triangles` (и до лимита вершин), сохраняя UV и
     границы между материалами. Материалы упрощаются по отдельности с
-    запертыми краями — иначе на стыках появились бы щели."""
+    запертыми краями - иначе на стыках появились бы щели"""
     fn = _meshopt()
     verts, inverse = _weld_pos_uv(mesh.corners, mesh.skin)
     positions = np.ascontiguousarray(verts[:, :3], np.float32)
@@ -732,15 +732,15 @@ def simplify(mesh: Mesh, target_triangles: int = SIMPLIFY_TARGET_TRIANGLES) -> M
                    skin=np.vstack(skins) if skins else None)
         if not over_limits(out):
             break
-        ratio *= 0.8                     # вершин всё ещё много — режем дальше
+        ratio *= 0.8                     # вершин всё ещё много - режем дальше
     logger.info(f"упрощение: {total} → {out.triangle_count} треугольников")
     return out
 
 
-# ── Запись ───────────────────────────────────────────────────────────────── #
+# Запись
 
 def smd_points(path: str) -> np.ndarray:
-    """Позиции вершин треугольников SMD (N×3); пусто, если не прочиталось."""
+    """Позиции вершин треугольников SMD (N×3), пусто, если не прочиталось"""
     rows = []
     section = ''
     try:
@@ -764,7 +764,7 @@ def smd_points(path: str) -> np.ndarray:
 
 
 def _euler_xyz(rot: np.ndarray) -> Vec3:
-    """Углы (градусы) для Fit.matrix(): Rz · Ry · Rx == rot."""
+    """Углы (градусы) для Fit.matrix(): Rz · Ry · Rx == rot"""
     b = math.asin(max(-1.0, min(1.0, -rot[2][0])))
     if abs(math.cos(b)) > 1e-6:
         a = math.atan2(rot[2][1], rot[2][2])
@@ -778,11 +778,11 @@ def _euler_xyz(rot: np.ndarray) -> Vec3:
 def fit_into(points: np.ndarray, target: np.ndarray) -> Fit:
     """
     Подгонка меша в габариты другой детали: длинная ось меша ложится на
-    длинную ось детали (повороты на 90°), масштаб — по длине, центр — в центр.
+    длинную ось детали (повороты на 90°), масштаб - по длине, центр - в центр
 
     Так своя модель снаряда из интернета сразу встаёт на место игрового:
     граната в стволе Loch-n-Load мала и стоит на своей кости, и вручную её
-    туда не поставить.
+    туда не поставить
     """
     if not len(points) or not len(target):
         return Fit()
@@ -792,7 +792,7 @@ def fit_into(points: np.ndarray, target: np.ndarray) -> Fit:
     rot = np.zeros((3, 3))
     for src, dst in zip(np.argsort(-size, kind='stable'), np.argsort(-tsize, kind='stable')):
         rot[dst][src] = 1.0
-    if np.linalg.det(rot) < 0:      # зеркало — не поворот: короткую ось обратно
+    if np.linalg.det(rot) < 0:      # зеркало - не поворот: короткую ось обратно
         shortest = np.argsort(-tsize, kind='stable')[2]
         rot[shortest] *= -1.0
     longest = float(np.abs(rot @ size).max())
@@ -803,7 +803,7 @@ def fit_into(points: np.ndarray, target: np.ndarray) -> Fit:
 
 def transform_smd(src_path: str, out_path: str, fit: Fit) -> str:
     """Тот же SMD с подгонкой, запечённой в вершины: кости, веса, материалы и
-    всё остальное остаются как есть — двигаются только позиции и нормали."""
+    всё остальное остаются как есть - двигаются только позиции и нормали"""
     rot = np.array(fit.matrix(), np.float32)
     off = np.array(fit.offset, np.float32)
     out = []
@@ -819,7 +819,7 @@ def transform_smd(src_path: str, out_path: str, fit: Fit) -> str:
             elif section == 'triangles':
                 parts = line.split()
                 # Строка вершины: кость x y z nx ny nz u v [links…]; строка
-                # материала чисел не содержит.
+                # материала чисел не содержит
                 if len(parts) >= 9 and parts[0].isdigit():
                     try:
                         pos = np.array([float(v) for v in parts[1:4]], np.float32)
@@ -838,9 +838,9 @@ def transform_smd(src_path: str, out_path: str, fit: Fit) -> str:
 
 
 def write_smd(mesh: Mesh, out_path: str, fit: Optional[Fit] = None) -> str:
-    """SMD с подгонкой, запечённой в вершины. Без скиннинга — одна кость
-    `root`; с ним — кости из файла и веса на каждый угол (nodes/skeleton
-    игра потом подставит свои, кости сойдутся по имени)."""
+    """SMD с подгонкой, запечённой в вершины. Без скиннинга - одна кость
+    `root`; с ним - кости из файла и веса на каждый угол (nodes/skeleton
+    игра потом подставит свои, кости сойдутся по имени)"""
     fit = fit or Fit()
     rot = np.array(fit.matrix(), np.float32)
     pos = mesh.corners[:, :3] @ rot.T * fit.scale + np.array(fit.offset, np.float32)
@@ -855,7 +855,7 @@ def write_smd(mesh: Mesh, out_path: str, fit: Optional[Fit] = None) -> str:
         nodes = ['0 "root" -1']
         pose = ['0 0 0 0 0 0 0']
     else:
-        # Главная кость строки — самая тяжёлая; дальше все ненулевые связи.
+        # Главная кость строки - самая тяжёлая, дальше все ненулевые связи
         joints = mesh.skin[:, :4].astype(np.int64)
         weights = mesh.skin[:, 4:]
         main = joints[np.arange(len(joints)), weights.argmax(axis=1)]

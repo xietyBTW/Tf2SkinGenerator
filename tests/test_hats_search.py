@@ -1,8 +1,8 @@
 """
-Каталог косметики: «куда надевается» и ранжированный поиск.
+Каталог косметики: «куда надевается» и ранжированный поиск
 
-Раньше поиск был подстрокой где угодно без порядка («очки» находило
-«Ботиночки» наравне с очками), а 1822 предмета шли одной алфавитной стеной.
+Подстрока где угодно без порядка не годится: «очки» находили бы «Ботиночки»
+наравне с очками
 """
 
 import unittest
@@ -27,7 +27,7 @@ class RegionTests(unittest.TestCase):
         self.assertEqual(region_group('disconnected_floating_item'), 'other')
 
     def test_item_takes_the_first_group_in_facet_order(self):
-        """Шлем с очками — голова, а не лицо; без областей — прочее."""
+        """Шлем с очками - голова, а не лицо, без областей - прочее"""
         self.assertEqual(_hat('Helm', ['glasses', 'hat']).region, 'head')
         self.assertEqual(_hat('Beard', ['beard']).region, 'face')
         self.assertEqual(_hat('Old', []).region, 'other')

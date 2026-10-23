@@ -1,9 +1,9 @@
 """
-Тесты целостности словарей переводов.
+Тесты целостности словарей переводов
 
-Цель — не дать языкам разъехаться: если в один язык добавили ключ, а в другой
+Цель - не дать языкам разъехаться: если в один язык добавили ключ, а в другой
 забыли, UI начнёт показывать английский fallback (или KeyError при self.t[key]).
-Тест ловит это до рантайма.
+Тест ловит это до рантайма
 """
 
 import unittest
@@ -37,8 +37,8 @@ class TranslationsParityTests(unittest.TestCase):
                 self.assertTrue(value.strip(), f"{lang}['{key}'] пустая строка")
 
     def test_tab_keys_exist(self):
-        # Регрессия: вкладки раньше держались на fallback в .get() — ключей не было,
-        # и русская вкладка оружия показывалась как "Weapons".
+        # Без ключей вкладки держались бы на fallback в .get(), и русская
+        # вкладка оружия показывалась как "Weapons"
         for key in ("tab_weapons", "tab_hats"):
             self.assertIn(key, TRANSLATIONS["ru"])
             self.assertIn(key, TRANSLATIONS["en"])

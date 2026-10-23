@@ -1,19 +1,19 @@
 /*
- * Превью самосвечения: ваша текстура «на свету» и «в темноте».
+ * Превью самосвечения: ваша текстура «на свету» и «в темноте»
  *
  * Формула шейдера (source-sdk-2013, skin_ps20b.fxc и
  * vertexlit_and_unlit_generic_bump_ps2x.fxc):
  *   цвет = lerp(текстура × свет, текстура × $selfillumtint, маска)
  * Свечение заменяет освещение, а не прибавляется, и от света сцены не
  * зависит - поэтому плоская картинка показывает его точно. $selfillumtint
- * движок берёт линейным (без перевода из гаммы), считаем в линейном цвете.
+ * движок берёт линейным (без перевода из гаммы), считаем в линейном цвете
  *
  * Пульсация - прокси Sine, как его считает игра:
- *   min + (max − min) · (sin(2π·t / период) · 0.5 + 0.5).
+ *   min + (max − min) · (sin(2π·t / период) · 0.5 + 0.5)
  *
  * «Затухание к краю» ($selfillumfresnel): вес = альфа основы ×
  * ((N·V)^exp · (1 − min/max) + min/max), яркость × max - от формы модели,
- * поэтому показан на шаре; на плоской картинке поверхность смотрит прямо на
+ * поэтому показан на шаре, на плоской картинке поверхность смотрит прямо на
  * зрителя (N·V = 1), и маской служит альфа основы, а не карта.
  */
 
@@ -88,7 +88,7 @@ export function glowPreview(st, schema, material) {
     for (const c of [lit, dark]) { c.width = tex.width; c.height = tex.height; }
   }
 
-  /** Цвет свечения ($selfillumtint) в момент `now`: цвет × яркость × пульс. */
+  /** Цвет свечения ($selfillumtint) в момент `now`: цвет × яркость × пульс */
   function tintAt(now) {
     const s = st.settings;
     const hex = s.glow_color || '#ffffff';
@@ -105,8 +105,8 @@ export function glowPreview(st, schema, material) {
 
   function drawFlat(canvas, light, tint, fadeOn, bright) {
     const { albedo, w, h } = data;
-    // При затухании маска - альфа основы (шейдер не читает карту); на
-    // плоской картинке поверхность смотрит на зрителя: вес = альфа, яркость × max.
+    // При затухании маска - альфа основы (шейдер не читает карту), на
+    // плоской картинке поверхность смотрит на зрителя: вес = альфа, яркость × max
     const mask = fadeOn ? data.alpha : data.mask;
     const k = fadeOn ? bright : 1;
     const ctx = canvas.getContext('2d');
@@ -137,7 +137,7 @@ export function glowPreview(st, schema, material) {
         if (rr > 1) continue;
         const n = [x, y, Math.sqrt(1 - rr)];
         const lambert = 0.5 * (n[0] * LIGHT[0] + n[1] * LIGHT[1] + n[2] * LIGHT[2]) + 0.5;
-        // Шейдер: (N·V)^exp · (1 − min/max) + min/max; min = 0 - как в сборке.
+        // Шейдер: (N·V)^exp · (1 − min/max) + min/max; min = 0 - как в сборке
         const weight = Math.min(1, Math.max(0, n[2] ** sharp));
         const at = (py * size + px) * 4;
         for (let c = 0; c < 3; c++) {
@@ -176,7 +176,7 @@ export function glowPreview(st, schema, material) {
   let last = 0;
   const tick = (now) => {
     if (!node.isConnected || document.hidden) { running = false; return; }
-    // ~20 кадров в секунду: пульсации хватает, а 256×256 дважды - не даром.
+    // ~20 кадров в секунду: пульсации хватает, а 256×256 дважды - не даром
     if (now - last > 50) { last = now; frame(now); }
     requestAnimationFrame(tick);
   };

@@ -1,9 +1,7 @@
 """
-Единая цепочка «материал → картинка».
+Единая цепочка «материал -> картинка»
 
-Проверяется против фейкового VPK — раньше этот код можно было проверить
-только руками на установленной игре, и именно поэтому в нём годами
-расходились копии.
+Проверяется против фейкового VPK, без установленной игры
 """
 
 import unittest
@@ -17,7 +15,7 @@ CD = ["models/workshop/player/items/scout/hat"]
 
 
 def _png_bytes(color=(10, 20, 30, 255), size=(4, 4)) -> bytes:
-    """Настоящий PNG нужного цвета — VTF в тестах подменяем на него."""
+    """Настоящий PNG нужного цвета - VTF в тестах подменяем на него"""
     from io import BytesIO
 
     from PIL import Image
@@ -28,7 +26,7 @@ def _png_bytes(color=(10, 20, 30, 255), size=(4, 4)) -> bytes:
 
 
 class _StubVtf:
-    """Подменяет декодер VTF: «VTF-байты» здесь — это готовый PNG."""
+    """Подменяет декодер VTF: «VTF-байты» здесь - это готовый PNG"""
 
     def __enter__(self):
         from src.services import vtf_preview_service as vps
@@ -78,7 +76,7 @@ class ResolverTests(unittest.TestCase):
         self.assertTrue(Path(res.png_path).is_file())
 
     def test_vmt_and_vtf_live_in_different_archives(self):
-        """Как в игре: VMT в tf2_misc, VTF в tf2_textures."""
+        """Как в игре: VMT в tf2_misc, VTF в tf2_textures"""
         r = self._resolver(
             {f"materials/{CD[0]}/hat.vmt": vmt(basetexture="models/hat/hat_color")},
             extra={"materials/models/hat/hat_color.vtf": _png_bytes()})
@@ -100,7 +98,7 @@ class ResolverTests(unittest.TestCase):
         self.assertFalse(no_base.resolve("hat", CD).ok)
 
     def test_material_name_with_path(self):
-        """В модели у материала иногда записан полный путь, а не голое имя."""
+        """В модели у материала иногда записан полный путь, а не голое имя"""
         r = self._resolver({
             "materials/models/hat/hat.vmt": vmt(basetexture="models/hat/hat_color"),
             "materials/models/hat/hat_color.vtf": _png_bytes(),
@@ -108,7 +106,7 @@ class ResolverTests(unittest.TestCase):
         self.assertTrue(r.resolve("models/hat/hat", []).ok)
 
     def test_cache_reads_vpk_once(self):
-        """Материал в модели встречается по несколько раз — архив читаем один."""
+        """Материал в модели встречается по несколько раз - архив читаем один"""
         files = {
             f"materials/{CD[0]}/hat.vmt": vmt(basetexture="models/hat/hat_color"),
             "materials/models/hat/hat_color.vtf": _png_bytes(),
@@ -121,7 +119,7 @@ class ResolverTests(unittest.TestCase):
         self.assertEqual(len(vmt_hits), 1, reader.paks[0].hits)
 
     def test_tint_is_applied(self):
-        """Командная краска впечатывается здесь — иначе её забудут."""
+        """Командная краска впечатывается здесь - иначе её забудут"""
         from PIL import Image
 
         files = {
@@ -142,7 +140,7 @@ class ResolverTests(unittest.TestCase):
         self.assertEqual(px[3], 255, "альфа была маской, а не прозрачностью")
 
     def test_tint_can_be_switched_off_for_export(self):
-        """Экспорт отдаёт сырую текстуру: в игре краску наложит движок."""
+        """Экспорт отдаёт сырую текстуру: в игре краску наложит движок"""
         from PIL import Image
 
         files = {
@@ -158,7 +156,7 @@ class ResolverTests(unittest.TestCase):
         self.assertIsNotNone(raw.tint, "краску всё равно распознали")
 
     def test_same_look_compares_texture_and_paint(self):
-        """Ответ на «отличается ли BLU от RED» даёт сам резолвер."""
+        """Ответ на «отличается ли BLU от RED» даёт сам резолвер"""
         files = {
             f"materials/{CD[0]}/hat.vmt": vmt(
                 basetexture="models/hat/hat_color",
@@ -175,7 +173,7 @@ class ResolverTests(unittest.TestCase):
         red = r.resolve("hat", CD)
         blu = r.resolve("hat_blue", CD, out_name="blu_hat")
         copy = r.resolve("hat_copy", CD, out_name="copy_hat")
-        self.assertFalse(red.same_look(blu), "разная краска — разный вид")
+        self.assertFalse(red.same_look(blu), "разная краска - разный вид")
         self.assertTrue(red.same_look(copy), "та же текстура и та же краска")
         self.assertFalse(red.same_look(None))
 
@@ -193,10 +191,10 @@ class ResolverTests(unittest.TestCase):
         self.assertTrue(all(Path(p).is_file() for p in tex.values()))
 
     def test_texture_map_keeps_the_name_as_given(self):
-        """Вьювер ищет меш по ТОЧНОМУ имени материала: `sniper_handL_red`.
+        """Вьювер ищет меш по ТОЧНОМУ имени материала: `sniper_handL_red`
 
         В архиве путь в нижнем регистре, и ключ `sniper_handl_red` меш не
-        находил — левая кисть снайпера оставалась без текстуры.
+        находил - левая кисть снайпера оставалась без текстуры
         """
         files = {
             f"materials/{CD[0]}/sniper_handl_red.vmt":
@@ -207,7 +205,7 @@ class ResolverTests(unittest.TestCase):
         self.assertEqual(list(tex), ["sniper_handL_red"])
 
     def test_out_name_keeps_files_apart(self):
-        """RED и BLU одного материала не должны затирать PNG друг друга."""
+        """RED и BLU одного материала не должны затирать PNG друг друга"""
         files = {
             f"materials/{CD[0]}/hat.vmt": vmt(basetexture="models/hat/a"),
             f"materials/{CD[0]}/hat_blue.vmt": vmt(basetexture="models/hat/b"),
@@ -220,7 +218,7 @@ class ResolverTests(unittest.TestCase):
         self.assertNotEqual(red.png_path, blu.png_path)
 
     def test_slashes_in_name_do_not_escape_out_dir(self):
-        """Имя материала с путём не должно уводить запись из папки превью."""
+        """Имя материала с путём не должно уводить запись из папки превью"""
         files = {
             "materials/models/hat/hat.vmt": vmt(basetexture="models/hat/hat_color"),
             "materials/models/hat/hat_color.vtf": _png_bytes(),

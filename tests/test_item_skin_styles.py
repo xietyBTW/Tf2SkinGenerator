@@ -1,6 +1,6 @@
 """
 Строки скина, которые в игре - отдельный предмет (Критокола у модели Бонка),
-становятся стилями с его именем; строки-копии - нет.
+становятся стилями с его именем, строки-копии - нет
 """
 
 import unittest
@@ -26,7 +26,7 @@ class ItemSkinStylesTests(unittest.TestCase):
         self.assertEqual(info['skins'][2]['role'], 'Критокола')
 
     def test_copy_of_an_earlier_row_is_not_a_style(self):
-        # Ботоубийцы огнемёта: строки 3/5 - та же синяя, править нечего.
+        # Ботоубийцы огнемёта: строки 3/5 - та же синяя, править нечего
         rows = [['c_flamethrower'], ['c_flamethrower_blue']] * 3
         info = _styles('c_flamethrower', rows, [('Ботоубийца', 3), ('Ржавый', 5)])
         self.assertEqual(info['styles'], [])

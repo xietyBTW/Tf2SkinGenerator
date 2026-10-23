@@ -1,24 +1,20 @@
 """
-Модель состояния текстур 2D/3D-превью (чистый Python, без Qt — юнит-тестируется).
+Модель состояния текстур 2D/3D-превью (чистый Python, юнит-тестируется)
 
-Зачем: раньше «что загружено и что показывать» жило россыпью полей виджета
-(_textures / _skin_overrides / _vpk_*_tex_map / _blu_frames / австралий-слоты)
-с ~50 точками прямого доступа, а правила маршрутизации (нейтральная текстура →
-обе команды, вариантный стиль → skin_overrides, приоритеты разрешения) были
-размазаны по обработчикам. Отсюда рассинхроны 2D↔3D.
+ЕДИНЫЙ источник правды о текстурах и все правила маршрутизации в одном месте
+(нейтральная текстура -> обе команды, вариантный стиль -> skin_overrides,
+приоритеты разрешения), чтобы 2D и 3D не расходились:
 
-Здесь — ЕДИНЫЙ источник правды и все правила в одном месте:
-
-  • set_texture()          — куда пишется загруженная пользователем текстура;
-  • resolve_card()/resolve_base() — что показывает карточка/2D при текущей
-    команде/стиле (пользовательская → другая команда для нейтральных →
-    VPK-оригинал → командный кадр);
-  • uploaded_for_mat()/uploaded_slot_paths()/blu_uploaded_paths() — что уходит
+  • set_texture()          - куда пишется загруженная пользователем текстура;
+  • resolve_card()/resolve_base() - что показывает карточка/2D при текущей
+    команде/стиле (пользовательская -> другая команда для нейтральных ->
+    VPK-оригинал -> командный кадр);
+  • uploaded_for_mat()/uploaded_slot_paths()/blu_uploaded_paths() - что уходит
     в сборку;
-  • variant_display_texture() — что показывает активный вариант (Australium).
+  • variant_display_texture() - что показывает активный вариант (Australium)
 
-Виджет (preview_panel) держит экземпляр PreviewTextureState и делегирует сюда
-и хранение, и разрешение; Qt-поля виджета — только отображение.
+Сеанс (PreviewSession) держит экземпляр и делегирует сюда и хранение, и
+разрешение
 """
 
 from __future__ import annotations
@@ -30,40 +26,40 @@ from typing import Dict, List, Optional
 from src.shared.constants import Team
 
 # Sentinel-ключ главной текстуры, когда у модели нет именованных материалов
-# (одноматериальный случай). НЕ имя материала и НЕ должен попадать в сборку.
+# (одноматериальный случай). НЕ имя материала и НЕ должен попадать в сборку
 SINGLE_TEX_KEY = '__single__'
 
 #: Приставка карточек гирлянды поверх оружия (праздничная версия,
-#: фестивайзер): `deco:<вид>/<материал>`. Гирлянда — отдельная модель со
+#: фестивайзер): `deco:<вид>/<материал>`. Гирлянда - отдельная модель со
 #: своими материалами: стилей у неё нет, в сборку оружия она не идёт (её
 #: собирает свой шаг, см. decor_build), а игровой оригинал лежит в
-#: `decor_stock`, а не в картах модели оружия — те пересобираются с каждой
-#: загрузкой модели.
+#: `decor_stock`, а не в картах модели оружия - те пересобираются с каждой
+#: загрузкой модели
 DECOR_PREFIX = 'deco:'
 
 
 def is_decor(mat: Optional[str]) -> bool:
-    """Карточка гирлянды, а не материал самого предмета."""
+    """Карточка гирлянды, а не материал самого предмета"""
     return bool(mat) and str(mat).startswith(DECOR_PREFIX)
 
 
 def team_priority(active_team: str) -> List[str]:
-    """Порядок проверки команд: активная первой (сборка может начаться с BLU)."""
+    """Порядок проверки команд: активная первой (сборка может начаться с BLU)"""
     if active_team == Team.BLU:
         return [Team.BLU, Team.RED]
     return [Team.RED, Team.BLU]
 
 
 def _existing(path: Optional[str]) -> Optional[str]:
-    """path, если файл существует, иначе None."""
+    """path, если файл существует, иначе None"""
     return path if (path and os.path.exists(path)) else None
 
 
 def _lookup_ci(store: Dict[str, str], key: str) -> Optional[str]:
-    """Значение по ключу, с фолбэком на совпадение без учёта регистра.
+    """Значение по ключу, с фолбэком на совпадение без учёта регистра
 
-    Нужно моду из VPK: карточки там названы по VTF, а меши модели — по
-    материалам, и совпадают они через раз только регистром.
+    Нужно моду из VPK: карточки там названы по VTF, а меши модели - по
+    материалам, и совпадают они через раз только регистром
     """
     if key in store:
         return store[key]
@@ -76,101 +72,99 @@ def _lookup_ci(store: Dict[str, str], key: str) -> Optional[str]:
 
 @dataclass
 class PreviewTextureState:
-    """Состояние текстур превью: пользовательские загрузки + данные модели."""
+    """Состояние текстур превью: пользовательские загрузки + данные модели"""
 
-    # ── Пользовательские текстуры ─────────────────────────────────────────── #
-    #: {team: {mat_name: path}} — загруженные пользователем (skin 0).
+    # Пользовательские текстуры
+    #: {team: {mat_name: path}} - загруженные пользователем (skin 0)
     textures: Dict[str, Dict[str, str]] = field(
         default_factory=lambda: {Team.RED: {}, Team.BLU: {}})
-    #: {skin_idx: {mat_name: path}} — переопределения вариантных стилей (skin > 0).
+    #: {skin_idx: {mat_name: path}} - переопределения вариантных стилей (skin > 0)
     skin_overrides: Dict[int, Dict[str, str]] = field(default_factory=dict)
-    #: {skin_idx: {базовый материал: png}} — ОРИГИНАЛЫ текстур стиля из игры или
+    #: {skin_idx: {базовый материал: png}} - ОРИГИНАЛЫ текстур стиля из игры или
     #: из мода. Не правки: в user_edits и в сборку не идут, показ их лишь
-    #: подставляет, пока человек не положил свою (см. resolve_card).
+    #: подставляет, пока человек не положил свою (см. resolve_card)
     style_game_tex: Dict[int, Dict[str, str]] = field(default_factory=dict)
 
-    # ── Активные селекторы ────────────────────────────────────────────────── #
+    # Активные селекторы
     active_team: str = Team.RED
     active_skin: int = 0
-    #: dict из SkinDetectWorker (num_skins, roles, …) или None — стили не определены.
+    #: dict из SkinDetectWorker (num_skins, roles, …) или None - стили не определены
     skin_info: Optional[dict] = None
     #: «Сделать командным» (+ Команда): оружие БЕЗ нативной команды, которому
     #: пользователь синтезирует RED/BLU. У таких материалов нет blu_name_map/
-    #: blu_frames, поэтому is_neutral() их считает нейтральными — но при force_team
+    #: blu_frames, поэтому is_neutral() их считает нейтральными - но при force_team
     #: загрузка НЕ должна дублироваться в обе команды (иначе BLU затирает RED и
-    #: 2D/3D показывают одинаковое). См. set_texture().
+    #: 2D/3D показывают одинаковое). См. set_texture()
     force_team: bool = False
 
-    # ── Данные модели (заполняются воркерами превью) ──────────────────────── #
-    #: Имена материалов геометрии; [0] — главный. ВНИМАНИЕ: в режиме «Прочее»
-    #: временно подменяется служебными — стабильное имя главного в main_material.
+    # Данные модели (заполняются воркерами превью)
+    #: Имена материалов геометрии; [0] - главный. ВНИМАНИЕ: в режиме «Прочее»
+    #: временно подменяется служебными - стабильное имя главного в main_material
     material_names: List[str] = field(default_factory=list)
-    #: Стабильное имя главного материала (не зависит от «Прочее»).
+    #: Стабильное имя главного материала (не зависит от «Прочее»)
     main_material: Optional[str] = None
-    #: {red_mat: blu_display_name} — командные пары материалов (персонажи/руки).
+    #: {red_mat: blu_display_name} - командные пары материалов (персонажи/руки)
     blu_name_map: Dict[str, str] = field(default_factory=dict)
-    #: Игровые оригиналы из VPK: {red_mat: png} по командам (ключи — RED-имена).
+    #: Игровые оригиналы из VPK: {red_mat: png} по командам (ключи - RED-имена)
     vpk_red_tex_map: Dict[str, str] = field(default_factory=dict)
     vpk_blu_tex_map: Dict[str, str] = field(default_factory=dict)
-    #: Командная текстура одним кадром (кадры анимации): пути PNG.
+    #: Командная текстура одним кадром (кадры анимации): пути PNG
     red_frames: List[str] = field(default_factory=list)
     blu_frames: List[str] = field(default_factory=list)
 
-    # ── Вариант Australium/Gold ───────────────────────────────────────────── #
+    # Вариант Australium/Gold
     australium_frame: Optional[str] = None      # игровой gold-кадр (PNG)
     australium_user_tex: Optional[str] = None   # своя текстура варианта
     australium_mat_name: Optional[str] = None   # имя gold-материала (для сборки)
     australium_active: bool = False             # активен ли вариант в превью
 
-    # ── Режим «Скайбокс» ──────────────────────────────────────────────────── #
-    # Пользовательские грани/панорама живут в textures (ключи — грани из
-    # SKY_FACES и SKY_PANO_KEY, нейтральные → обе команды); здесь — данные,
+    # Режим «Скайбокс»
+    # Пользовательские грани/панорама живут в textures (ключи - грани из
+    # SKY_FACES и SKY_PANO_KEY, нейтральные -> обе команды), здесь - данные,
     # которые панель получает от воркеров.
-    #: Стоковые грани выбранного неба из VPK игры: {face: png}.
+    #: Стоковые грани выбранного неба из VPK игры: {face: png}
     skybox_stock_faces: Dict[str, str] = field(default_factory=dict)
-    #: Грани, нарезанные из загруженной панорамы: {face: png}.
+    #: Грани, нарезанные из загруженной панорамы: {face: png}
     skybox_split_faces: Dict[str, str] = field(default_factory=dict)
 
-    # ── Гирлянда поверх оружия ────────────────────────────────────────────── #
+    # Гирлянда поверх оружия
     #: Игровые кадры гирлянды: {team: {карточка deco:…: png}}. Кладёт сеанс,
-    #: когда гирлянда разобрана; свои правки гирлянды живут в `textures`.
+    #: когда гирлянда разобрана, свои правки гирлянды живут в `textures`
     decor_stock: Dict[str, Dict[str, str]] = field(default_factory=dict)
 
-    # ── Части, ставшие своими материалами ─────────────────────────────────── #
-    #: {материал части: карточка исходного}. Материал части — отдельная
-    #: карточка: своя картинка по командам, без неё — игровая текстура
-    #: исходного (см. src/services/part_materials.py). Ведёт PreviewSession.
+    # Части, ставшие своими материалами
+    #: {материал части: карточка исходного}. Материал части - отдельная
+    #: карточка: своя картинка по командам, без неё - игровая текстура
+    #: исходного (см. src/services/part_materials.py). Ведёт PreviewSession
     part_cards: Dict[str, str] = field(default_factory=dict)
 
-    # ═══════════════════════════════════════════════════════════════════════ #
     # Ключи / классификация материалов
-    # ═══════════════════════════════════════════════════════════════════════ #
 
     def storage_main_key(self) -> str:
-        """Ключ ХРАНЕНИЯ главной текстуры (как исторически пишет load_image)."""
+        """Ключ ХРАНЕНИЯ главной текстуры (как исторически пишет load_image)"""
         return self.material_names[0] if self.material_names else SINGLE_TEX_KEY
 
     def stable_main(self) -> Optional[str]:
-        """Стабильное имя главного материала независимо от режима «Прочее»."""
+        """Стабильное имя главного материала независимо от режима «Прочее»"""
         if self.main_material:
             return self.main_material
         return self.material_names[0] if self.material_names else None
 
     def is_team_material(self, mat: str) -> bool:
-        """True, если материал КОМАНДНЫЙ (есть свой синий вариант).
+        """True, если материал КОМАНДНЫЙ (есть свой синий вариант)
 
-        С per-material маппингом — синее имя отличается от красного
-        (medic_hands_red→medic_hands_blue). Без маппинга — главный материал
+        С per-material маппингом - синее имя отличается от красного
+        (medic_hands_red->medic_hands_blue). Без маппинга - главный материал
         командный, если BLU пришёл одним кадром (blu_frames): синий вариант
-        существует, просто не по-материально. Это ЕДИНОЕ правило командности —
+        существует, просто не по-материально. Это ЕДИНОЕ правило командности -
         им пользуются и хранение (is_neutral), и разрешение (resolve_base);
         расхождение этих двух путей давало «на BLU показывается RED» у
-        мульти-материальных шапок с одним BLU-кадром.
+        мульти-материальных шапок с одним BLU-кадром
         """
         if is_decor(mat):
             return self._decor_team(mat)
         # Материал части командный, если командный его исходный: в сборке у
-        # него строки скина исходного (`_blue` на месте синего).
+        # него строки скина исходного (`_blue` на месте синего)
         base = self.part_cards.get(mat)
         if base and base != mat:
             return self.is_team_material(base)
@@ -183,32 +177,32 @@ class PreviewTextureState:
         return False
 
     def _decor_team(self, mat: str) -> bool:
-        """Командна ли карточка гирлянды: у синих свои огоньки (кадры разные).
+        """Командна ли карточка гирлянды: у синих свои огоньки (кадры разные)
 
         Карта имён модели оружия (`blu_name_map`) гирлянды не знает, и
-        судить по ней значило бы считать огоньки фестивайзера общими — тогда
-        правка на красных легла бы и на синие.
+        судить по ней значило бы считать огоньки фестивайзера общими - тогда
+        правка на красных легла бы и на синие
         """
         red = self.decor_stock.get(Team.RED, {}).get(mat)
         blu = self.decor_stock.get(Team.BLU, {}).get(mat)
         return bool(red and blu and red != blu)
 
     def is_neutral(self, mat: str) -> bool:
-        """True, если текстура не относится к конкретной команде (RED/BLU).
+        """True, если текстура не относится к конкретной команде (RED/BLU)
 
         Нейтральные (sniper_lens, c_arrow, eyeball_r …) одинаковы для обеих
-        команд — хранятся в обоих словарях, чтобы карточка не пропадала при
-        переключении команды.
+        команд - хранятся в обоих словарях, чтобы карточка не пропадала при
+        переключении команды
 
-        Материал, который САМ есть в маппинге, судим по его паре: стал собой —
+        Материал, который САМ есть в маппинге, судим по его паре: стал собой -
         значит общий. Это не крючкотворство: у многоматериальных шапок
         (hwn2022_alcoholic_automaton) BLU-имя одной колонки одновременно
-        является обычным материалом другой — линза там всегда синяя и по
+        является обычным материалом другой - линза там всегда синяя и по
         команде не меняется, а по правилу «имя есть среди значений» карточка
-        считалась бы командной и пропадала при переключении.
+        считалась бы командной и пропадала при переключении
 
         Имя, которое встречается ТОЛЬКО как значение (medic_hands_blue у рук),
-        нейтральным по-прежнему не считается: это чисто синий материал.
+        нейтральным по-прежнему не считается: это чисто синий материал
         """
         if is_decor(mat):
             return not self._decor_team(mat)
@@ -222,19 +216,17 @@ class PreviewTextureState:
             return not any(str(v).lower() == low for v in self.blu_name_map.values())
         return not self.is_team_material(mat)
 
-    # ═══════════════════════════════════════════════════════════════════════ #
     # Запись
-    # ═══════════════════════════════════════════════════════════════════════ #
 
     def set_texture(self, mat: str, path: Optional[str]) -> None:
-        """Сохраняет (или сбрасывает, path=None) пользовательскую текстуру.
+        """Сохраняет (или сбрасывает, path=None) пользовательскую текстуру
 
         Маршрутизация:
-          • активен вариантный стиль (skin > 0) → skin_overrides этого стиля;
-          • нейтральная → обе команды;
-          • командная → только активная команда.
+          • активен вариантный стиль (skin > 0) -> skin_overrides этого стиля;
+          • нейтральная -> обе команды;
+          • командная -> только активная команда
         """
-        # Стилей у гирлянды нет: правка стиля оружия её не касается.
+        # Стилей у гирлянды нет: правка стиля оружия её не касается
         if self.skin_info and self.active_skin != 0 and not is_decor(mat):
             slot = self.skin_overrides.setdefault(self.active_skin, {})
             if path:
@@ -244,12 +236,12 @@ class PreviewTextureState:
             return
 
         # Нейтральная текстура пишется в обе команды, чтобы карточка не пропадала
-        # при переключении команды. ИСКЛЮЧЕНИЕ — force_team: там пользователь
+        # при переключении команды. ИСКЛЮЧЕНИЕ - force_team: там пользователь
         # намеренно задаёт РАЗНЫЕ текстуры RED/BLU, поэтому дублирование запрещено
         # (иначе загрузка на BLU затирает RED). Дефолт «BLU как RED» до задания
         # своей синей обеспечивает симметричный fallback в resolve_base().
         # Австралий командой не делится и под force_team: сборка красит его
-        # одной текстурой для обеих команд (игра так и показывает).
+        # одной текстурой для обеих команд (игра так и показывает)
         teams = [self.active_team]
         if self.is_neutral(mat) and (not self.force_team
                                      or self.is_variant_material(mat)):
@@ -260,36 +252,34 @@ class PreviewTextureState:
             else:
                 self.textures.get(team, {}).pop(mat, None)
 
-    # ═══════════════════════════════════════════════════════════════════════ #
     # Разрешение (что показывать)
-    # ═══════════════════════════════════════════════════════════════════════ #
 
     def variant_display_texture(self) -> Optional[str]:
-        """Текстура активного варианта (Australium) или None, если не активен.
+        """Текстура активного варианта (Australium) или None, если не активен
 
-        У варианта своя карточка (`australium_mat_name`): что на ней лежит —
-        своя правка либо игровой gold-кадр, — то и показывает кадр.
-        `australium_user_tex` остался от работ, записанных до карточки."""
+        У варианта своя карточка (`australium_mat_name`): что на ней лежит -
+        своя правка либо игровой gold-кадр, - то и показывает кадр.
+        `australium_user_tex` остался от работ, записанных до карточки"""
         if not self.australium_active:
             return None
         own = self.resolve_base(self.australium_mat_name) if self.australium_mat_name else None
         return own or _existing(self.australium_user_tex) or self.australium_frame
 
     def is_variant_material(self, mat: Optional[str]) -> bool:
-        """Материал варианта (Australium) — карточка с той же геометрией, что у
-        главного, но со своей текстурой."""
+        """Материал варианта (Australium) - карточка с той же геометрией, что у
+        главного, но со своей текстурой"""
         return bool(mat and self.australium_mat_name
                     and mat.lower() == self.australium_mat_name.lower())
 
     def resolve_card(self, mat: str, hands_blu_view: bool = False) -> Optional[str]:
-        """Текстура для карточки при текущей команде/стиле.
+        """Текстура для карточки при текущей команде/стиле
 
-        hands_blu_view — режим рук на BLU: нейтральный материал показываем
-        пустым (= «общий, наследует RED»), пока ему не задана отдельная синяя.
+        hands_blu_view - режим рук на BLU: нейтральный материал показываем
+        пустым (= «общий, наследует RED»), пока ему не задана отдельная синяя
         """
         # Вариантный стиль (skin > 0): своя правка, иначе ОРИГИНАЛ этого стиля
-        # (у гильотины Bloody — своя игровая текстура). Базу стиль не
-        # наследует: карточка без собственной текстуры остаётся пустой.
+        # (у гильотины Bloody - своя игровая текстура). Базу стиль не
+        # наследует: карточка без собственной текстуры остаётся пустой
         if self.skin_info and self.active_skin != 0 and not is_decor(mat):
             return self.style_texture(self.active_skin, mat)
 
@@ -299,11 +289,11 @@ class PreviewTextureState:
         return self.resolve_base(mat)
 
     def style_texture(self, style: int, mat: str) -> Optional[str]:
-        """Текстура материала в стиле: правка человека, иначе оригинал стиля.
+        """Текстура материала в стиле: правка человека, иначе оригинал стиля
 
-        У материала части без своей правки оригинал — стиля его исходного:
+        У материала части без своей правки оригинал - стиля его исходного:
         строка стиля ведёт часть в игровой VMT материала стиля
-        (part_materials.add_part_columns), у гильотины Bloody — кровь."""
+        (part_materials.add_part_columns), у гильотины Bloody - кровь"""
         own = (_existing(self.skin_overrides.get(style, {}).get(mat))
                or _existing(self.style_game_tex.get(style, {}).get(mat)))
         base = self.part_cards.get(mat)
@@ -312,19 +302,19 @@ class PreviewTextureState:
         return _existing(self.style_game_tex.get(style, {}).get(base))
 
     def style_upload_for(self, mat: str) -> Optional[str]:
-        """Правка стиля, загруженная под ИМЯ материала строки $texturegroup.
+        """Правка стиля, загруженная под ИМЯ материала строки $texturegroup
 
         Сборка спрашивает материалы группы по их собственным именам
         (``c_sd_cleaver_bloody``), а правки стиля хранятся под БАЗОВЫМ
-        материалом (``c_sd_cleaver``) — связывает их колонка строки стиля.
+        материалом (``c_sd_cleaver``) - связывает их колонка строки стиля.
         Оригиналы (``style_game_tex``) сюда не попадают: их сборка возьмёт из
-        игры сама, если человек так ответит.
+        игры сама, если человек так ответит
         """
         rows = (self.skin_info or {}).get('rows') or []
         if not rows or not self.skin_overrides:
             return None
         # Одноматериальная модель хранит правку под служебным ключом: имени
-        # своего материала превью не знает (см. adopt_style_textures).
+        # своего материала превью не знает (см. adopt_style_textures)
         single = self.material_names == [SINGLE_TEX_KEY]
         low = (mat or '').lower()
         for style, overrides in self.skin_overrides.items():
@@ -341,20 +331,20 @@ class PreviewTextureState:
 
     def resolve_base(self, mat: str) -> Optional[str]:
         """Базовая (skin 0) текстура материала: пользовательская активной
-        команды → другая команда (нейтральные) → игровой оригинал из VPK →
-        командный кадр для главного материала. Без учёта стилей (skin > 0)."""
+        команды -> другая команда (нейтральные) -> игровой оригинал из VPK ->
+        командный кадр для главного материала. Без учёта стилей (skin > 0)"""
         active = self.active_team
         p = _existing(self.textures.get(active, {}).get(mat))
         if p:
             return p
 
         team_specific = self.is_team_material(mat)
-        # Наследование чужой команды — одностороннее, когда команды РАЗДЕЛЕНЫ.
+        # Наследование чужой команды - одностороннее, когда команды РАЗДЕЛЕНЫ.
         # Под «сделать командным» человек задаёт RED и BLU порознь: красная
         # карточка, подхватившая синюю текстуру, читалась как «загрузка на BLU
-        # заменила и красную» — при том, что в состоянии красная пуста и врал
+        # заменила и красную» - при том, что в состоянии красная пуста и врал
         # только показ. Синяя красную наследует по-прежнему: это её дефолт,
-        # пока своей нет (см. set_texture).
+        # пока своей нет (см. set_texture)
         borrows = not (self.force_team and active == Team.RED)
         if not team_specific and borrows:
             other = Team.BLU if active == Team.RED else Team.RED
@@ -362,21 +352,21 @@ class PreviewTextureState:
             if p:
                 return p
 
-        # Материал части без своей картинки — игровая текстура исходного
+        # Материал части без своей картинки - игровая текстура исходного
         # (game_base): картинка на исходном его не касается, это отдельный
         # материал. Копию картинки исходного он получает при создании
-        # (PartsEditor._fork_card), покраску частей — своей склейкой.
+        # (PartsEditor._fork_card), покраску частей - своей склейкой
         return self.game_base(mat)
 
     def game_base(self, mat: str, team: Optional[str] = None) -> Optional[str]:
-        """Игровой оригинал материала — БЕЗ пользовательских правок.
+        """Игровой оригинал материала - БЕЗ пользовательских правок
 
         Нужен склейке частей: картинки частей рисуются поверх игровой
         текстуры, а не поверх прошлой склейки. Иначе правки копились бы
-        слоями, и «убрать картинку с части» ничего бы не возвращало.
+        слоями, и «убрать картинку с части» ничего бы не возвращало
 
-        `team` — чей оригинал; по умолчанию показанной команды. Сборке нужны
-        обе: у RED и BLU своя краска в VMT.
+        `team` - чей оригинал, по умолчанию показанной команды. Сборке нужны
+        обе: у RED и BLU своя краска в VMT
         """
         active = team or self.active_team
         base = self.part_cards.get(mat)
@@ -385,27 +375,27 @@ class PreviewTextureState:
         if is_decor(mat):
             return (_existing(self.decor_stock.get(active, {}).get(mat))
                     or _existing(self.decor_stock.get(Team.RED, {}).get(mat)))
-        # Игровой оригинал текущей команды (карты ключуются RED-именами).
+        # Игровой оригинал текущей команды (карты ключуются RED-именами)
         vpk_map = self.vpk_red_tex_map if active == Team.RED else self.vpk_blu_tex_map
         g = _existing(vpk_map.get(mat))
         if g:
             return g
 
-        # Нейтральные/служебные не зависят от команды — их оригинал только в
-        # RED-карте; на BLU показываем его же (иначе «Прочее» на BLU пустое).
+        # Нейтральные/служебные не зависят от команды - их оригинал только в
+        # RED-карте, на BLU показываем его же (иначе «Прочее» на BLU пустое)
         if active != Team.RED and not self.is_team_material(mat):
             g = _existing(self.vpk_red_tex_map.get(mat))
             if g:
                 return g
 
-        # Главный материал без per-material карты: BLU пришёл одним кадром.
+        # Главный материал без per-material карты: BLU пришёл одним кадром
         if self.material_names and mat == self.material_names[0]:
             frames = self.blu_frames if active == Team.BLU else self.red_frames
             if frames and os.path.exists(frames[0]):
                 return frames[0]
 
         # Вариант (Australium): его игровой кадр приезжает отдельным сигналом,
-        # в карты материалов он не попадает.
+        # в карты материалов он не попадает
         if self.is_variant_material(mat):
             return _existing(self.australium_frame)
 
@@ -414,32 +404,30 @@ class PreviewTextureState:
     def resolve_mesh(self, mat: str) -> Optional[str]:
         """
         Текстура для МЕША загруженного мода: правка пользователя, иначе
-        оригинал из мода.
+        оригинал из мода
 
         Отдельно от resolve_card, потому что ключи здесь чужие: карточки
-        названы по VTF мода, а меши — по материалам модели. Сравнение без
-        учёта регистра — единственное, что их связывает.
+        названы по VTF мода, а меши - по материалам модели. Сравнение без
+        учёта регистра - единственное, что их связывает
         """
         return (_existing(_lookup_ci(self.textures.get(Team.RED, {}), mat))
                 or _existing(_lookup_ci(self.vpk_red_tex_map, mat)))
 
-    # ═══════════════════════════════════════════════════════════════════════ #
     # Что уходит в сборку
-    # ═══════════════════════════════════════════════════════════════════════ #
 
     def red_main(self) -> Optional[str]:
-        """Пользовательская RED-текстура главного слота (без fallback на BLU)."""
+        """Пользовательская RED-текстура главного слота (без fallback на BLU)"""
         return _existing(self.textures.get(Team.RED, {}).get(self.storage_main_key()))
 
     def blu_main(self) -> Optional[str]:
-        """Пользовательская BLU-текстура: главный слот, иначе любой BLU-слот."""
+        """Пользовательская BLU-текстура: главный слот, иначе любой BLU-слот"""
         blu = self.textures.get(Team.BLU, {})
         p = _existing(blu.get(self.storage_main_key()))
         if p:
             return p
         for mat, candidate in blu.items():
-            # Огоньки гирлянды и материалы частей — свои карточки: синим
-            # скином всего оружия они не станут.
+            # Огоньки гирлянды и материалы частей - свои карточки: синим
+            # скином всего оружия они не станут
             if is_decor(mat) or mat in self.part_cards:
                 continue
             p = _existing(candidate)
@@ -448,16 +436,16 @@ class PreviewTextureState:
         return None
 
     def uploaded_for_mat(self, mat: str) -> Optional[str]:
-        """Загруженная пользователем текстура для материала (для сборки).
+        """Загруженная пользователем текстура для материала (для сборки)
 
         RED и BLU не смешиваются:
-          1. RED-имя (ключ blu_name_map) → только textures[RED] — иначе сборка
+          1. RED-имя (ключ blu_name_map) -> только textures[RED] - иначе сборка
              молча подставила бы BLU вместо диалога.
-          2. BLU-имя (значение) → обратный поиск textures[BLU][RED-ключ]
+          2. BLU-имя (значение) -> обратный поиск textures[BLU][RED-ключ]
              (карточки хранят BLU-текстуры под RED-ключами).
-          3. Нейтральная при непустом маппинге → обе команды.
-          4. Маппинг пуст → обе команды; суффикс '_blue'/'_blu' (force-team) →
-             textures[BLU][база], затем главная BLU как fallback.
+          3. Нейтральная при непустом маппинге -> обе команды.
+          4. Маппинг пуст -> обе команды, суффикс '_blue'/'_blu' (force-team) ->
+             textures[BLU][база], затем главная BLU как fallback
         """
         if self.blu_name_map:
             if mat in self.blu_name_map:
@@ -473,7 +461,7 @@ class PreviewTextureState:
 
         # То же одностороннее правило, что и в показе: под «сделать командным»
         # красный слот сборки берёт только красную текстуру. Иначе на красный
-        # скин в игре уходил бы файл, который человек положил на синий.
+        # скин в игре уходил бы файл, который человек положил на синий
         for team in ((Team.RED,) if self.force_team else (Team.RED, Team.BLU)):
             p = _existing(self.textures.get(team, {}).get(mat))
             if p:
@@ -485,10 +473,9 @@ class PreviewTextureState:
                 p = _existing(self.textures.get(Team.BLU, {}).get(base))
                 if p:
                     return p
-                # force_team без своей синей → «как RED»: берём базовую RED-текстуру
-                # (раньше это обеспечивал дубль в set_texture; теперь дубля нет,
-                # поэтому дефолт восстанавливаем здесь, в резолве сборки — иначе
-                # синий скин остался бы без VTF = фиолетовый в игре).
+                # force_team без своей синей -> «как RED»: берём базовую RED-текстуру.
+                # set_texture её не дублирует, поэтому дефолт здесь, в резолве
+                # сборки - иначе синий скин остался бы без VTF, фиолетовым в игре
                 if self.force_team:
                     r = _existing(self.textures.get(Team.RED, {}).get(base))
                     if r:
@@ -497,8 +484,8 @@ class PreviewTextureState:
         return None
 
     def uploaded_slot_paths(self) -> Dict[str, str]:
-        """{mat: path} всех заполненных слотов; активная команда приоритетнее.
-        SINGLE_TEX_KEY пропускается (главная идёт в сборку отдельно)."""
+        """{mat: path} всех заполненных слотов, активная команда приоритетнее.
+        SINGLE_TEX_KEY пропускается (главная идёт в сборку отдельно)"""
         result: Dict[str, str] = {}
         for team in team_priority(self.active_team):
             for mat, path in self.textures.get(team, {}).items():
@@ -509,11 +496,11 @@ class PreviewTextureState:
         return result
 
     def blu_uploaded_paths(self) -> Dict[str, str]:
-        """{mat: path} своих синих текстур (для командности рук при сборке).
+        """{mat: path} своих синих текстур (для командности рук при сборке)
 
         Нейтральная текстура лежит в обеих командах одной картинкой
-        (set_texture), и такая копия — не своя синяя: по ней сборка делала
-        нейтральные руки командными и писала лишний `_blue`-материал.
+        (set_texture), и такая копия - не своя синяя: по ней сборка делала
+        нейтральные руки командными и писала лишний `_blue`-материал
         """
         red = self.textures.get(Team.RED, {})
         return {
@@ -524,12 +511,12 @@ class PreviewTextureState:
         }
 
     def decor_uploads(self) -> Dict[str, Dict[str, str]]:
-        """Свои текстуры гирлянд: {карточка: {команда: путь}}.
+        """Свои текстуры гирлянд: {карточка: {команда: путь}}
 
         Команда без своей правки берёт картинку другой, как и текстуры оружия
         (resolve_base): покрасили огоньки за RED - у BLU в игре те же. Иначе
         синие оставались игровыми, и в руках за BLU правка пропадала.
-        Покрашенная отдельно команда остаётся своей.
+        Покрашенная отдельно команда остаётся своей
         """
         out: Dict[str, Dict[str, str]] = {}
         cards = {m for paths in self.textures.values() for m in paths if is_decor(m)}
@@ -540,14 +527,12 @@ class PreviewTextureState:
                 out[card] = {Team.RED: red or blu, Team.BLU: blu or red}
         return out
 
-    # ═══════════════════════════════════════════════════════════════════════ #
     # Снимок / восстановление (мини-память оружия)
-    # ═══════════════════════════════════════════════════════════════════════ #
 
     def snapshot(self) -> dict:
-        """Глубокий снимок данных модели — для мгновенного восстановления
+        """Глубокий снимок данных модели - для мгновенного восстановления
         оружия при возврате (без перезапуска воркера). Австралий-активность
-        не сохраняется: после восстановления вариант всегда выключен."""
+        не сохраняется: после восстановления вариант всегда выключен"""
         return {
             'textures': {t: dict(d) for t, d in self.textures.items()},
             'material_names': list(self.material_names),
@@ -566,9 +551,9 @@ class PreviewTextureState:
 
     def restore(self, snap: dict) -> None:
         """Восстанавливает данные модели из snapshot(). Стили (skin_overrides)
-        в мини-память не входят — они живут в пер-стилевой памяти шапок;
+        в мини-память не входят - они живут в пер-стилевой памяти шапок;
         на всякий случай сбрасываем их, чтобы залипший active_skin не резолвил
-        карточки восстановленного оружия в чужие override'ы."""
+        карточки восстановленного оружия в чужие override'ы"""
         self.reset_skins()
         self.textures = {t: dict(d) for t, d in (snap.get('textures') or {}).items()}
         self.material_names = list(snap.get('material_names') or [])
@@ -585,19 +570,17 @@ class PreviewTextureState:
         self.australium_user_tex = snap.get('australium_user_tex')
         self.australium_active = False
 
-    # ═══════════════════════════════════════════════════════════════════════ #
     # Сбросы
-    # ═══════════════════════════════════════════════════════════════════════ #
 
     def reset_skins(self) -> None:
-        """Сброс стилей (skinfamilies) — при смене модели."""
+        """Сброс стилей (skinfamilies) - при смене модели"""
         self.skin_info = None
         self.active_skin = 0
         self.skin_overrides = {}
         self.style_game_tex = {}
 
     def reset_team_data(self) -> None:
-        """Сброс командных данных из VPK (кадры, карты, маппинг имён)."""
+        """Сброс командных данных из VPK (кадры, карты, маппинг имён)"""
         self.red_frames = []
         self.blu_frames = []
         self.vpk_red_tex_map = {}
@@ -607,32 +590,30 @@ class PreviewTextureState:
         self.force_team = False
 
     def reset_australium(self) -> None:
-        """Сброс варианта Australium (кадр, своя текстура, активность)."""
+        """Сброс варианта Australium (кадр, своя текстура, активность)"""
         self.australium_frame = None
         self.australium_active = False
         self.australium_user_tex = None
         self.australium_mat_name = None
 
-    # ═══════════════════════════════════════════════════════════════════════ #
     # Режим «Скайбокс»
-    # ═══════════════════════════════════════════════════════════════════════ #
 
     def resolve_skybox_face(self, face: str) -> Optional[str]:
-        """Что показывает грань скайбокса: своя загруженная → нарезка из
-        панорамы → стоковая грань выбранного неба."""
+        """Что показывает грань скайбокса: своя загруженная -> нарезка из
+        панорамы -> стоковая грань выбранного неба"""
         return (_existing(self.textures.get(Team.RED, {}).get(face))
                 or _existing(self.skybox_split_faces.get(face))
                 or _existing(self.skybox_stock_faces.get(face)))
 
     def skybox_pano(self) -> Optional[str]:
-        """Загруженная пользователем панорама (или None)."""
+        """Загруженная пользователем панорама (или None)"""
         from src.data.skyboxes import SKY_PANO_KEY
         return _existing(self.textures.get(Team.RED, {}).get(SKY_PANO_KEY))
 
     def skybox_build_data(self) -> dict:
         """Что уходит в сборку скайбокса: панорама + ручные оверрайды граней.
-        Нарезанные превью-грани НЕ входят — сборка режет панораму заново в
-        выбранном разрешении."""
+        Нарезанные превью-грани НЕ входят - сборка режет панораму заново в
+        выбранном разрешении"""
         from src.data.skyboxes import SKY_FACES
         overrides = {}
         for face in SKY_FACES:
@@ -642,7 +623,7 @@ class PreviewTextureState:
         return {'equirect': self.skybox_pano(), 'face_overrides': overrides}
 
     def reset_skybox(self) -> None:
-        """Сброс данных скайбокса (стоковые/нарезанные грани; загрузки
-        пользователя живут в textures и чистятся общим сбросом слотов)."""
+        """Сброс данных скайбокса (стоковые/нарезанные грани, загрузки
+        пользователя живут в textures и чистятся общим сбросом слотов)"""
         self.skybox_stock_faces = {}
         self.skybox_split_faces = {}

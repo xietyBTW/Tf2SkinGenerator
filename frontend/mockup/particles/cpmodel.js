@@ -1,11 +1,11 @@
 /*
- * Модель для точек частиц: выбор из каталога игры, не из кэша.
+ * Модель для точек частиц: выбор из каталога игры, не из кэша
  *
  * Тот же каталог, что в левой колонке (классы, шапки, оружие: обложки,
  * фильтр по классу, поиск), только в окне и с одним исходом - модель
  * встаёт в сцену частиц. Кэш декомпиляции общий с вкладками оружия и шапок:
  * что уже открывали, приходит сразу, остальное разбирает Crowbar (это
- * секунды-минуты, поэтому фоном: ответ «начали», сцена - событием cp_model).
+ * секунды-минуты, поэтому фоном: ответ «начали», сцена - событием cp_model)
  *
  * Четвёртая вкладка «Из кэша» - то, чего в каталоге нет (реквизит насмешек)
  * и вообще всё, что уже разобрано: без Crowbar и без ожидания.
@@ -15,6 +15,7 @@ import * as api from '../api.js';
 import { ask } from '../ask.js';
 import { t } from '../i18n.js';
 import { makePick, fillFilters } from '../catalog.js';
+import { clearCovers } from '../catalog-cover.js';
 import { say } from '../stage.js';
 
 const dlg = document.getElementById('cpmodeldlg');
@@ -38,7 +39,7 @@ const GROUPS = { player: 'Игроки', hat: 'Косметика', weapon: 'О�
 const state = { tab: 'character', cls: null, query: '' };
 let resolveWith = null;
 
-/** Открывает окно; ответ - {mode, key, qc, label} или null. */
+/** Открывает окно, ответ - {mode, key, qc, label} или null */
 export function pickCpModel() {
   return new Promise((resolve) => {
     resolveWith = resolve;
@@ -62,7 +63,7 @@ dlg.addEventListener('cancel', () => settle(null));
 dlg.addEventListener('close', () => settle(null));
 document.getElementById('cpm-cancel').addEventListener('click', () => settle(null));
 findEl.addEventListener('input', () => { state.query = findEl.value.trim(); refresh(); });
-// Enter в поиске - не «отправить форму» (окно закрылось бы без ответа).
+// Enter в поиске - не «отправить форму» (окно закрылось бы без ответа)
 findEl.addEventListener('keydown', (e) => { if (e.key === 'Enter') e.preventDefault(); });
 
 function drawTabs() {
@@ -78,13 +79,13 @@ function drawTabs() {
 }
 
 //: Номер последнего запроса: ответ более раннего (медленный поиск шапок)
-//: не должен затирать свежий список.
+//: не должен затирать свежий список
 let refreshSeq = 0;
 
 async function refresh() {
   const tab = state.tab;
   const seq = ++refreshSeq;
-  // Классы - сами по себе фильтр, у кэша класса нет.
+  // Классы - сами по себе фильтр, у кэша класса нет
   const withClass = tab === 'hat' || tab === 'weapon';
   classEl.hidden = !withClass;
   if (withClass) {
@@ -103,7 +104,7 @@ async function refresh() {
     list = list.filter((it) => (it.name + ' ' + (it.label || '') + ' ' + (it.key || ''))
       .toLowerCase().includes(q));
   }
-  gridEl.innerHTML = '';
+  clearCovers(gridEl);
   for (const item of list) {
     gridEl.appendChild(makePick(item, () => chosen(item)));
   }
@@ -117,7 +118,7 @@ async function refresh() {
 async function load(tab) {
   if (tab === 'character') {
     // Класс - заголовок карточки, «тело»/«руки» - подпись: здесь выбирают
-    // модель, а не скин, и класс важнее.
+    // модель, а не скин, и класс важнее
     return (await api.items({ category: 'character' })).map((it) => ({
       ...it, name: it.cls, label: it.name,
     }));
@@ -129,14 +130,14 @@ async function load(tab) {
     return api.items({ category: 'weapon', tf2_class: state.cls });
   }
   // Кэш: обложек у него нет - тип как у частиц, чтобы карточка не ходила
-  // за иконкой; подпись - группа.
+  // за иконкой, подпись - группа
   return (await api.particleModels()).map((m) => ({
     key: m.qc, name: m.label, label: t(GROUPS[m.group] || GROUPS.other),
     type: 'particle', mode: 'cache',
   }));
 }
 
-/** Выбор карточки: у мультиклассовой шапки ещё спрашиваем класс. */
+/** Выбор карточки: у мультиклассовой шапки ещё спрашиваем класс */
 async function chosen(item) {
   if (item.mode === 'cache') {
     settle({ mode: 'cache', key: item.key, qc: item.key, label: item.name });

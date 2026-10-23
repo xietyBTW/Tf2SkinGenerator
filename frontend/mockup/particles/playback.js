@@ -1,5 +1,5 @@
 /*
- * Проигрывание и отмена правок.
+ * Проигрывание и отмена правок
  *
  * Снимками занимается Python - он же и хранит дерево. Здесь только сочетание
  * клавиш, кнопки проигрывателя и перерисовка тем, что вернулось. Состояние
@@ -7,19 +7,19 @@
  */
 
 import * as api from '../api.js';
-import { say, withParticles } from '../stage.js';
+import { say, sayError, withParticles } from '../stage.js';
 import { root } from '../layout.js';
 import { pSystem } from './state.js';
 import { applyStructure, PACTS } from './actions.js';
 import { showParticleMaterials, ensureEffectMaterials } from './materials.js';
 
-// ── Отмена правок ────────────────────────────────────────────────────────
+// Отмена правок
 // Снимками занимается Python: он же и хранит дерево. Здесь только сочетание
-// клавиш и перерисовка тем, что вернулось.
+// клавиш и перерисовка тем, что вернулось
 
 export async function historyGo(delta) {
   const res = await api.undoParticles(delta);
-  if (res.error) { say(res.error); return; }
+  if (res.error) { sayError(res.error); return; }
   await applyStructure(res);
   if (res.materials) {
     withParticles((w) => w.loadParticleData({ ...res, rootName: pSystem }));
@@ -30,7 +30,7 @@ export async function historyGo(delta) {
   await syncHistory();
 }
 
-/** Гасит кнопки отмены, когда откатываться некуда. */
+/** Гасит кнопки отмены, когда откатываться некуда */
 export async function syncHistory() {
   const st = await api.particleHistory();
   document.getElementById('pundo').disabled = !st.undo;
@@ -41,7 +41,7 @@ document.getElementById('pundo').addEventListener('click', () => historyGo(-1));
 document.getElementById('predo').addEventListener('click', () => historyGo(1));
 
 /**
- * Сочетания клавиш раздела: отмена, возврат, копирование и вставка системы.
+ * Сочетания клавиш раздела: отмена, возврат, копирование и вставка системы
  *
  * Разбор вынесен в функцию, потому что то же нажатие приходит ИЗ КАДРА:
  * щелчок по эффекту отдаёт фокус iframe, и Ctrl+Z молча не работал, пока не
@@ -49,17 +49,17 @@ document.getElementById('predo').addEventListener('click', () => historyGo(1));
  */
 export function editorKey(e) {
   if (root.dataset.section !== 'particles' || !(e.ctrlKey || e.metaKey)) return;
-  // В поле ввода Ctrl+Z - это отмена ТЕКСТА, её перехватывать нельзя; то же
-  // с копированием выделенного.
+  // В поле ввода Ctrl+Z - это отмена ТЕКСТА, её перехватывать нельзя, то же
+  // с копированием выделенного
   const tag = (e.target.tagName || '').toLowerCase();
   if (tag === 'input' || tag === 'textarea' || tag === 'select') return;
-  // По коду клавиши, а не по символу: в русской раскладке Z - это «я».
+  // По коду клавиши, а не по символу: в русской раскладке Z - это «я»
   if (e.code === 'KeyZ' && !e.shiftKey) { e.preventDefault(); historyGo(-1); }
   else if (e.code === 'KeyY' || (e.code === 'KeyZ' && e.shiftKey)) {
     e.preventDefault();
     historyGo(1);
   } else if (e.code === 'KeyC' && pSystem) {
-    // Выделенный текст копируют как текст - это не про эффект.
+    // Выделенный текст копируют как текст - это не про эффект
     if (String(window.getSelection && window.getSelection()).trim()) return;
     e.preventDefault();
     PACTS.copy();
@@ -73,7 +73,7 @@ document.addEventListener('keydown', editorKey);
 document.getElementById('prestart').addEventListener('click',
   () => withParticles((w) => w.restartEffect()));
 
-//: Состояние кнопок-переключателей. Движок своего состояния не отдаёт.
+//: Состояние кнопок-переключателей. Движок своего состояния не отдаёт
 let pPaused = false;
 let pLoop = true;
 
@@ -84,8 +84,8 @@ function togglePause() {
 }
 document.getElementById('ppause').addEventListener('click', togglePause);
 
-//: Скорость времени по кругу: 1× → ½ → ¼ → 1×. Быстрые эффекты (крит,
-//: вспышка) на глаз не разобрать без замедления.
+//: Скорость времени по кругу: 1× -> ½ -> ¼ -> 1×. Быстрые эффекты (крит,
+//: вспышка) на глаз не разобрать без замедления
 const SPEEDS = [1, 0.5, 0.25];
 let pSpeed = 0;
 function cycleSpeed() {
@@ -99,20 +99,20 @@ function cycleSpeed() {
 document.getElementById('pspeed').addEventListener('click', cycleSpeed);
 
 // Горячие клавиши кадра: пробел - пауза, R - заново, S - скорость. Только
-// когда фокус не в поле ввода: там пробел - это пробел.
+// когда фокус не в поле ввода: там пробел - это пробел
 document.addEventListener('keydown', (e) => {
   if (root.dataset.section !== 'particles' || e.ctrlKey || e.altKey) return;
   const tag = (e.target.tagName || '').toLowerCase();
   if (tag === 'input' || tag === 'textarea' || tag === 'select'
       || e.target.isContentEditable) return;
-  // По коду клавиши, а не по символу: в русской раскладке R - это «к».
+  // По коду клавиши, а не по символу: в русской раскладке R - это «к»
   if (e.code === 'Space') { e.preventDefault(); togglePause(); }
   else if (e.code === 'KeyR') withParticles((w) => w.restartEffect());
   else if (e.code === 'KeyS') cycleSpeed();
 });
 
 //: Фон кадра: тёмный, как карта в тени, как карта на свету. Полупрозрачные
-//: слои (дымка воды) видны только на светлом - на чёрном это чёрный ящик.
+//: слои (дымка воды) видны только на светлом - на чёрном это чёрный ящик
 const BACKGROUNDS = [0x1a1a1a, 0x5c6a72, 0xb8c2c8];
 let pBg = 0;
 document.getElementById('pbg').addEventListener('click', () => {

@@ -1,8 +1,8 @@
-"""Разбор точек крепления модели (QC + бинд-поза SMD).
+"""Разбор точек крепления модели (QC + бинд-поза SMD)
 
-Матрицы — порт мат-библиотеки Source, и ошибка в порядке осей не падает, а
+Матрицы - порт мат-библиотеки Source, и ошибка в порядке осей не падает, а
 тихо разворачивает эффект в игре: проверяем и математику, и склейку цепочки
-костей на маленькой синтетической модели.
+костей на маленькой синтетической модели
 """
 
 import math
@@ -100,7 +100,7 @@ def test_attachment_world_transform_follows_bone(tmp_path):
     assert [round(v, 3) for v in tip.pos] == [10.0, 5.0, 0.0]
     assert abs(tip.angles[1] - 90.0) < 1e-3
 
-    # Корневая кость единичная — трансформ проходит насквозь
+    # Корневая кость единичная - трансформ проходит насквозь
     assert [round(v, 3) for v in by_name["unusual_0"].pos] == [0.0, 0.0, 20.0]
 
     # Кости нет в SMD: точку не выбрасываем, берём её локальный трансформ
@@ -110,7 +110,7 @@ def test_attachment_world_transform_follows_bone(tmp_path):
 def test_root_bone_is_first_player_bone(tmp_path):
     """Игра вешает анюжуал на первую кость, которая есть и у игрока
     (bone_merge_cache.cpp), а не на первую кость файла: у реквизита впереди
-    может стоять своя prop-кость."""
+    может стоять своя prop-кость"""
     smd = _SMD.replace('"root"', '"prop_bone"').replace('"arm"', '"bip_head"')
     (tmp_path / "test.smd").write_text(smd, encoding="utf-8")
     qc = tmp_path / "test.qc"
@@ -119,13 +119,13 @@ def test_root_bone_is_first_player_bone(tmp_path):
     assert root.name == "bip_head"
     assert [round(v, 3) for v in root.pos] == [10.0, 0.0, 0.0]
 
-    # Костей игрока нет — корень модели, как у GetBoneTransform(0)
+    # Костей игрока нет - корень модели, как у GetBoneTransform(0)
     (tmp_path / "test.smd").write_text(_SMD, encoding="utf-8")
     assert root_bone_from_qc(str(qc)).name == "root"
 
 
 def test_attachments_ignore_physics_smd(tmp_path):
-    """Reference-SMD выбирается по имени QC, физика рядом не сбивает разбор."""
+    """Reference-SMD выбирается по имени QC, физика рядом не сбивает разбор"""
     (tmp_path / "test_physics.smd").write_text(
         _SMD.replace('10.000000', '777.000000'), encoding="utf-8")
     (tmp_path / "test.smd").write_text(_SMD, encoding="utf-8")
@@ -136,7 +136,7 @@ def test_attachments_ignore_physics_smd(tmp_path):
 
 
 def test_radian_euler_matches_source_axis_order():
-    """RadianEuler(x, y, z) в Source читается как QAngle(y, z, x)."""
+    """RadianEuler(x, y, z) в Source читается как QAngle(y, z, x)"""
     from src.services.model_attachments import radian_euler_matrix
     m = radian_euler_matrix(0.0, math.radians(30), 0.0, (0.0, 0.0, 0.0))
     pitch, yaw, roll = matrix_angles(m)
@@ -146,8 +146,8 @@ def test_radian_euler_matches_source_axis_order():
 
 def test_keep_source_axes_leaves_coordinates_alone(tmp_path):
     """Превью частиц живёт в координатах Source (Z-up), поэтому меш модели для
-    него конвертируется БЕЗ поворота осей — иначе эффект съедет с точки
-    крепления, посчитанной в тех же координатах."""
+    него конвертируется БЕЗ поворота осей - иначе эффект съедет с точки
+    крепления, посчитанной в тех же координатах"""
     from src.services.smd_to_obj_service import SmdToObjService
 
     smd = tmp_path / "m.smd"
@@ -171,13 +171,13 @@ def test_keep_source_axes_leaves_coordinates_alone(tmp_path):
         return [round(float(v), 3) for v in line.split()[1:]]
 
     assert first_vertex("source_axes", keep_source_axes=True) == [1.0, 2.0, 3.0]
-    # Штатный режим для viewer3d по-прежнему разворачивает Z-up → Y-up
+    # Штатный режим для viewer3d по-прежнему разворачивает Z-up -> Y-up
     assert first_vertex("yup", source_zup=True) == [1.0, 3.0, -2.0]
 
 
 def test_cdmaterials_normalised_and_deduped():
     """$cdmaterials в QC бывают со слэшами в обе стороны, ведущим слэшем и
-    пустые — иначе путь к VMT не соберётся."""
+    пустые - иначе путь к VMT не соберётся"""
     from src.services.model_materials import cdmaterials_from_qc
 
     cds = cdmaterials_from_qc(
@@ -188,6 +188,6 @@ def test_cdmaterials_normalised_and_deduped():
 
 
 def test_model_textures_need_game_path():
-    """Без пути к игре текстуры не ищем — модель просто останется серой."""
+    """Без пути к игре текстуры не ищем - модель просто останется серой"""
     from src.services.model_materials import resolve_model_textures
     assert resolve_model_textures("nope.qc", ["mat"], "") == {}

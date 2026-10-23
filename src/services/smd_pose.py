@@ -1,30 +1,28 @@
 """
-Поза из анимации вместо bind-позы: то, что игрок реально видит.
+Поза из анимации вместо bind-позы: то, что игрок реально видит
 
-Превью показывает reference-меш как есть — позу, в которой модель собирали.
+Превью показывает reference-меш как есть - позу, в которой модель собирали.
 Игра же всегда проигрывает последовательность, и у части моделей она заметно
 двигает геометрию. У Мутировавшего молока хлеб в bind-позе торчит из банки на
-2.58 единицы, а первый кадр `idle` смещает кости ровно на 2.69 — то есть в игре
+2.58 единицы, а первый кадр `idle` смещает кости ровно на 2.69 - то есть в игре
 хлеб внутри, а в превью снаружи. Из проверенных пушек геометрию двигает
 `idle` у Шприцемёта (8.9), Ракетомёта (4.4), Боксёрских перчаток (3.7) и
-Мутировавшего молока (2.7); у остальных отличается только поворот корня.
+Мутировавшего молока (2.7), у остальных отличается только поворот корня
 
 Как это работает:
 
-    для каждой кости    M = T(позиция) · R(углы)      — локально относительно родителя
+    для каждой кости    M = T(позиция) · R(углы)      - локально относительно родителя
     мировая             W[i] = W[родитель] · M[i]
     матрица скиннинга   S[i] = W_анимации[i] · W_bind[i]⁻¹
     вершина             v' = Σ вес · (S[кость] · v)
 
-Порядок эйлеровых углов — `Rz · Ry · Rx`. Он не угадан: в MDL каждая кость
+Порядок эйлеровых углов - `Rz · Ry · Rx`. Он не угадан: в MDL каждая кость
 несёт и углы, и посчитанный компилятором Valve кватернион, и на 35 костях
 стоковых моделей этот порядок воспроизводит кватернион с ошибкой 0.000000
-(ближайший другой — 0.78).
+(ближайший другой - 0.78)
 
-Матрица здесь — 12 чисел (три строки по четыре), обратная считается как для
-жёсткого преобразования: Rᵀ и −Rᵀ·t. Numpy не нужен: вершин тысячи, не миллионы.
-
-Модуль без Qt.
+Матрица здесь - 12 чисел (три строки по четыре), обратная считается как для
+жёсткого преобразования: Rᵀ и −Rᵀ·t. Numpy не нужен: вершин тысячи, не миллионы
 """
 
 from __future__ import annotations
@@ -38,48 +36,48 @@ from src.shared.logging_config import get_logger
 
 logger = get_logger(__name__)
 
-#: Матрица 3x4: (m00 m01 m02 m03, m10 … m13, m20 … m23).
+#: Матрица 3x4: (m00 m01 m02 m03, m10 … m13, m20 … m23)
 Mat = Tuple[float, ...]
 
 IDENTITY: Mat = (1.0, 0.0, 0.0, 0.0,
                  0.0, 1.0, 0.0, 0.0,
                  0.0, 0.0, 1.0, 0.0)
 
-#: Ниже этого сдвига (в единицах Source) поза считается совпадающей с bind —
-#: пересчитывать вершины незачем. У большинства моделей разница ровно нулевая.
+#: Ниже этого сдвига (в единицах Source) поза считается совпадающей с bind -
+#: пересчитывать вершины незачем. У большинства моделей разница ровно нулевая
 POSE_EPSILON = 1e-4
 
 
-# ── Разбор SMD ───────────────────────────────────────────────────────────── #
+# Разбор SMD
 
-#: Строка секции nodes: id "имя" родитель. Имя в кавычках и может быть с пробелами.
+#: Строка секции nodes: id "имя" родитель. Имя в кавычках и может быть с пробелами
 _RE_NODE = re.compile(r'^(\d+)\s+"(.*)"\s+(-?\d+)\s*$')
 
 
 def parse_nodes(smd_path: str) -> Dict[int, int]:
-    """{кость: родитель} из секции nodes (−1 у корня). Пусто, если секции нет."""
+    """{кость: родитель} из секции nodes (−1 у корня). Пусто, если секции нет"""
     return {bone: parent for bone, (_name, parent) in parse_node_table(smd_path).items()}
 
 
 def parse_node_names(smd_path: str) -> Dict[int, str]:
-    """{кость: имя} из секции nodes.
+    """{кость: имя} из секции nodes
 
-    Имя — единственное, что связывает скелеты РАЗНЫХ моделей: номера костей у
+    Имя - единственное, что связывает скелеты РАЗНЫХ моделей: номера костей у
     рук, оружия и модели анимаций свои, а bonemerge в Source сопоставляет их
-    именно по имени.
+    именно по имени
     """
     return {bone: name for bone, (name, _parent) in parse_node_table(smd_path).items()}
 
 
 def parse_node_table(smd_path: str) -> Dict[int, Tuple[str, int]]:
-    """{кость: (имя, родитель)} — один разбор секции nodes на оба запроса."""
+    """{кость: (имя, родитель)} - один разбор секции nodes на оба запроса"""
     nodes: Dict[int, Tuple[str, int]] = {}
     for line in _section(smd_path, "nodes"):
         m = _RE_NODE.match(line)
         if m:
             nodes[int(m.group(1))] = (m.group(2), int(m.group(3)))
             continue
-        # Экспортёр без кавычек вокруг имени: id имя родитель.
+        # Экспортёр без кавычек вокруг имени: id имя родитель
         parts = line.split()
         if len(parts) < 3:
             continue
@@ -92,15 +90,15 @@ def parse_node_table(smd_path: str) -> Dict[int, Tuple[str, int]]:
 
 def parse_frame0(smd_path: str) -> Dict[int, Tuple[Tuple[float, float, float],
                                                    Tuple[float, float, float]]]:
-    """{кость: (позиция, углы)} из ПЕРВОГО кадра секции skeleton."""
+    """{кость: (позиция, углы)} из ПЕРВОГО кадра секции skeleton"""
     return parse_frame(smd_path, 0)
 
 
 def parse_frames(smd_path: str) -> List[Dict[int, Tuple[tuple, tuple]]]:
-    """Все кадры секции skeleton за ОДИН проход файла.
+    """Все кадры секции skeleton за ОДИН проход файла
 
-    Анимация — это десятки кадров, и читать файл заново на каждый (как делает
-    `parse_frame`) значит разобрать мегабайтный SMD полсотни раз.
+    Анимация - это десятки кадров, и читать файл заново на каждый (как делает
+    `parse_frame`) значит разобрать мегабайтный SMD полсотни раз
     """
     frames: List[Dict[int, Tuple[tuple, tuple]]] = []
     for line in _section(smd_path, "skeleton"):
@@ -124,10 +122,10 @@ def parse_frames(smd_path: str) -> List[Dict[int, Tuple[tuple, tuple]]]:
 def parse_frame(smd_path: str, index: int = 0
                 ) -> Dict[int, Tuple[Tuple[float, float, float],
                                      Tuple[float, float, float]]]:
-    """{кость: (позиция, углы)} из кадра `index` секции skeleton.
+    """{кость: (позиция, углы)} из кадра `index` секции skeleton
 
-    Кадр за концом анимации даёт пустой результат — вызывающий сам решает, что
-    это значит.
+    Кадр за концом анимации даёт пустой результат - вызывающий сам решает, что
+    это значит
     """
     frame: Dict[int, Tuple[tuple, tuple]] = {}
     current = -1
@@ -152,7 +150,7 @@ def parse_frame(smd_path: str, index: int = 0
 
 
 def _section(smd_path: str, name: str) -> List[str]:
-    """Непустые строки секции SMD (`name` … `end`)."""
+    """Непустые строки секции SMD (`name` … `end`)"""
     out: List[str] = []
     try:
         with open(smd_path, "r", encoding="utf-8", errors="replace") as f:
@@ -172,10 +170,10 @@ def _section(smd_path: str, name: str) -> List[str]:
     return out
 
 
-# ── Матрицы ──────────────────────────────────────────────────────────────── #
+# Матрицы
 
 def local_matrix(pos: Sequence[float], rot: Sequence[float]) -> Mat:
-    """T(позиция) · Rz · Ry · Rx — конвенция studiomdl (см. док модуля)."""
+    """T(позиция) · Rz · Ry · Rx - конвенция studiomdl (см. док модуля)"""
     sx, cx = math.sin(rot[0]), math.cos(rot[0])
     sy, cy = math.sin(rot[1]), math.cos(rot[1])
     sz, cz = math.sin(rot[2]), math.cos(rot[2])
@@ -187,7 +185,7 @@ def local_matrix(pos: Sequence[float], rot: Sequence[float]) -> Mat:
 
 
 def mul(a: Mat, b: Mat) -> Mat:
-    """Произведение двух 3x4 (нижняя строка подразумевается 0 0 0 1)."""
+    """Произведение двух 3x4 (нижняя строка подразумевается 0 0 0 1)"""
     out = []
     for r in range(3):
         r4 = r * 4
@@ -198,7 +196,7 @@ def mul(a: Mat, b: Mat) -> Mat:
 
 
 def rigid_inverse(m: Mat) -> Mat:
-    """Обратная к жёсткому преобразованию: Rᵀ и −Rᵀ·t (без общего обращения)."""
+    """Обратная к жёсткому преобразованию: Rᵀ и −Rᵀ·t (без общего обращения)"""
     r00, r01, r02, tx = m[0], m[1], m[2], m[3]
     r10, r11, r12, ty = m[4], m[5], m[6], m[7]
     r20, r21, r22, tz = m[8], m[9], m[10], m[11]
@@ -211,7 +209,7 @@ def rigid_inverse(m: Mat) -> Mat:
 
 def world_matrices(parents: Dict[int, int],
                    frame: Dict[int, Tuple[tuple, tuple]]) -> Dict[int, Mat]:
-    """Мировые матрицы костей: W[i] = W[родитель] · локальная[i]."""
+    """Мировые матрицы костей: W[i] = W[родитель] · локальная[i]"""
     world: Dict[int, Mat] = {}
 
     def resolve(bone: int, guard: int = 0) -> Mat:
@@ -219,7 +217,7 @@ def world_matrices(parents: Dict[int, int],
         if cached is not None:
             return cached
         data = frame.get(bone)
-        if data is None or guard > 256:      # битая иерархия — не зацикливаемся
+        if data is None or guard > 256:      # битая иерархия - не зацикливаемся
             return IDENTITY
         local = local_matrix(*data)
         parent = parents.get(bone, -1)
@@ -245,15 +243,15 @@ def transform_dir(m: Mat, v: Sequence[float]) -> Tuple[float, float, float]:
             m[8] * v[0] + m[9] * v[1] + m[10] * v[2])
 
 
-# ── Публичное ────────────────────────────────────────────────────────────── #
+# Публичное
 
 def skinning_matrices(ref_smd: str, pose_smd: str) -> Optional[Dict[int, Mat]]:
     """
-    {кость: матрица} для перевода меша из bind-позы в позу анимации.
+    {кость: матрица} для перевода меша из bind-позы в позу анимации
 
     None, если позу применять не нужно или нельзя: нет файлов, скелеты не
-    совпали, поза совпадает с bind. Отказ здесь безобиден — превью просто
-    останется в bind-позе, как было раньше.
+    совпали, поза совпадает с bind. Отказ здесь безобиден - превью просто
+    останется в bind-позе
     """
     if not ref_smd or not pose_smd:
         return None
@@ -268,22 +266,22 @@ def skinning_matrices(ref_smd: str, pose_smd: str) -> Optional[Dict[int, Mat]]:
     common = set(bind) & set(pose)
     if not common or len(common) < len(bind) * 0.5:
         logger.info(
-            f"[pose] скелеты не сошлись ({len(common)} из {len(bind)} костей) — "
+            f"[pose] скелеты не сошлись ({len(common)} из {len(bind)} костей) - "
             f"оставляем bind-позу")
         return None
 
     parents = parse_nodes(ref_smd)
     # Корневым костям оставляем bind-положение. В анимации корень разворачивает
     # предмет так, как он лежит в руке (у скаттергана это ровно поворот на 90°),
-    # а превью показывает предмет в его собственной позе — крутить всю модель
-    # не надо. Двигаться должно только то, что движется ОТНОСИТЕЛЬНО корня.
+    # а превью показывает предмет в его собственной позе - крутить всю модель
+    # не надо. Двигаться должно только то, что движется ОТНОСИТЕЛЬНО корня
     pose = dict(pose)
     for bone in list(pose):
         if parents.get(bone, -1) < 0 and bone in bind:
             pose[bone] = bind[bone]
 
     # Сравниваем ПОСЛЕ подмены корня: у большинства моделей вся разница с
-    # bind-позой в нём и сидит, и трогать вершины незачем.
+    # bind-позой в нём и сидит, и трогать вершины незачем
     if all(_same_bone(bind[b], pose[b]) for b in common):
         return None
 
@@ -305,29 +303,29 @@ def _same_bone(a: Tuple[tuple, tuple], b: Tuple[tuple, tuple]) -> bool:
 
 
 #: Во сколько раз габариты вправе вырасти после позы. Реальная поза модель
-#: не раздувает: у Мутировавшего молока она наоборот убирает выступ.
+#: не раздувает: у Мутировавшего молока она наоборот убирает выступ
 MAX_POSE_GROWTH = 3.0
 
 
 def looks_sane(before: Sequence[Sequence[float]],
                after: Sequence[Sequence[float]]) -> bool:
     """
-    Похожа ли поза на позу, а не на разлетевшийся меш.
+    Похожа ли поза на позу, а не на разлетевшийся меш
 
     Страховка на незнакомых моделях: в игре их тысячи, проверить все нельзя, а
-    цена ошибки — превью с геометрией во всю сцену. Отказ здесь возвращает
-    bind-позу, то есть ровно прежнее поведение.
+    цена ошибки - превью с геометрией во всю сцену. Отказ здесь возвращает
+    bind-позу, то есть превью без позы
     """
     if not before or not after or len(before) != len(after):
         return False
     if any(p != p or p in (float("inf"), float("-inf"))
            for point in after for p in point):
-        return False                          # NaN/inf — точно не поза
+        return False                          # NaN/inf - точно не поза
     return _extent(after) <= _extent(before) * MAX_POSE_GROWTH
 
 
 def _extent(points: Sequence[Sequence[float]]) -> float:
-    """Наибольшая сторона габаритного ящика."""
+    """Наибольшая сторона габаритного ящика"""
     lo = [min(p[i] for p in points) for i in range(3)]
     hi = [max(p[i] for p in points) for i in range(3)]
     return max(hi[i] - lo[i] for i in range(3))
@@ -335,7 +333,7 @@ def _extent(points: Sequence[Sequence[float]]) -> float:
 
 def apply_to_vertex(mats: Dict[int, Mat], links: Sequence[Tuple[int, float]],
                     pos: Sequence[float], nrm: Sequence[float]) -> Tuple[tuple, tuple]:
-    """Линейный скиннинг одной вершины. Без весов и костей — возвращает как было."""
+    """Линейный скиннинг одной вершины. Без весов и костей - возвращает как было"""
     if not mats or not links:
         return tuple(pos), tuple(nrm)
     px = py = pz = nx = ny = nz = 0.0
@@ -362,7 +360,7 @@ def apply_to_vertex(mats: Dict[int, Mat], links: Sequence[Tuple[int, float]],
     return (px, py, pz), (nx, ny, nz)
 
 
-# ── Поиск SMD анимации в QC ──────────────────────────────────────────────── #
+# Поиск SMD анимации в QC
 
 _RE_SEQUENCE = re.compile(r'\$sequence\b(.*?)(?=\$|\Z)', re.IGNORECASE | re.DOTALL)
 _RE_SMD = re.compile(r'"([^"]+\.smd)"', re.IGNORECASE)
@@ -370,12 +368,12 @@ _RE_SMD = re.compile(r'"([^"]+\.smd)"', re.IGNORECASE)
 
 def find_pose_smd(qc_path: str) -> Optional[str]:
     """
-    SMD последовательности `idle` из QC — та поза, в которой модель видна в
-    игре большую часть времени; без неё — первая по порядку.
+    SMD последовательности `idle` из QC - та поза, в которой модель видна в
+    игре большую часть времени, без неё - первая по порядку
 
     У косметики и оружия `idle` и стоит первой. У вьюмоделей (часы шпиона)
     первой идёт `draw`: Звон смерти в её нулевом кадре закрыт, и циферблат
-    спрятан под крышкой. None, если последовательностей нет или файл потерян.
+    спрятан под крышкой. None, если последовательностей нет или файл потерян
     """
     if not qc_path or not os.path.isfile(qc_path):
         return None

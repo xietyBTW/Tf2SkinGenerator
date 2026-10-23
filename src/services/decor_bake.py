@@ -1,21 +1,19 @@
 """
-Гирлянда, вшитая в модель оружия («Сделать праздничным»).
+Гирлянда, вшитая в модель оружия («Сделать праздничным»)
 
 Игра рисует гирлянду только у праздничной версии или с Фестивайзером:
 отдельной моделью костями оружия. Вшитая - часть меша самого оружия, её видят
-все, кто поставил мод. Проверено в игре на обрезе: гирлянда на месте и мигает.
+все, кто поставил мод. Проверено в игре на обрезе: гирлянда на месте и мигает
 
 1. Гирлянда разбирается со всеми правками формы (decor_build.prepare).
-2. Её треугольники дописываются в главный меш оружия; номера костей
+2. Её треугольники дописываются в главный меш оружия, номера костей
    переносятся по ИМЕНАМ (скелеты гирлянд повторяют скелет оружия).
 3. Материалы - в свою папку (`models/tf2sg_decor/<гирлянда>`), как у
    гирлянды своей моделью: материалы гирлянд общие у сотни оружий.
 4. Командные огоньки - столбцом $texturegroup: у оружия строка 0 - RED,
-   1 - BLU, дальше парами; строка гирлянды берётся по той же чётности.
+   1 - BLU, дальше парами, строка гирлянды берётся по той же чётности.
 5. Родные гирлянды оружия собираются пустыми: у владельца праздничной версии
-   игра повесила бы свою поверх вшитой.
-
-Модуль без Qt.
+   игра повесила бы свою поверх вшитой
 """
 
 from __future__ import annotations
@@ -30,7 +28,7 @@ from src.shared.logging_config import get_logger
 
 logger = get_logger(__name__)
 
-#: Пустая гирлянда: один крошечный треугольник с невидимым материалом.
+#: Пустая гирлянда: один крошечный треугольник с невидимым материалом
 EMPTY_DIR = f"{decor_build.DECOR_MATERIALS_ROOT}\\empty"
 EMPTY_MATERIAL = "tf2sg_empty"
 _EMPTY_VMT = ('"VertexLitGeneric"\n{\n\t"$basetexture" "tools/toolsnodraw"\n'
@@ -43,7 +41,7 @@ _RE_CDMATERIALS = re.compile(r'^[ \t]*\$cdmaterials\b', re.IGNORECASE | re.MULTI
 
 
 def bake_entry(entries: Optional[Iterable[dict]]) -> Optional[dict]:
-    """Гирлянда, которую надо вшить в оружие, из списка гирлянд сборки."""
+    """Гирлянда, которую надо вшить в оружие, из списка гирлянд сборки"""
     return next((e for e in entries or () if e.get('bake')), None)
 
 
@@ -51,7 +49,7 @@ def bake(ctx, entry: dict, qc_path: str, weapon_key: str, *, misc_vpk: str,
          textures_vpk: str, studiomdl_exe: str, tf_dir: str, size, format_type,
          flags, vtf_options, bypass_prefix: str) -> None:
     """Вшивает гирлянду `entry` в QC оружия до его компиляции и кладёт в мод
-    пустые родные гирлянды (`entry['empty']` - их пути в VPK)."""
+    пустые родные гирлянды (`entry['empty']` - их пути в VPK)"""
     from src.services.model_build_service import ModelBuildService
 
     mdl = entry['mdl'].replace('\\', '/').lower()
@@ -77,7 +75,7 @@ def bake(ctx, entry: dict, qc_path: str, weapon_key: str, *, misc_vpk: str,
 
 
 def append_triangles(body_smd: str, garland_smd: str) -> None:
-    """Дописывает треугольники гирлянды в меш оружия, кости - по именам."""
+    """Дописывает треугольники гирлянды в меш оружия, кости - по именам"""
     from src.services.smd_service import SMDService
 
     body = Path(body_smd).read_text(encoding='utf-8', errors='replace').splitlines(True)
@@ -95,7 +93,7 @@ def append_triangles(body_smd: str, garland_smd: str) -> None:
 
 
 def add_to_qc(qc_path: str, cd_dir: str, garland_rows: List[List[str]]) -> None:
-    """Папка материалов гирлянды и её командный столбец в QC оружия."""
+    """Папка материалов гирлянды и её командный столбец в QC оружия"""
     from src.services.model_build_service import ModelBuildService
 
     text = Path(qc_path).read_text(encoding='utf-8', errors='replace')
@@ -111,24 +109,24 @@ def add_to_qc(qc_path: str, cd_dir: str, garland_rows: List[List[str]]) -> None:
 
 
 def skin_rows(weapon: List[List[str]], garland: List[List[str]]) -> List[List[str]]:
-    """Строки скинов оружия со столбцами гирлянды; пусто - менять нечего.
+    """Строки скинов оружия со столбцами гирлянды, пусто - менять нечего
 
     У гирлянды без скинов (одна строка) материалы одни на все скины - столбец
-    не нужен. У оружия без скинов строки - сами строки гирлянды.
+    не нужен. У оружия без скинов строки - сами строки гирлянды
     """
     if len(garland) < 2:
         return []
     if not weapon:
         return [list(row) for row in garland]
     # Скинов у оружия меньше, чем у гирлянды (у револьвера строка одна):
-    # синему игра ставит скин 1, и без своей строки огоньки остались бы красными.
+    # синему игра ставит скин 1, и без своей строки огоньки остались бы красными
     weapon = list(weapon) + [weapon[0]] * (len(garland) - len(weapon))
     return [list(row) + list(garland[i % len(garland)]) for i, row in enumerate(weapon)]
 
 
 def build_empty(ctx, mdl: str, *, misc_vpk: str, studiomdl_exe: str, tf_dir: str,
                 bypass_prefix: str) -> None:
-    """Родная гирлянда по своему пути, но без видимой геометрии."""
+    """Родная гирлянда по своему пути, но без видимой геометрии"""
     from src.services import model_decompile_service as mds
     from src.services.model_build_service import ModelBuildService
     from src.services.model_service import ModelService

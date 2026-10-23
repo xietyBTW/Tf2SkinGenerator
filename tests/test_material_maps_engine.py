@@ -1,7 +1,7 @@
-"""Карты материала так, как их читает движок (вики Valve + материалы TF2).
+"""Карты материала так, как их читает движок (вики Valve + материалы TF2)
 
 VTFCmd в тестах не зовём: create_vtf кладёт PNG под именем .vtf, а
-rgba_from_vtf его читает — так видно, что именно ушло бы в текстуру.
+rgba_from_vtf его читает - так видно, что именно ушло бы в текстуру
 """
 import io
 import tempfile
@@ -69,8 +69,8 @@ class EngineMapsTests(unittest.TestCase):
         self.assertIsNone(doc.get('$basemapalphaphongmask'))
         n = self.normal()
         self.assertEqual(tuple(n[0, 0, :3]), STOCK_RGB)       # рельеф игры цел
-        self.assertEqual(int(n[0, 0, 3]), 255)                # светлое — блестит
-        self.assertEqual(int(n[0, -1, 3]), 0)            # размер — как у родной
+        self.assertEqual(int(n[0, 0, 3]), 255)                # светлое - блестит
+        self.assertEqual(int(n[0, -1, 3]), 0)            # размер - как у родной
 
     def test_auto_gloss_mask_lives_in_normal_alpha(self):
         text = self.build('"VertexLitGeneric"\n{\n\t"$basetexture" "models/w/m9"\n}\n',
@@ -81,7 +81,7 @@ class EngineMapsTests(unittest.TestCase):
         n = self.normal()
         self.assertEqual((int(n[0, 0, 3]), int(n[0, 15, 3])), (255, 0))
         exp = fake_rgba((self.tmp / 'm9_exp.vtf').read_bytes())
-        self.assertEqual(int(exp[..., 3].min()), 255)         # альфа exp — rim, не блеск
+        self.assertEqual(int(exp[..., 3].min()), 255)         # альфа exp - rim, не блеск
 
     def test_material_fresnel_ranges_are_kept(self):
         text = self.build('"VertexLitGeneric"\n{\n\t"$basetexture" "models/w/m9"\n'
@@ -112,7 +112,7 @@ class EngineMapsTests(unittest.TestCase):
                          '$basetexture')
 
     def test_animated_normal_is_left_alone(self):
-        # Гифка + Normal Map: многокадровый рельеф. Маска заморозила бы его.
+        # Гифка + Normal Map: многокадровый рельеф. Маска заморозила бы его
         animated = bytearray(b'VTF\0' + bytes(22))
         animated[24:26] = (12).to_bytes(2, 'little')
         (self.tmp / 'm9_normal.vtf').write_bytes(bytes(animated))
@@ -174,7 +174,7 @@ class EngineMapsTests(unittest.TestCase):
         self.assertIsNone(doc.get('$detail'))
 
     def test_unsupported_blend_mode_falls_back(self):
-        # «Multiply» раньше писал 7 — с $bumpmap материал не рисуется вовсе.
+        # 7 с $bumpmap не рисуется вовсе
         got = normalize_maps({'detail': {'derive': False, 'image': str(self.base),
                                          '$detailblendmode': '7'}})
         self.assertNotIn('$detailblendmode', got['detail'])

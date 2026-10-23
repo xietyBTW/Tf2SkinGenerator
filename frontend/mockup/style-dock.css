@@ -1,24 +1,24 @@
 /*
  * Параметры сборки, нижняя полоса, сборка в полосе, узкое окно, баннер
- * правки текстуры, консоль.
+ * правки текстуры, консоль
  *
  * Часть стилей страницы: файлы подключены в index.html в порядке каскада
  * (style.css первым), порядок менять нельзя.
  */
 
-/* ── Параметры сборки ────────────────────────────────────────────────────
-   Тот же блок: прибитый — колонка справа, плавающий — накладка над нижней
+/* Параметры сборки
+   Тот же блок: прибитый - колонка справа, плавающий - накладка над нижней
    полосой. Накладкой, а не распоркой: раздвигая работу, панель съедала
-   модель ради параметров, открытых на секунду. */
+   модель ради параметров, открытых на секунду */
 .build { min-width: 0; min-height: 0; overflow: auto; }
 
 .build__grid { display: grid; gap: 22px; }
 /* Особые флаги VTF живут своей колонкой и по умолчанию скрыты: скину они либо
    безразличны, либо вредны (SSBump), а выглядят такой же безобидной галкой,
-   как остальные. Показывает их настройка — признак ставится на корень
-   (settings.js → applyLook). Прячем колонку, а не удаляем из разметки:
+   как остальные. Показывает их настройка - признак ставится на корень
+   (settings.js -> applyLook). Прячем колонку, а не удаляем из разметки:
    скрытая галка и так не уходит в сборку (build.js), а список остаётся тем,
-   что отдал Python. */
+   что отдал Python */
 .build__col { display: flex; flex-direction: column; gap: 9px; min-width: 0; }
 .build__col[data-col="flags-adv"] { display: none; }
 [data-advflags="1"] .build__col[data-col="flags-adv"] { display: flex; }
@@ -29,12 +29,12 @@
 .input--tiny:disabled { color: var(--ink-mute); border-bottom-style: dashed; }
 /* Галка со своим значением в одной строке (сила гамма-коррекции). Пока
    галка снята, число просто бледное: подчёркивание обещало бы, что его
-   можно править. */
+   можно править */
 .optval { display: flex; align-items: center; gap: 10px; }
 .optval__input { width: 3.5em; padding-top: 0; padding-bottom: 1px; text-align: center; }
 .optval__input:disabled { color: var(--ink-mute); border-bottom-color: transparent; }
 
-/* Карта нормалей: галка и её настройки под ней, с отступом галки. */
+/* Карта нормалей: галка и её настройки под ней, с отступом галки */
 .nmap { display: flex; flex-direction: column; gap: 9px; }
 .nmap[hidden], .nmap__body[hidden], .nmap .check[hidden] { display: none; }
 .nmap__body { display: flex; flex-direction: column; gap: 7px; padding-left: 23px; }
@@ -43,8 +43,8 @@
 .nmap__range { width: 100%; min-width: 0; margin: 0; accent-color: var(--accent); }
 .nmap__val { font-size: 10.5px; color: var(--ink-soft); text-align: right; font-variant-numeric: tabular-nums; }
 
-/* Радио отличается от чекбокса формой точки: квадрат был бы враньём —
-   выбор здесь одиночный. */
+/* Радио отличается от чекбокса формой точки: квадрат был бы враньём -
+   выбор здесь одиночный */
 .check input[type="radio"] { border-radius: 50%; }
 .check input[type="radio"]:checked { background: none; border-color: var(--ink); }
 .check input[type="radio"]:checked::after {
@@ -73,12 +73,12 @@
 }
 [data-panels="float"] .build[hidden] { display: none; }
 [data-panels="float"] .build__grid { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 34px; }
-/* С особыми флагами колонок пять: место справа как раз пустует. */
+/* С особыми флагами колонок пять: место справа как раз пустует */
 [data-advflags="1"][data-panels="float"] .build__grid {
   grid-template-columns: repeat(5, minmax(0, 1fr));
 }
 
-/* ── Нижняя полоса ───────────────────────────────────────────────────── */
+/* Нижняя полоса */
 .dock {
   flex: none;
   display: flex;
@@ -128,31 +128,31 @@
 
 /* Полоса всегда в одну строку. Длинное сообщение («VPK создан: путь…»)
    раньше отрывало квадратик на свою строку и ломало «Собрать VPK» надвое:
-   теперь первым режется путь к игре, потом сводка, потом само сообщение. */
+   теперь первым режется путь к игре, потом сводка, потом само сообщение */
 .dock__summary { min-width: 0; }
 .dock__state { display: flex; align-items: baseline; min-width: 0; white-space: nowrap; }
 .dock__state::before { flex: none; align-self: center; }
 .dock__state > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-/* Сжатие делится пропорционально; огромные множители дают почти очередь:
-   путь к игре (до начала строки), за ним сводка, сообщение последним. */
+/* Сжатие делится пропорционально, огромные множители дают почти очередь:
+   путь к игре (до начала строки), за ним сводка, сообщение последним */
 #docksum { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex-shrink: 100; }
 .dock__more { flex: none; }
 .dock__tf2 { min-width: 96px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex-shrink: 10000; }
 .dock > .btn--primary { flex: none; white-space: nowrap; }
 /* Пока идёт сборка и пока виден её итог, полоса занята только ими: сводка
-   параметров и путь к игре вернутся вместе с обычной полосой (layout.js). */
+   параметров и путь к игре вернутся вместе с обычной полосой (layout.js) */
 [data-dock="focus"] #docksum,
 [data-dock="focus"] .dock__more,
 [data-dock="focus"] .dock__tf2 { display: none; }
 [data-dock="focus"] .dock__summary { margin-right: auto; }
-/* Смена главной кнопки (сборка, «Остановить», «Открыть папку») — мягким
-   проявлением, а не скачком. Без анимаций --dur-panel ноль. */
+/* Смена главной кнопки (сборка, «Остановить», «Открыть папку») - мягким
+   проявлением, а не скачком. Без анимаций --dur-panel ноль */
 .dock > .btn--primary:not([hidden]) { animation: dock-btn-in var(--dur-panel) ease-out; }
 @keyframes dock-btn-in { from { opacity: 0; transform: translateY(3px); } }
 
-/* ── Сборка в полосе (buildfx.js) ─────────────────────────────────────────
+/* Сборка в полосе (buildfx.js)
    Линия по верхнему краю полосы, счётчик на месте сводки, кнопка
-   «Остановить» с заливкой или кольцом. Тот же набор — у примера в настройках. */
+   «Остановить» с заливкой или кольцом. Тот же набор - у примера в настройках */
 .dock { position: relative; }
 :root { --bfx-error: #b8383b; }
 [data-theme="dark"] { --bfx-error: #e06c6c; }
@@ -179,10 +179,10 @@
   transition: left .45s cubic-bezier(.3, 0, .2, 1);
 }
 .bfx__ants line { stroke: var(--accent); stroke-width: 2; stroke-dasharray: 8 6; }
-/* Искры, луч, конфетти: поверх соседей, мимо мыши. */
+/* Искры, луч, конфетти: поверх соседей, мимо мыши */
 .bfx__over { position: absolute; z-index: 30; pointer-events: none; }
-/* Текст этапа: старая и новая строка в одной клетке — смена строкой
-   вверх или вбок уезжает внутри неё. */
+/* Текст этапа: старая и новая строка в одной клетке - смена строкой
+   вверх или вбок уезжает внутри неё */
 .bfx__text { display: inline-grid; grid-template-columns: minmax(0, 1fr); overflow: hidden; vertical-align: bottom; }
 .bfx__text > span { grid-area: 1 / 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .bfx__ch { display: inline-block; white-space: pre; }
@@ -204,7 +204,7 @@
   width: 0;
   background: var(--accent);
   opacity: .25;
-  /* Через --dur-panel: без анимаций интерфейса он ноль, и заливка встаёт сразу. */
+  /* Через --dur-panel: без анимаций интерфейса он ноль, и заливка встаёт сразу */
   transition: width calc(var(--dur-panel) * 2) cubic-bezier(.3, 0, .2, 1);
 }
 .bfx__ring { position: relative; width: 12px; height: 12px; margin-right: 8px; vertical-align: -2px; }
@@ -216,7 +216,7 @@
   transition: stroke-dashoffset calc(var(--dur-panel) * 2);
 }
 
-/* Пример в настройках: та же полоса в миниатюре. */
+/* Пример в настройках: та же полоса в миниатюре */
 .fxprev {
   position: relative;
   display: flex;
@@ -245,24 +245,24 @@
 }
 .cfg__fxacts { display: flex; gap: 22px; margin-bottom: 14px; }
 
-/* ── Узкое окно ──────────────────────────────────────────────────────────
+/* Узкое окно
    Прибитые панели съедают ширину, которой и так нет: каталог, две половины
    работы и параметры в одну строку не встают. Ниже порога режим принудительно
-   переключается в плавающий (см. app.js) — поэтому здесь остаётся только
-   разложить две половины работы друг под друга. */
+   переключается в плавающий (см. app.js) - поэтому здесь остаётся только
+   разложить две половины работы друг под друга */
 @media (max-width: 1100px) {
   .work { grid-template-columns: minmax(0, 1fr); grid-auto-rows: minmax(180px, 1fr); }
   [data-panels="float"] .build__grid,
   /* Особые флаги тоже складываются: пять колонок в узком окне это пять
-     обрезанных подписей. */
+     обрезанных подписей */
   [data-advflags="1"][data-panels="float"] .build__grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 
-/* ── Баннер правки текстуры ──────────────────────────────────────────────
+/* Баннер правки текстуры
    Панель сборки в этот момент показывает настройки ОДНОГО материала, а не
-   общие. Об этом надо сказать явно, иначе легко принять одно за другое. */
+   общие. Об этом надо сказать явно, иначе легко принять одно за другое */
 .editbar {
   display: flex;
   align-items: baseline;
@@ -280,9 +280,9 @@
 .editbar__acts { display: flex; gap: 16px; }
 
 
-/* ── Консоль ─────────────────────────────────────────────────────────────
+/* Консоль
    Поток событий от Python и вызовов к нему. Панель поверх правого края:
-   раздвигать ради неё рабочую область не стоит, смотрят в неё редко. */
+   раздвигать ради неё рабочую область не стоит, смотрят в неё редко */
 .console {
   position: fixed;
   top: 46px;
@@ -296,9 +296,9 @@
   background: var(--surface);
 }
 .console[hidden] { display: none; }
-/* Ширину тянут за левый край, она живёт в --cw (см. log.js). */
+/* Ширину тянут за левый край, она живёт в --cw (см. log.js) */
 .console { width: var(--cw, min(460px, 46vw)); }
-/* «Во всё окно»: читать длинный трейсбек в колонке 460 px невозможно. */
+/* «Во всё окно»: читать длинный трейсбек в колонке 460 px невозможно */
 .console[data-wide="1"] { width: 100%; left: 0; }
 
 .console__grip {
@@ -329,7 +329,7 @@
 }
 
 /* Разрыв в нумерации: записи вытеснены, пока журнал не читали. Молчать про
-   это нельзя — иначе кажется, что в тот момент ничего не происходило. */
+   это нельзя - иначе кажется, что в тот момент ничего не происходило */
 .console__note {
   flex: none;
   padding: 6px var(--gap);
@@ -361,14 +361,14 @@
 
 .logline { display: flex; gap: 10px; color: var(--ink-soft); }
 .logline__time { flex: none; color: var(--ink-mute); }
-/* Направление обмена важнее уровня: сразу видно, кто кого позвал. */
+/* Направление обмена важнее уровня: сразу видно, кто кого позвал */
 .logline__dir { flex: none; width: 2.2em; color: var(--ink-mute); }
 .logline--in  .logline__dir { color: var(--accent); }
 .logline--err { color: var(--accent); }
 .logline__text { min-width: 0; overflow-wrap: anywhere; white-space: pre-wrap; }
-/* Источник записи (модуль Python). У строк обмена его нет. */
+/* Источник записи (модуль Python). У строк обмена его нет */
 .logline__src { flex: none; color: var(--ink-mute); }
-/* Уровень виден цветом, а не значком: значки в моноширинном списке шумят. */
+/* Уровень виден цветом, а не значком: значки в моноширинном списке шумят */
 .logline--warning .logline__text { color: var(--ink); }
 .logline--error .logline__text,
 .logline--critical .logline__text { color: var(--accent); }

@@ -1,18 +1,17 @@
 """
 Текстуры чужого мода: какая основная, а какая служебная, и какие карты
-материала уже стоят в его VMT.
+материала уже стоят в его VMT
 
 Одно правило на все места (карточки мода, сборка мода, обложка в
-библиотеке). Раньше было два списка слов, искавших подстроку где угодно в
-пути: «mask» прятал основную текстуру маски шпиона, а наши же карты из
-сборки (`_exp`, `_illum`, `_envmask`) карточками, наоборот, показывались.
+библиотеке). Поиск подстроки где угодно в пути не годится: «mask» спрятал бы
+основную текстуру маски шпиона
 
 Порядок доверия:
-  1. VMT мода: на что ссылается `$basetexture` — основная; на что ссылаются
-     прочие параметры ($bumpmap, $detail, $lightwarptexture…) — служебная.
+  1. VMT мода: на что ссылается `$basetexture` - основная, на что ссылаются
+     прочие параметры ($bumpmap, $detail, $lightwarptexture…) - служебная.
      Так текстуру находит сама игра.
-  2. Имя файла — только если VMT про неё молчит: суффикс стебля, а не
-     подстрока в пути.
+  2. Имя файла - только если VMT про неё молчит: суффикс стебля, а не
+     подстрока в пути
 """
 
 from __future__ import annotations
@@ -22,11 +21,11 @@ from typing import Dict, Iterable, Optional, Set
 
 from src.services import vmt_parse
 
-#: Параметры VMT, которые указывают на ОСНОВНУЮ текстуру.
+#: Параметры VMT, которые указывают на ОСНОВНУЮ текстуру
 _BASE_PARAMS = frozenset({'basetexture', 'basetexture2'})
 
 #: Окончания стебля служебных текстур: и Valve, и авторов модов, и наших
-#: карт (суффиксы MATERIAL_MAPS — `_exp`, `_illum`, `_envmask`…).
+#: карт (суффиксы MATERIAL_MAPS - `_exp`, `_illum`, `_envmask`…)
 _SERVICE_SUFFIXES = (
     '_normal', '_normals', '_nrm', '_bump', '_bumpmap', '_ssbump',
     '_exp', '_exponent', '_phongexp', '_phong',
@@ -35,13 +34,13 @@ _SERVICE_SUFFIXES = (
     '_detail', '_mask', '_masks', '_sheen', '_sheenmask',
     '_lightwarp', '_phongwarp',
 )
-#: Слова, которых в имени основной текстуры не бывает вовсе.
+#: Слова, которых в имени основной текстуры не бывает вовсе
 _SERVICE_WORDS = ('lightwarp', 'phongwarp', 'cubemap', 'normalmap', 'sheenmap')
 
 
 def texture_key(path: str) -> str:
     """Путь текстуры так, как его пишет VMT: от materials/, без .vtf,
-    прямые слэши, нижний регистр."""
+    прямые слэши, нижний регистр"""
     key = str(path or '').replace('\\', '/').strip().strip('/').lower()
     if key.startswith('materials/'):
         key = key[len('materials/'):]
@@ -49,7 +48,7 @@ def texture_key(path: str) -> str:
 
 
 def is_service_name(vtf_path: str) -> bool:
-    """Служебная ли текстура по одному имени (когда VMT о ней молчит)."""
+    """Служебная ли текстура по одному имени (когда VMT о ней молчит)"""
     stem = os.path.splitext(os.path.basename(str(vtf_path)))[0].lower()
     if stem.endswith('_blue'):
         stem = stem[:-len('_blue')]
@@ -58,7 +57,7 @@ def is_service_name(vtf_path: str) -> bool:
 
 
 def vmt_references(vmt_texts: Iterable[str]) -> Dict[str, Set[str]]:
-    """{'base': ключи основных текстур, 'service': ключи служебных} по VMT мода."""
+    """{'base': ключи основных текстур, 'service': ключи служебных} по VMT мода"""
     base: Set[str] = set()
     service: Set[str] = set()
     for text in vmt_texts:
@@ -67,7 +66,7 @@ def vmt_references(vmt_texts: Iterable[str]) -> Dict[str, Set[str]]:
             if not isinstance(value, str) or not value.strip():
                 continue
             key = texture_key(value)
-            # Числа, векторы и «env_cubemap» путями не бывают.
+            # Числа, векторы и «env_cubemap» путями не бывают
             if '/' not in key:
                 continue
             (base if name in _BASE_PARAMS else service).add(key)
@@ -77,9 +76,9 @@ def vmt_references(vmt_texts: Iterable[str]) -> Dict[str, Set[str]]:
 def all_references(vmt_texts: Iterable[str]) -> Set[str]:
     """Каждое строковое значение VMT во всём дереве (блоки качества, прокси),
     приведённое к ключу текстуры. Для решения «можно ли удалить VTF»: тут
-    лишнее безопасно (файл останется), а пропуск — нет (материал станет
+    лишнее безопасно (файл останется), а пропуск - нет (материал станет
     фиолетовым). Поэтому без фильтра по «/»: текстура бывает и в корне
-    materials."""
+    materials"""
     found: Set[str] = set()
 
     def walk(node) -> None:
@@ -96,9 +95,9 @@ def all_references(vmt_texts: Iterable[str]) -> Set[str]:
 
 
 def is_base_vtf(vtf_path: str, refs: Optional[Dict[str, Set[str]]] = None) -> bool:
-    """Основная ли это текстура мода.
+    """Основная ли это текстура мода
 
-    `refs` — результат `vmt_references`; без него решает только имя.
+    `refs` - результат `vmt_references`; без него решает только имя
     """
     if refs:
         key = texture_key(vtf_path)

@@ -1,15 +1,15 @@
 /*
- * Конструктор узора блеска Killstreak.
+ * Конструктор узора блеска Killstreak
  *
  * Узор - слои (полоса, вспышка, искры, дымка, картинка), у каждого свой
  * цвет и свой отрезок времени внутри прохода. Кадры считает Python
- * (sheen_builder.py) - те же, что уйдут в мод; здесь поля и проигрыватель.
+ * (sheen_builder.py) - те же, что уйдут в мод, здесь поля и проигрыватель
  *
  * Окно - карточки: «Превью» и «Проход» слева, «Слои» и «Свойства слоя»
  * справа, «Время прохода» внизу на всю ширину. Каждая карточка - свой модуль
- * (sheen-player, sheen-layers, sheen-props, sheen-timeline); состояние узора
+ * (sheen-player, sheen-layers, sheen-props, sheen-timeline), состояние узора
  * и история правок - SheenPattern (sheen-pattern.js). Здесь шапка, «Проход»,
- * раскладка, клавиши и сохранение.
+ * раскладка, клавиши и сохранение
  *
  * Превью - плоская плитка в пропорциях показанного оружия: маска ложится на
  * оружие плоско, как трафарет сбоку, и растягивается на его габариты
@@ -31,7 +31,7 @@ import { createTimeline } from './sheen-timeline.js';
 const dlg = document.getElementById('sheenb');
 
 //: Текстовое поле в фокусе: там свои Ctrl+Z и пробел. Ползунок, галка и
-//: палитра - не поле: после них отмена и пробел должны работать.
+//: палитра - не поле: после них отмена и пробел должны работать
 const typing = (e) => e.target.tagName === 'TEXTAREA' || e.target.tagName === 'SELECT'
   || (e.target.tagName === 'INPUT' && /^(text|number|search)$/.test(e.target.type));
 
@@ -62,7 +62,7 @@ export async function openSheenBuilder({ patternId = '', length = 2.5 } = {}) {
     dlg.replaceChildren(body);
     let alive = true;          // этот показ окна: после закрытия всё молчит
 
-    /** Любая правка слоёв: перерисовать что нужно, пересчитать кадры. */
+    /** Любая правка слоёв: перерисовать что нужно, пересчитать кадры */
     const changed = ({ list = false, params = false, time = true } = {}) => {
       if (list) layers.render();
       else if (params) props.render();
@@ -81,7 +81,7 @@ export async function openSheenBuilder({ patternId = '', length = 2.5 } = {}) {
       player.refresh();
     };
 
-    // ── Карточки ──────────────────────────────────────────────────────
+    // Карточки
     const player = createPlayer(state, {
       onDropImage: async (file) => {
         if (state.full) return;
@@ -102,7 +102,7 @@ export async function openSheenBuilder({ patternId = '', length = 2.5 } = {}) {
       onSelect: select, onChanged: () => changed({ list: true }), onSeek: (f) => player.seek(f),
     });
 
-    // ── Шапка ─────────────────────────────────────────────────────────
+    // Шапка
     const head = el('div', 'sheenb__top');
     const name = el('input', 'input sheenb__name');
     name.value = state.name;
@@ -118,12 +118,12 @@ export async function openSheenBuilder({ patternId = '', length = 2.5 } = {}) {
     head.append(el('p', 'label sheenb__title', t('Конструктор блеска')), name, undo, redo,
       layers.presetsBtn);
 
-    // ── Карточка «Проход» ─────────────────────────────────────────────
+    // Карточка «Проход»
     const pass = card(t('Проход'));
-    // Качество - высота маски (64/128/256), ширина - по пропорции оружия.
+    // Качество - высота маски (64/128/256), ширина - по пропорции оружия
     const sizeOut = el('span', 'mono sheenb__val');
     // Размер и вес маски - формулой, как sheen_builder.mask_shape и
-    // sheen_patterns.frames_for: сразу при нажатии, без ожидания кадров.
+    // sheen_patterns.frames_for: сразу при нажатии, без ожидания кадров
     const showSize = () => {
       const h = schema.quality[state.quality] || 128;
       const aspect = player.sheet?.aspect || schema.default_aspect;
@@ -186,7 +186,7 @@ export async function openSheenBuilder({ patternId = '', length = 2.5 } = {}) {
       prow(t('Серия убийств'), t('Как в игре: чем больше убийств подряд, тем короче пауза между проходами.'),
         streakSeg, pauseOut));
 
-    // ── Раскладка и низ ──────────────────────────────────────────────
+    // Раскладка и низ
     const leftCol = el('div', 'sheenb__col');
     leftCol.append(player.box, pass.box);
     const rightCol = el('div', 'sheenb__col sheenb__col--right');
@@ -204,7 +204,7 @@ export async function openSheenBuilder({ patternId = '', length = 2.5 } = {}) {
     acts.append(del, copy, cancel, save);
     body.append(head, main, timeline.box, acts);
 
-    // ── Клавиши: пробел, Delete, Ctrl+Z/Y ─────────────────────────────
+    // Клавиши: пробел, Delete, Ctrl+Z/Y
     const onKey = (e) => {
       if (!alive) return;
       const mod = e.ctrlKey || e.metaKey;
@@ -226,7 +226,7 @@ export async function openSheenBuilder({ patternId = '', length = 2.5 } = {}) {
     };
     dlg.addEventListener('keydown', onKey);
 
-    // ── Закрытие ───────────────────────────────────────────────────────
+    // Закрытие
     let saving = false;
     const finish = (value) => {
       alive = false;
@@ -238,7 +238,7 @@ export async function openSheenBuilder({ patternId = '', length = 2.5 } = {}) {
       resolve(value);
     };
     cancel.addEventListener('click', () => finish(null));
-    // Esc - как «Отмена» (своим обработчиком: прошлые показы не копятся).
+    // Esc - как «Отмена» (своим обработчиком: прошлые показы не копятся)
     dlg.oncancel = (e) => { e.preventDefault(); if (!saving) finish(null); };
     const doSave = async (asCopy) => {
       save.disabled = true;

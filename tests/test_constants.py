@@ -16,7 +16,7 @@ class ConstantsTests(unittest.TestCase):
             self.assertEqual(result, tool_file.resolve())
 
     def test_tool_paths_missing_no_tf2(self):
-        # Бандл отсутствует И путь к TF2 не задан → возвращаем бандл-путь как есть.
+        # Бандл отсутствует И путь к TF2 не задан -> возвращаем бандл-путь как есть
         missing = Path("tools/missing.exe")
         with patch.object(ToolPaths, "VPK_TOOL", missing):
             with patch("src.config.app_config.AppConfig.get_tf2_game_folder", return_value=""):
@@ -24,7 +24,7 @@ class ConstantsTests(unittest.TestCase):
         self.assertEqual(result, missing)
 
     def test_tool_paths_vpk_falls_back_to_tf2_bin(self):
-        # Бандл отсутствует, но у пользователя установлена TF2 → берём bin/vpk.exe.
+        # Бандл отсутствует, но у пользователя установлена TF2 -> берём bin/vpk.exe
         with tempfile.TemporaryDirectory() as tmp:
             tf2_root = Path(tmp)
             bin_dir = tf2_root / "bin"

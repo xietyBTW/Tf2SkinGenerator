@@ -1,4 +1,4 @@
-"""Тесты чистой логики выбора 2D-карточек материалов."""
+"""Тесты чистой логики выбора 2D-карточек материалов"""
 
 import unittest
 
@@ -13,7 +13,7 @@ class EditableMaterialCardsTests(unittest.TestCase):
         names = [s.name for s in specs]
         self.assertIn("c_scattergun", names)
         self.assertIn("c_scattergun_shell", names)
-        self.assertNotIn("eyeball_l", names)   # служебный — отброшен
+        self.assertNotIn("eyeball_l", names)   # служебный - отброшен
 
     def test_name_equals_display(self):
         specs = editable_material_cards(["c_rocketlauncher"])
@@ -24,7 +24,7 @@ class EditableMaterialCardsTests(unittest.TestCase):
         self.assertEqual([s.name for s in specs], ["a", "b", "c"])
 
     def test_all_service_falls_back_to_all(self):
-        # Вся модель «служебная» → не оставляем пусто, показываем всё.
+        # Вся модель «служебная» -> не оставляем пусто, показываем всё
         specs = editable_material_cards(["eyeball_l", "eyeball_r"])
         self.assertEqual([s.name for s in specs], ["eyeball_l", "eyeball_r"])
 

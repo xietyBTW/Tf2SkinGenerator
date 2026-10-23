@@ -1,10 +1,10 @@
 """
-План материалов сборки модели: что и под какими именами строить.
+План материалов сборки модели: что и под какими именами строить
 
 Разбор $texturegroup, сужение до текстур рук, изоляция плеч вьюмодели,
 промоушен нейтральных материалов в командные, «сделать командным»,
 подавление игровой группы для своей модели. Все функции МУТИРУЮТ QC
-(и SMD при изоляции плеч) до компиляции - VPKService только зовёт их.
+(и SMD при изоляции плеч) до компиляции - VPKService только зовёт их
 """
 
 import os
@@ -25,7 +25,7 @@ logger = get_logger(__name__)
 class MaterialPlan:
     """План материалов сборки: что и под какими именами строить (результат
     анализа $texturegroup + изоляции плеч + подавления для кастомных моделей).
-    QC к этому моменту уже пропатчен/синхронизирован (side effect plan_materials)."""
+    QC к этому моменту уже пропатчен/синхронизирован (side effect plan_materials)"""
     tg_structure: dict
     blu_row: list
     extra_materials: list
@@ -50,12 +50,12 @@ def apply_shoulder_isolation(
     Изоляция плеч/тела вьюмодели рук + команд-промоушен нейтральных
     материалов. Переименовывает общий с миром материал плеч в vm_* в
     $texturegroup и в самих SMD (reference + bodygroup) ДО компиляции,
-    плюс синтезирует командные варианты. Только для режимов рук.
+    плюс синтезирует командные варианты. Только для режимов рук
 
     Returns:
-        (shoulder_iso, image_path) — список [(new_name, orig_name,
+        (shoulder_iso, image_path) - список [(new_name, orig_name,
         source_path|None)] для записи материалов ниже и (возможно
-        перенаправленный) image_path главной текстуры.
+        перенаправленный) image_path главной текстуры
     """
     if mode not in HAND_MODE_KEYS:
         return [], image_path
@@ -78,8 +78,8 @@ def apply_shoulder_isolation(
     _rename_in_qc_and_smds(qc_path, weapon_key, ref_smd, tg_structure, promo, rename, shoulders)
 
     shoulder_iso = [(rename[s], s, srcs[s]) for s in shoulders]
-    # Синие плечи: источник — пользовательская BLU-картинка
-    # (если плечи были главной) либо оригинал {orig_blue} из игры.
+    # Синие плечи: источник - пользовательская BLU-картинка
+    # (если плечи были главной) либо оригинал {orig_blue} из игры
     blue_main_src = (
         blu_image_path
         if (blu_image_path and blu_image_path != EXTRA_TEX_USE_GAME_ORIGINAL
@@ -90,28 +90,28 @@ def apply_shoulder_isolation(
         shoulder_iso.append((vm_blue, orig_blue, blue_main_src if is_main else None))
     if blue_iso:
         logger.info(f"[SHOULDER ISO] синие плечи: {[b[0] for b in blue_iso]}")
-    # Командные варианты нейтральных (из «+») — пишем их VTF/VMT.
+    # Командные варианты нейтральных (из «+») - пишем их VTF/VMT
     shoulder_iso.extend(variant_entries)
     if variant_entries:
         logger.info(f"[TEAM PROMO] варианты записаны: {[v[0] for v in variant_entries]}")
     logger.info(f"[SHOULDER ISO] переименованы плечи: {rename}")
-    # Если текстура плеч пришла как image_path (главная) —
-    # НЕ даём записать её на руку: главная уйдёт на оригинал.
+    # Если текстура плеч пришла как image_path (главная) -
+    # НЕ даём записать её на руку: главная уйдёт на оригинал
     if any(p is not None and p == image_path for p in srcs.values()):
         image_path = EXTRA_TEX_USE_GAME_ORIGINAL
-        logger.info("[SHOULDER ISO] главная текстура (плечи) перенаправлена в vm_*; руке — оригинал")
+        logger.info("[SHOULDER ISO] главная текстура (плечи) перенаправлена в vm_*; руке - оригинал")
     return shoulder_iso, image_path
 
 
 def _shoulder_candidates(ctx, mode, qc_path, weapon_key, tg_structure):
     """(reference-SMD, плечи): редактируемые материалы меша рук, которых нет
-    среди текстур самих рук."""
+    среди текстур самих рук"""
     from src.data.player_hands import get_hand_textures
     from src.services.qc_skin_parser import detect_shoulder_materials
     from src.data.material_filter import is_editable_material
     whitelist = [n for _, n in get_hand_textures(mode)]
     # Материалы РЕАЛЬНОГО меша (из reference SMD), а не полная
-    # skin-таблица red_row (там варианты/ганслингер/blue).
+    # skin-таблица red_row (там варианты/ганслингер/blue)
     ref_smd = VpkModelPipeline._find_decompiled_reference_smd(
         qc_path, weapon_key, ctx.decompile_dir
     )
@@ -124,8 +124,8 @@ def _shoulder_candidates(ctx, mode, qc_path, weapon_key, tg_structure):
 
 def _shoulder_source(s, panel_extra, orig_main, image_path):
     """Источник текстуры плеча: карточка из panel_extra ИЛИ image_path (если
-    плечи были col0/«главной» — тогда их текстура ушла в from_path и была
-    выкинута из panel_extra)."""
+    плечи были col0/«главной» - тогда их текстура ушла в from_path и была
+    выкинута из panel_extra)"""
     v = panel_extra.get(s)
     if not v:
         sl = s.lower()
@@ -142,9 +142,9 @@ def _shoulder_source(s, panel_extra, orig_main, image_path):
 def _team_promotions(qc_path, panel_blu_textures, shoulders):
     """
     Промоушен: НЕЙТРАЛЬНЫЙ материал (нет своего blue-варианта в blu_row) с
-    загруженной СИНЕЙ текстурой → делаем командным. Уже-командные
-    (medic_hands_red→medic_hands_blue в blu_row) и плечи — НЕ трогаем (их
-    ведёт нативный BLU-блок / изоляция).
+    загруженной СИНЕЙ текстурой -> делаем командным. Уже-командные
+    (medic_hands_red->medic_hands_blue в blu_row) и плечи - НЕ трогаем (их
+    ведёт нативный BLU-блок / изоляция)
 
     Returns:
         ({mat_lower: variant_name}, [(variant, orig_mat, src_path)])
@@ -170,10 +170,10 @@ def _team_promotions(qc_path, panel_blu_textures, shoulders):
 
 def _blue_shoulders(shoulders, tg_structure, rename, orig_main):
     """
-    Синяя команда: BLU-вариант плеча по соглашению имён (engineer_red →
-    engineer_blue); фолбэк — та же колонка blu-строки texturegroup. Тоже
+    Синяя команда: BLU-вариант плеча по соглашению имён (engineer_red ->
+    engineer_blue), фолбэк - та же колонка blu-строки texturegroup. Тоже
     изолируем (vm_engineer_blue), иначе синий игрок увидит оригинал/фиолет.
-    Дописывает переименования в rename.
+    Дописывает переименования в rename
 
     Returns:
         [(vm_blue, orig_blue, плечи_были_главной)]
@@ -200,8 +200,8 @@ def _blue_shoulders(shoulders, tg_structure, rename, orig_main):
 
 
 def _rename_in_qc_and_smds(qc_path, weapon_key, ref_smd, tg_structure, promo, rename, shoulders):
-    """Промоушен нейтральных в командные (синие строки → варианты), затем
-    переименование плеч на vm_* - в $texturegroup и в самих SMD."""
+    """Промоушен нейтральных в командные (синие строки -> варианты), затем
+    переименование плеч на vm_* - в $texturegroup и в самих SMD"""
     rows = (ModelBuildService._parse_texturegroup_rows(qc_path)
             or [tg_structure.get('red_row', [])])
     if promo:
@@ -213,7 +213,7 @@ def _rename_in_qc_and_smds(qc_path, weapon_key, ref_smd, tg_structure, promo, re
     # ГЛАВНОЕ: studiomdl берёт имя материала skin 0 из SMD,
     # поэтому переименовываем материал в самих SMD (reference
     # + bodygroup), иначе модель ссылается на старое имя и
-    # текстура становится фиолетовой.
+    # текстура становится фиолетовой
     smds = [ref_smd] if ref_smd else []
     try:
         smds += ModelBuildService.extract_extra_body_smds(qc_path, weapon_key) or []
@@ -234,27 +234,32 @@ def apply_force_team(force_team, mode, qc_path, weapon_key, ctx) -> None:
     «Сделать командным»: для оружия БЕЗ нативной команды делает синей BLU-строку
     каждой пары скинов $texturegroup ({material}_blue по материалам
     reference-SMD), чтобы дальше весь командный путь отработал как у
-    нативно-командного. Остальные строки (австралий, ботокиллеры) остаются —
-    раньше группа заменялась двумя строками, и золото пропадало. Мутирует QC.
+    нативно-командного. Остальные строки (австралий, ботокиллеры) остаются:
+    замена всей группы двумя строками потеряла бы золото. Мутирует QC
     """
     if force_team and mode not in HAND_MODE_KEYS:
         try:
             from src.services import qc_skin_parser as _qsp
             if ModelBuildService.extract_skin_info(qc_path).get('is_team'):
-                logger.info("[FORCE TEAM] оружие уже командное — пропуск")
+                logger.info("[FORCE TEAM] оружие уже командное - пропуск")
                 return
-            from src.services.smd_service import SMDService as _SMDft
+            from src.services import smd_service
+            from src.data.item_kinds import kind_of
             from src.data.material_filter import is_editable_material as _ed
-            _ref = _SMDft.find_reference_smd(str(ctx.decompile_dir), weapon_key)
-            _mesh = _SMDft.ordered_unique_materials(_ref) if _ref else []
+            # У шапок и персонажей командность в игре ещё не проверена:
+            # без меша строки не дописываются, QC остаётся как был
+            _kind = kind_of(mode)
+            _ref = (None if _kind.is_hat or _kind.is_character or _kind.is_spy_mask
+                    else smd_service.find_reference_smd(str(ctx.decompile_dir), weapon_key))
+            _mesh = SMDService.ordered_unique_materials(_ref) if _ref else []
             _rows = _qsp.parse_texturegroup_rows(qc_path)
             _new = _qsp.force_team_rows(_rows, [m for m in _mesh if _ed(m)])
             if _new is None:
-                why = ("вторая строка скинов — стиль, а не пара команды"
+                why = ("вторая строка скинов - стиль, а не пара команды"
                        if not _qsp.team_pairs_free(_rows)
                        else f"нет материалов меша для команды (меш={_mesh})")
                 logger.warning(f"[FORCE TEAM] команду не дописать: {why} "
-                               f"(строки={_rows}) — пропуск")
+                               f"(строки={_rows}) - пропуск")
                 return
             ModelBuildService.replace_texturegroup_in_qc(
                 qc_path, ModelBuildService.generate_renamed_texturegroup(_new, {}))
@@ -274,18 +279,18 @@ def plan_materials(
     доп. материалы, служебные/ЧС (пишутся оригиналом), фильтр для рук, изоляция
     плеч, подавление игровой группы для кастомных моделей. Финализирует QC
     (patch_qc_file, инъекция/удаление $texturegroup, пользовательский QC-текст).
-    Мутирует файл qc_path. Возвращает MaterialPlan со всеми выходными именами.
+    Мутирует файл qc_path. Возвращает MaterialPlan со всеми выходными именами
     """
     tg_structure = ModelBuildService.extract_texturegroup_structure(qc_path)
     blu_row = tg_structure.get('blu_row', [])
     extra_materials = tg_structure.get('extra_materials', [])
     # Настоящая ли команда вторая строка (c_xxx_blue), а не вариант
-    # (австралий/gold/festive). У вариант-онли оружия команды нет —
-    # значит {texture}_blue не нужен.
+    # (австралий/gold/festive). У вариант-онли оружия команды нет -
+    # значит {texture}_blue не нужен
     blu_is_team = bool(tg_structure.get('blu_is_team', False))
 
-    # Оружие с одной общей текстурой (напр. часы шпиона) — BLU не нужен.
-    # Иначе в мод попадёт лишняя _blue текстура.
+    # Оружие с одной общей текстурой (напр. часы шпиона) - BLU не нужен.
+    # Иначе в мод попадёт лишняя _blue текстура
     from src.data.weapon_quirks import NO_BLU_WEAPON_KEYS
     if weapon_key in NO_BLU_WEAPON_KEYS:
         if blu_row:
@@ -300,47 +305,47 @@ def plan_materials(
         texture_filename, extra_materials, blu_row = _restrict_to_own(
             weapon_key, texture_filename, extra_materials, blu_row, tg_structure)
 
-    # ── Изоляция плеч вьюмодели (опционально) ────────────────────
+    # Изоляция плеч вьюмодели (опционально)
     # Материал плеч/тела arms-модели общий с мировым персонажем.
-    # Переименовываем его на уникальный (engineer_red → vm_engineer_red)
+    # Переименовываем его на уникальный (engineer_red -> vm_engineer_red)
     # в $texturegroup ДО компиляции: перекомпилированная модель станет
     # ссылаться на новый материал, а мир останется на старом. Позже
-    # запишем переименованный материал отдельным блоком.
+    # запишем переименованный материал отдельным блоком
     shoulder_iso, image_path = apply_shoulder_isolation(
         ctx, mode, qc_path, weapon_key, tg_structure,
         orig_main_pre_restrict, image_path, blu_image_path,
         panel_extra_textures, panel_blu_textures, isolate_shoulders,
     )
 
-    # Делаем ПОСЛЕ hands-блока, т.к. он переназначает extra_materials/blu_row.
+    # Делаем ПОСЛЕ hands-блока, т.к. он переназначает extra_materials/blu_row
     extra_materials, blacklisted_extra = _split_asked_and_silent(
         tg_structure, extra_materials, texture_filename, misc_materials)
     # Чужие материалы модели (руки шпиона во вьюмодели часов) - ни карточкой,
-    # ни «оригиналом»: игра и так берёт их из своих файлов.
+    # ни «оригиналом»: игра и так берёт их из своих файлов
     from src.data.weapon_quirks import is_own_material
     blacklisted_extra = [m for m in blacklisted_extra if is_own_material(weapon_key, m)]
-    # blu_row НЕ фильтруем удалением — он индексируется по колонкам
+    # blu_row НЕ фильтруем удалением - он индексируется по колонкам
     # вместе с red_row. Служебные blu-материалы пропускаются ВНУТРИ
-    # цикла (по col_idx), чтобы не сместить выравнивание.
+    # цикла (по col_idx), чтобы не сместить выравнивание
 
-    # ── Стили (skinfamilies) кастомной модели ──────────────────
+    # Стили (skinfamilies) кастомной модели
     # Если пользователь определил доп-стили, ИГРОВОЙ $texturegroup
     # неприменим: его имена (c_sd_cleaver_bloody, _blue …) относятся
     # к игровой модели, а не к мешу пользователя. Подавляем
-    # производные из него BLU/extra-материалы и команду — мы
+    # производные из него BLU/extra-материалы и команду - мы
     # сгенерируем свою группу и варианты ниже. Меш-материалы базы
     # приходят отдельно через panel_extra_textures.
     # Для рук $texturegroup уже сгенерирован выше (изоляция плеч +
     # промоушен): vm_* для плеч + _blu варианты в синих строках.
-    # Старый «кастомный» SKIN BUILD путь его перезатёр бы — отключаем.
+    # Старый «кастомный» SKIN BUILD путь его перезатёр бы - отключаем
     has_skins = (bool(skin_build_data and skin_build_data.get('tg_overrides'))
                  and mode not in HAND_MODE_KEYS)
     # Для «готовой» кастомной модели (keep_materials) ИГРОВОЙ
-    # $texturegroup неприменим ВСЕГДА — у меша свои материалы
+    # $texturegroup неприменим ВСЕГДА - у меша свои материалы
     # (c_sd_cleaver/mouth/lefteye…), а игровые имена (c_scattergun,
     # c_scattergun_gold) к нему отношения не имеют. Иначе сборка
     # начнёт спрашивать текстуры для игровых слотов, которых нет
-    # в карточках. Базовые меш-материалы идут через panel_extra_textures.
+    # в карточках. Базовые меш-материалы идут через panel_extra_textures
     if has_skins or replace_keep_materials:
         logger.info(
             "[SKIN BUILD] кастомная модель → подавляем игровой "
@@ -348,7 +353,7 @@ def plan_materials(
         )
         blu_row = []
         extra_materials = []
-        blacklisted_extra = []  # у кастомного меша свои материалы — не пишем
+        blacklisted_extra = []  # у кастомного меша свои материалы - не пишем
         blu_mode = 'none'   # не плодим {texture}_blue
 
     if blu_row:
@@ -357,13 +362,13 @@ def plan_materials(
         logger.info(f"Найдены дополнительные материалы модели: {extra_materials}")
 
     # Пропатчиваем QC файл: перенаправляем $cdmaterials в whitelisted-папку
-    # обхода sv_pure (console\ или vgui\replay\thumbnails\), удаляем $lod.
+    # обхода sv_pure (console\ или vgui\replay\thumbnails\), удаляем $lod
     ModelBuildService.patch_qc_file(qc_path, bypass_prefix)
 
     # Игровое имя текстуры/VMT (источник ОРИГИНАЛЬНОГО кода VMT из игры).
     # Для кастомной модели texture_filename станет именем материала SMD,
     # но оригинальный VMT тащим по игровому имени (c_sd_cleaver),
-    # затем лишь переставим $basetexture на материал модели.
+    # затем лишь переставим $basetexture на материал модели
     game_vmt_name = texture_filename
 
     if replace_keep_materials:
@@ -387,7 +392,7 @@ def _restrict_to_own(weapon_key, texture_filename, extra_materials, blu_row, tg_
     Оставляет только свои материалы модели (MODEL_MATERIAL_WHITELIST). Часы
     Крякенптиц - вьюмодель, где первым материалом стоят руки шпиона: без
     этого главной текстурой стали бы руки, и своя картинка легла бы на
-    общую текстуру рук всего оружия шпиона.
+    общую текстуру рук всего оружия шпиона
 
     Returns:
         (texture_filename, extra_materials, blu_row)
@@ -409,8 +414,8 @@ def _restrict_to_hands(mode, texture_filename, tg_structure):
     """
     Для режимов рук: фильтруем $texturegroup до актуальных текстур рук.
     QC руки инженера (c_engineer_arms) в column 0 содержит "engineer_red"
-    (текстуру ТЕЛА), а не текстуру руки — без фильтрации картинка
-    пользователя заменила бы всё тело персонажа.
+    (текстуру ТЕЛА), а не текстуру руки - без фильтрации картинка
+    пользователя заменила бы всё тело персонажа
 
     Returns:
         (texture_filename, extra_materials, blu_row)
@@ -434,19 +439,19 @@ def _split_asked_and_silent(tg_structure, extra_materials, texture_filename, mis
     """
     Спрашиваем ровно то, что человек видит карточкой: основные материалы
     геометрии и «Прочее» со страницы (убер/зомби-варианты, у которых
-    превью нашло текстуру — сами они в геометрии не встречаются, модель
+    превью нашло текстуру - сами они в геометрии не встречаются, модель
     ссылается на них из других скинов). Молча, игровым оригиналом, пишем
     остальное: пользовательский ЧС, маски шпиона (у них своя страница) и
-    служебное без карточки (глаза без $basetexture, оверлеи) — без
-    записи под console\\-cdmaterials оно фиолетовое.
+    служебное без карточки (глаза без $basetexture, оверлеи) - без
+    записи под console\\-cdmaterials оно фиолетовое
 
     Returns:
-        (extra_materials, blacklisted_extra) — спросить / записать оригиналом.
+        (extra_materials, blacklisted_extra) - спросить / записать оригиналом
     """
     from src.data.material_filter import is_editable_material, is_hidden_at_build
     from src.services.qc_skin_parser import is_australium
-    # Источник — ВЕСЬ $texturegroup (все строки/колонки), а не
-    # extra_materials: служебные варианты обычно не в геометрии.
+    # Источник - ВЕСЬ $texturegroup (все строки/колонки), а не
+    # extra_materials: служебные варианты обычно не в геометрии
     all_tg_mats: list = []
     seen_tg: set = set()
     for row in (tg_structure.get('all_rows') or []):
@@ -466,9 +471,9 @@ def _split_asked_and_silent(tg_structure, extra_materials, texture_filename, mis
             extra_materials.append(tg_names[ml])
     # Австралий (_gold) тоже пишем оригиналом, если человек его не правил:
     # у золота свой VMT (кубмапа, блеск, sheen), а производный от главного
-    # делал австралий матовым. Спрашивать о нём незачем — своя текстура
+    # делал австралий матовым. Спрашивать о нём незачем - своя текстура
     # приходит карточкой (panel-extra). Праздничные имена сюда НЕ входят:
-    # у праздничного оружия это родные материалы (см. is_australium).
+    # у праздничного оружия это родные материалы (см. is_australium)
     blacklisted_extra = [m for m in all_tg_mats
                          if m.lower() not in asked
                          and (is_hidden_at_build(m) or not is_editable_material(m)
@@ -483,8 +488,8 @@ def _align_to_smd_materials(ctx, qc_path, weapon_key, texture_filename, skin_bui
     Кастомная модель: имена ведём от ФАКТИЧЕСКИХ материалов SMD. Имена
     VTF/VMT, $texturegroup и $basetexture обязаны совпадать с материалом,
     с которым реально компилируется модель (из reference-SMD). UI-имена
-    могли разойтись с SMD (другой экспорт/регистр) → текстура не находилась
-    (фиолетовая). Картинки скинов мапим по индексу.
+    могли разойтись с SMD (другой экспорт/регистр) -> текстура не находилась
+    (фиолетовая). Картинки скинов мапим по индексу
 
     Returns:
         (texture_filename, skin_build_data)
@@ -508,9 +513,9 @@ def _align_to_smd_materials(ctx, qc_path, weapon_key, texture_filename, skin_bui
 
 
 def _write_custom_texturegroup(qc_path, has_skins, replace_keep_materials, skin_build_data) -> str:
-    """$texturegroup кастомной модели. Возвращает вписанный блок ('' - нет)."""
+    """$texturegroup кастомной модели. Возвращает вписанный блок ('' - нет)"""
     if has_skins:
-        # Свои стили: генерируем группу (имена выровнены по SMD).
+        # Свои стили: генерируем группу (имена выровнены по SMD)
         tg_block = ModelBuildService.generate_texturegroup_block(
             skin_build_data.get('mesh_materials', []),
             skin_build_data.get('tg_overrides', {}),
@@ -519,9 +524,9 @@ def _write_custom_texturegroup(qc_path, has_skins, replace_keep_materials, skin_
         logger.info(f"[SKIN BUILD] $texturegroup инъектирован в QC:\n{tg_block}")
         return tg_block
     if replace_keep_materials:
-        # Одно-скиновая кастомная модель: убираем игровую группу — её
+        # Одно-скиновая кастомная модель: убираем игровую группу - её
         # имена относятся к игровой модели, не к мешу (иначе пустые
-        # skin-строки ремапят материал в пустоту → фиолет).
+        # skin-строки ремапят материал в пустоту -> фиолет)
         ModelBuildService.replace_texturegroup_in_qc(qc_path, '')
         logger.info("[SKIN BUILD] игровой $texturegroup удалён (одно-скиновая кастомная модель)")
     return ''
@@ -531,16 +536,16 @@ def _apply_custom_qc_text(ctx, qc_path, weapon_key, custom_qc_text, tg_block) ->
     """
     Отредактированный пользователем QC: заменяем QC текстом пользователя,
     синхронизировав $texturegroup с актуальными стилями (правки человека не
-    теряются). Делается ДО извлечения cdmaterials — дальше всё читается из
-    этого QC.
+    теряются). Делается ДО извлечения cdmaterials - дальше всё читается из
+    этого QC
     """
     final_qc = ModelBuildService.replace_texturegroup_in_text(custom_qc_text, tg_block)
     with open(qc_path, 'w', encoding='utf-8') as qf:
         qf.write(final_qc)
     logger.info("[QC EDIT] QC заменён пользовательским (texturegroup синхронизирован)")
     # Описания своих костей модели писались в прежний QC
-    # (_apply_model_replacement) — правленый их стёр, и studiomdl
-    # снова свернул бы кости в родителя.
+    # (_apply_model_replacement) - правленый их стёр, и studiomdl
+    # снова свернул бы кости в родителя
     ref = VpkModelPipeline._find_decompiled_reference_smd(qc_path, weapon_key, ctx.decompile_dir)
     if ref:
         ModelBuildService.define_missing_bones(qc_path, ref)

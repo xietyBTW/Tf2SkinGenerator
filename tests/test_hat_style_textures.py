@@ -1,11 +1,10 @@
 """
-Текстуры дополнительных стилей шапки при сборке.
+Текстуры дополнительных стилей шапки при сборке
 
 Стиль, который пользователь правил, но не оставил активным, собирается
-отдельной веткой (`_build_extra_style_models`). Раньше она писала РОВНО одну
-текстуру — главный материал, — а пер-материальные и командные правки молча
-терялись: панель их запоминает, метка «изменён» горит, сборка проходит без
-ошибок, и только в игре видно, что заменена лишь часть шапки.
+отдельной веткой (`_build_extra_style_models`). Она пишет все текстуры
+стиля, а не одну главную: иначе пер-материальные и командные правки молча
+терялись бы, и только в игре было бы видно, что заменена лишь часть шапки
 """
 
 import os
@@ -75,7 +74,7 @@ class StyleTexturesTests(unittest.TestCase):
             "console/models/hat", (512, 512), "DXT5", [], {}, **kw)
 
     def test_every_material_and_team_variant_is_written(self):
-        """Правки по материалам и по командам доходят до мода целиком."""
+        """Правки по материалам и по командам доходят до мода целиком"""
         entry = {"textures": {
             Team.RED: {"hat_style2": self._img("body.png"),
                        "hat_style2_1": self._img("lens.png")},
@@ -90,7 +89,7 @@ class StyleTexturesTests(unittest.TestCase):
         self.assertIn(("hat_style2_blue", "body_blu.png"), self.calls)
 
     def test_shared_columns_do_not_get_a_blu_copy(self):
-        """Столбцы, одинаковые в обеих строках, командной пары не имеют."""
+        """Столбцы, одинаковые в обеих строках, командной пары не имеют"""
         entry = {"textures": {
             Team.RED: {"hat_style2_blue": self._img("always_blue.png")},
         }}
@@ -99,7 +98,7 @@ class StyleTexturesTests(unittest.TestCase):
         self.assertEqual(names.count("hat_style2_blue"), 1, self.calls)
 
     def test_single_image_goes_to_the_main_material(self):
-        """Общая картинка стиля (старое поведение) достаётся главному материалу."""
+        """Общая картинка стиля (старое поведение) достаётся главному материалу"""
         written = self._write(self._qc(QC_MULTI), {}, main_img=self._img("one.png"))
         self.assertEqual(written, 1)
         self.assertEqual(self.calls, [("hat_style2", "one.png")])
@@ -122,13 +121,13 @@ class StyleTexturesTests(unittest.TestCase):
         self.assertEqual(self._write(self._qc(QC_SINGLE), entry), 1)
 
     def test_material_names_are_matched_case_insensitively(self):
-        """Панель отдаёт имена в нижнем регистре, QC — как автор написал."""
+        """Панель отдаёт имена в нижнем регистре, QC - как автор написал"""
         entry = {"textures": {Team.RED: {"HAT_STYLE2_1": self._img("lens.png")}}}
         self._write(self._qc(QC_MULTI), entry)
         self.assertIn(("hat_style2_1", "lens.png"), self.calls)
 
     def test_broken_qc_still_writes_the_main_texture(self):
-        """QC не читается — хотя бы главный материал должен уехать в мод."""
+        """QC не читается - хотя бы главный материал должен уехать в мод"""
         qc = str(self.dir / "нет-такого.qc")
         written = self._write(qc, {}, main_img=self._img("one.png"))
         self.assertEqual(written, 1)
@@ -139,8 +138,8 @@ class SharedMaterialWarningTests(StyleTexturesTests):
     """
     63 шапки в стоке (Barnstormer, «Gem Only»-серия) держат все стили на ОДНОМ
     материале: стили различаются только геометрией. Разные текстуры для них
-    физически невозможны — в мод уедет записанная последней. Молча это делать
-    нельзя, иначе выглядит как баг приложения.
+    физически невозможны - в мод уедет записанная последней. Молча это делать
+    нельзя, иначе выглядит как баг приложения
     """
 
     def setUp(self):
@@ -162,7 +161,7 @@ class SharedMaterialWarningTests(StyleTexturesTests):
         self.assertIn("hat_style2", self.warnings[0])
 
     def test_same_image_twice_is_not_a_conflict(self):
-        """Один стиль пишется для каждого класса — это не конфликт."""
+        """Один стиль пишется для каждого класса - это не конфликт"""
         seen, img = {}, self._img("up.png")
         for _ in range(3):
             self._write(self._qc(QC_SINGLE),
@@ -171,12 +170,12 @@ class SharedMaterialWarningTests(StyleTexturesTests):
         self.assertEqual(self.warnings, [])
 
     def test_slot_key_ignores_slash_style_and_case(self):
-        """Основная сборка отдаёт путь с обратными слэшами, стиль — с прямыми."""
+        """Основная сборка отдаёт путь с обратными слэшами, стиль - с прямыми"""
         self.assertEqual(texture_slot_key(chr(92).join(("console", "models", "hat")), "Hat"),
                          texture_slot_key("console/models/hat/", "hat"))
 
     def test_styles_in_different_material_folders_do_not_clash(self):
-        """211 из 273 шапок держат стили в разных папках — им конфликта нет."""
+        """211 из 273 шапок держат стили в разных папках - им конфликта нет"""
         seen = {}
         for folder, img in (("console/models/a", "up.png"),
                             ("console/models/b", "down.png")):

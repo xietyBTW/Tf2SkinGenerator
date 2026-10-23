@@ -1,12 +1,12 @@
 """
-Необычные эффекты игры: какая система частиц как называется.
+Необычные эффекты игры: какая система частиц как называется
 
 В items_game лежит таблица `attribute_controlled_attached_particles`: номер
 эффекта, имя системы частиц и где она крепится. Имя, которое видит игрок
 («Burning Flames»), даёт локализация по токену `Attrib_Particle<номер>`.
-Это единственная связка «имя в игре → система → файл PCF», и без неё
+Это единственная связка «имя в игре -> система -> файл PCF», и без неё
 эффект приходится искать по 134 файлам, зная рабочее имя Valve
-(`superrare_burning1`).
+(`superrare_burning1`)
 """
 
 from __future__ import annotations
@@ -14,7 +14,7 @@ from __future__ import annotations
 import re
 from typing import Dict, List
 
-#: Подраздел таблицы → категория. Ключ уходит в фильтр, подпись — человеку.
+#: Подраздел таблицы -> категория. Ключ уходит в фильтр, подпись - человеку
 CATEGORIES: Dict[str, str] = {
     'cosmetic_unusual_effects': 'cosmetic',
     'weapon_unusual_effects': 'weapon',
@@ -30,15 +30,15 @@ CATEGORY_NAMES: Dict[str, str] = {
 
 _HEAD = '"attribute_controlled_attached_particles"'
 _BRACE = re.compile(r'[{}]')
-#: Подраздел: имя в кавычках и открывающая скобка.
+#: Подраздел: имя в кавычках и открывающая скобка
 _SUB = re.compile(r'"([a-z_]+)"\s*\{')
-#: Запись эффекта: номер и тело без вложенных скобок.
+#: Запись эффекта: номер и тело без вложенных скобок
 _ENTRY = re.compile(r'"(\d+)"\s*\{([^{}]*)\}')
 _SYSTEM = re.compile(r'"system"\s+"([^"]+)"')
 
 
 def _block(text: str) -> str:
-    """Тело таблицы по балансу скобок. Пусто — таблицы нет."""
+    """Тело таблицы по балансу скобок. Пусто - таблицы нет"""
     start = text.find(_HEAD)
     if start < 0:
         return ''
@@ -52,11 +52,11 @@ def _block(text: str) -> str:
 
 
 def parse(items_game_text: str, loc: Dict[str, str]) -> List[dict]:
-    """[{id, system, name, category}] — эффекты с именами из локализации.
+    """[{id, system, name, category}] - эффекты с именами из локализации
 
     Без имени эффект тоже остаётся: у полусотни записей токена в
     локализации нет (служебные, вроде `burningplayer_red`), но система у
-    них настоящая, и найти её по рабочему имени должно быть можно.
+    них настоящая, и найти её по рабочему имени должно быть можно
     """
     body = _block(items_game_text)
     out: List[dict] = []

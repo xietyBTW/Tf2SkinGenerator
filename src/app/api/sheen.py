@@ -1,4 +1,4 @@
-"""Конструктор блеска."""
+"""Конструктор блеска"""
 
 from __future__ import annotations
 
@@ -7,12 +7,12 @@ from typing import Dict, Optional
 from src.app.api._common import _lang, endpoint
 
 
-# ── Конструктор узора блеска (src/services/sheen_builder.py) ─────────── #
+# Конструктор узора блеска (src/services/sheen_builder.py)
 
 @endpoint
 def sheen_builder_schema(lang: str = '') -> Dict[str, object]:
-    """Слои конструктора и их поля, готовые узоры для начала — на языке
-    интерфейса. Поля формы страница строит отсюда."""
+    """Слои конструктора и их поля, готовые узоры для начала - на языке
+    интерфейса. Поля формы страница строит отсюда"""
     from src.services import sheen_builder as sb
     from src.services import sheen_patterns as sp
 
@@ -39,7 +39,7 @@ def sheen_builder_schema(lang: str = '') -> Dict[str, object]:
                     for k, p in sb.PRESETS.items()],
         'max_layers': sb.MAX_LAYERS,
         # Размер маски страница считает сама, сразу при выборе качества,
-        # а не после расчёта кадров (sheen_builder.mask_shape).
+        # а не после расчёта кадров (sheen_builder.mask_shape)
         'quality': dict(sb.QUALITY),
         'default_aspect': sb.DEFAULT_ASPECT,
         'frames': {'min': sp.MIN_FRAMES, 'max': sp.MAX_FRAMES, 'fps': sp.FPS},
@@ -49,14 +49,14 @@ def sheen_builder_schema(lang: str = '') -> Dict[str, object]:
 
 @endpoint
 def sheen_preset_thumbs() -> Dict[str, object]:
-    """Карточки шаблонов «Начать с»: по картинке на шаблон."""
+    """Карточки шаблонов «Начать с»: по картинке на шаблон"""
     from src.app.session import session
     return session().sheen.sheen_preset_thumbs()
 
 
 @endpoint
 def sheen_patterns_list() -> Dict[str, object]:
-    """Свои узоры блеска: [{id, name, length}]."""
+    """Свои узоры блеска: [{id, name, length}]"""
     from src.services import sheen_library
     return {'patterns': sheen_library.list_patterns()}
 
@@ -73,7 +73,7 @@ def sheen_pattern_preview(spec: Optional[Dict[str, object]] = None,
                           length: float = 2.5,
                           full: Optional[Dict[str, object]] = None) -> Dict[str, object]:
     """Кадры узора сеткой (те же, что уйдут в мод) и пропорция оружия.
-    `full` - весь узор, когда в превью один слой «соло»: гамму решает он."""
+    `full` - весь узор, когда в превью один слой «соло»: гамму решает он"""
     from src.app.session import session
     return session().sheen.sheen_pattern_preview(spec or {}, length, full)
 

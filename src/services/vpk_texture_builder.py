@@ -1,5 +1,5 @@
 """
-Построение текстур/материалов VPK-сборки: фасад над стадиями.
+Построение текстур/материалов VPK-сборки: фасад над стадиями
 
 Стадии живут в ``src/services/texture_build/``:
 
@@ -10,10 +10,10 @@
   с помощниками ``map_textures`` и ``map_settings``;
 - ``panel_extras``    - текстуры 2D-панели, варианты стилей, части;
 - ``fixed_extras``, ``styles``, ``part_textures`` - их составляющие;
-- ``game_source``     - оригиналы игры и общие записи VMT.
+- ``game_source``     - оригиналы игры и общие записи VMT
 
-Фасад хранит прежние имена, которыми зовёт VPKService. Подменять в тестах
-надо функцию в модуле стадии: вызовы между стадиями фасад не видят.
+Фасад держит имена, которыми зовёт VPKService. Подменять в тестах
+надо функцию в модуле стадии: вызовы между стадиями фасад не видят
 """
 
 from src.services.texture_build import (
@@ -30,9 +30,9 @@ from src.services.texture_build import (
 
 
 class VpkTextureBuilder:
-    """Прежний интерфейс сборки текстур (см. модуль)."""
+    """Прежний интерфейс сборки текстур (см. модуль)"""
 
-    # Стадии в порядке сборки (VPKService._stage_textures).
+    # Стадии в порядке сборки (VPKService._stage_textures)
     _build_main_material = staticmethod(main_texture.build_main_material)
     _maybe_build_blu_team_texture = staticmethod(main_texture.maybe_build_blu_team_texture)
     _build_extra_material_textures = staticmethod(extra_materials.build_extra_material_textures)
@@ -43,7 +43,7 @@ class VpkTextureBuilder:
     _build_secondary_textures = staticmethod(panel_extras.build_secondary_textures)
     _follow_shared_textures = staticmethod(extra_materials.follow_shared_textures)
 
-    # Отдельные шаги, которыми пользуются другие сервисы и тесты.
+    # Отдельные шаги, которыми пользуются другие сервисы и тесты
     _render_panel_extras = staticmethod(panel_extras.render_panel_extras)
     _render_extra_texture = staticmethod(panel_extras.render_extra_texture)
     _write_part_materials = staticmethod(part_textures.write_part_materials)

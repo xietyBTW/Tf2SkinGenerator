@@ -1,9 +1,9 @@
 """
-Кастомные исключения для приложения.
+Кастомные исключения для приложения
 
 Здесь остались только реально используемые типы. RequiredFileMissingError
 наследуется и от встроенного FileNotFoundError, чтобы существующие
-`except FileNotFoundError` продолжали его ловить.
+`except FileNotFoundError` продолжали его ловить
 """
 
 from typing import Optional
@@ -16,10 +16,10 @@ class TF2SkinGeneratorError(Exception):
 
 class RequiredFileMissingError(TF2SkinGeneratorError, FileNotFoundError):
     """
-    Необходимый для работы файл не найден.
+    Необходимый для работы файл не найден
 
     Наследует встроенный FileNotFoundError: обработчики, ловящие встроенный
-    тип, поймают и этот.
+    тип, поймают и этот
     """
     def __init__(self, file_path: str, message: Optional[str] = None):
         self.file_path = file_path
@@ -43,12 +43,12 @@ class VTFCreationError(TF2SkinGeneratorError):
 
 
 class FileLockedError(TF2SkinGeneratorError):
-    """Файл занят другим процессом (Windows не даёт его перезаписать).
+    """Файл занят другим процессом (Windows не даёт его перезаписать)
 
     Отдельно от прочих ошибок сборки: причина всегда одна и чинится не
     настройками, а закрытием того, кто держит файл (запущенная TF2 с
     примонтированным модом, GCFScape, проводник с превью). Сообщение уже
-    готово к показу пользователю — сырой WinError 32 ему ничего не говорит.
+    готово к показу пользователю - сырой WinError 32 ему ничего не говорит
     """
     def __init__(self, file_path: str, message: Optional[str] = None):
         self.file_path = file_path

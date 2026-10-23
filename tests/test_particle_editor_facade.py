@@ -1,6 +1,6 @@
-"""Характеризующие тесты ParticleEditorService на то, что раньше не покрывалось:
+"""Характеризующие тесты ParticleEditorService:
 игровая версия файла (stock), сборка VPK, ветки «родных цветов», полный
-список модулей группы. Держат поведение при разборе сервиса на модули."""
+список модулей группы. Держат поведение при разборе сервиса на модули"""
 
 import pytest
 
@@ -30,7 +30,7 @@ def test_stock_is_loaded_once_per_path(monkeypatch):
     assert svc.stock_diff("D:/tf2")["fx"]["status"] == "same"
     assert calls == ["particles/crit.pcf"]
 
-    # Нет стока — None, и это тоже запоминается.
+    # Нет стока - None, и это тоже запоминается
     def broken(self, root, path):
         calls.append(path)
         raise FileNotFoundError(path)
@@ -76,7 +76,7 @@ def test_export_vpk_packs_pcf_and_texture_part(tmp_path, monkeypatch):
         "materials/effects/test.vmt", "materials/effects/test.vtf"]
     assert svc.last_textures_vpk == f"{tmp_path}/m_textures.vpk"
 
-    # Без своих текстур второй архив не собирается.
+    # Без своих текстур второй архив не собирается
     packed.clear()
     svc._overwritten = {}
     svc.export_vpk(str(tmp_path / "m.vpk"))

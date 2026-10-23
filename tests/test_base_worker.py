@@ -1,4 +1,4 @@
-"""Тесты базовых воркеров (StandardWorker.run-шаблон, BaseWorker.stop, Signal)."""
+"""Тесты базовых воркеров (StandardWorker.run-шаблон, BaseWorker.stop, Signal)"""
 
 import unittest
 from unittest.mock import Mock
@@ -19,7 +19,7 @@ class _FailWorker(StandardWorker):
 
 class SignalTests(unittest.TestCase):
     def test_slots_are_per_instance(self):
-        """Сигнал объявлен в классе, но слоты у каждого экземпляра свои."""
+        """Сигнал объявлен в классе, но слоты у каждого экземпляра свои"""
         a, b = _OkWorker(), _OkWorker()
         seen = []
         a.progress.connect(lambda pct, msg: seen.append((pct, msg)))
@@ -37,7 +37,7 @@ class SignalTests(unittest.TestCase):
         slot.assert_not_called()
 
     def test_slot_exception_does_not_break_emit(self):
-        """Падение одного обработчика не должно ронять воркер и глушить остальные."""
+        """Падение одного обработчика не должно ронять воркер и глушить остальные"""
         w = _OkWorker()
         good = Mock()
         w.progress.connect(Mock(side_effect=RuntimeError("slot boom")))
@@ -69,7 +69,7 @@ class StandardWorkerTests(unittest.TestCase):
 
 class InterruptionTests(unittest.TestCase):
     def test_stop_interrupts_running_worker(self):
-        """stop() должен и попросить прерваться, и дождаться выхода из run()."""
+        """stop() должен и попросить прерваться, и дождаться выхода из run()"""
         import threading
 
         started = threading.Event()
@@ -88,7 +88,7 @@ class InterruptionTests(unittest.TestCase):
 
 
 class UiRequestTests(unittest.TestCase):
-    """Протокол emit → ожидание → answer из другого потока."""
+    """Протокол emit -> ожидание -> answer из другого потока"""
 
     class _Asker(BaseWorker):
         question = Signal(str)
@@ -103,7 +103,7 @@ class UiRequestTests(unittest.TestCase):
         self.assertEqual(req.ask("вопрос?"), "ответ")
 
     def test_answer_before_wait_is_not_lost(self):
-        """UI ответил синхронно внутри emit — ask() не должен уйти в ожидание."""
+        """UI ответил синхронно внутри emit - ask() не должен уйти в ожидание"""
         w = self._Asker()
         req = UiRequest(w.question, timeout_ms=5000)
         w.question.connect(lambda _q: req.answer(None))

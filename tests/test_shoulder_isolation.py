@@ -1,4 +1,4 @@
-"""Тесты ядра изоляции плеч вьюмодели (определение + переименование $texturegroup)."""
+"""Тесты ядра изоляции плеч вьюмодели (определение + переименование $texturegroup)"""
 
 import os
 import tempfile
@@ -13,7 +13,7 @@ from src.services.smd_service import SMDService
 
 
 # Реальная структура $texturegroup рук инженера (упрощённо: 1 RED + 1 BLU скин,
-# те же столбцы). col0 — командное тело, col1/col2 — нейтральные руки.
+# те же столбцы). col0 - командное тело, col1/col2 - нейтральные руки
 _ENG_ROWS = [
     ["engineer_red",  "engineer_handL", "engineer_handR_red"],   # RED
     ["engineer_blue", "engineer_handL", "engineer_handR_red"],   # BLU
@@ -48,7 +48,7 @@ class DetectShoulderMaterialsTests(unittest.TestCase):
         self.assertEqual(detect_shoulder_materials(red_row, whitelist), ["engineer_red"])
 
     def test_clean_arms_have_nothing(self):
-        # Руки без мирового тела — все материалы в whitelist → изолировать нечего.
+        # Руки без мирового тела - все материалы в whitelist -> изолировать нечего
         red_row = ["scout_handl", "scout_handr"]
         whitelist = ["scout_handl", "scout_handr"]
         self.assertEqual(detect_shoulder_materials(red_row, whitelist), [])
@@ -93,8 +93,8 @@ class GenerateRenamedTexturegroupTests(unittest.TestCase):
         )
 
     def test_empty_rename_builds_unchanged(self):
-        # Пустой rename + строки → блок строится без переименования (нужно для
-        # промоушена нейтральных, где строки уже изменены отдельно).
+        # Пустой rename + строки -> блок строится без переименования (нужно для
+        # промоушена нейтральных, где строки уже изменены отдельно)
         block = ModelBuildService.generate_renamed_texturegroup([["a", "b"]], {})
         self.assertIn('"a"', block)
         self.assertIn('"b"', block)

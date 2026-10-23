@@ -1,4 +1,4 @@
-"""Свой материал: карты материала, настройки текстур, правка VMT."""
+"""Свой материал: карты материала, настройки текстур, правка VMT"""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ from src.app.api._common import _lang, _t, endpoint, logger
 
 @endpoint
 def material_map_schema(lang: str = '') -> Dict[str, object]:
-    """Какие карты материала бывают и что у них настраивается."""
+    """Какие карты материала бывают и что у них настраивается"""
     from src.data.material_maps import MAP_DISPLAY_ORDER, MATERIAL_MAPS
     from src.services import lightwarp
 
@@ -25,8 +25,8 @@ def material_map_schema(lang: str = '') -> Dict[str, object]:
                 'default': str(cfg.get('extra_vmt', {}).get(param, '')),
                 'choices': None,
             }
-            # Режим смешивания detail — не число, а именованные варианты;
-            # какие допустимы, решает MATERIAL_MAPS (номера по вики Valve).
+            # Режим смешивания detail - не число, а именованные варианты;
+            # какие допустимы, решает MATERIAL_MAPS (номера по вики Valve)
             allowed = cfg.get('choices', {}).get(param)
             if allowed:
                 field['choices'] = [{'value': v, 'label': t.get(f'map_blend_{v}', v)}
@@ -35,8 +35,8 @@ def material_map_schema(lang: str = '') -> Dict[str, object]:
         return out
 
     def settings_fields(cfg: dict) -> List[dict]:
-        """Свои настройки карты (не параметры VMT) — поля со всем, что нужно
-        странице: вид, варианты, пределы, когда поле видно."""
+        """Свои настройки карты (не параметры VMT) - поля со всем, что нужно
+        странице: вид, варианты, пределы, когда поле видно"""
         out = []
         for key, rule in cfg.get('settings', {}).items():
             field = {'key': key, 'label': t.get(f'set_{key}_label', t.get(f'set_{key}', key)),
@@ -81,7 +81,7 @@ def material_map_schema(lang: str = '') -> Dict[str, object]:
             }
             for map_id in MAP_DISPLAY_ORDER
         ],
-        # Конструктор градиента блика (services/phongwarp.py).
+        # Конструктор градиента блика (services/phongwarp.py)
         'phongwarp': {
             'defaults': dict(phongwarp.DEFAULTS),
             'custom': 'custom',
@@ -94,7 +94,7 @@ def material_map_schema(lang: str = '') -> Dict[str, object]:
                     'preset', 'strength', 'bands', 'shift', 'edge', 'before', 'after',
                     'texture', 'hint', 'points', 'angle', 'angle_hint', 'edge_row',
                     'row_main', 'row_edge')},
-                # Редактор точек общий с lightwarp — и подписи к нему те же.
+                # Редактор точек общий с lightwarp - и подписи к нему те же
                 **{key: t.get(f'lightwarp_{key}', key) for key in (
                     'point', 'position', 'remove_point', 'gradient_hint')},
             },
@@ -110,7 +110,7 @@ def material_map_schema(lang: str = '') -> Dict[str, object]:
             'view_rim', 'view_rim_tip', 'view_mask', 'view_mask_tip', 'view_env',
             'view_env_tip', 'view_env_tex', 'view_env_tex_tip', 'view_stand_in',
             'view_no_game', 'view_detail', 'view_detail_tip', 'view_none', 'view_no_texture')},
-        # Конструктор полоски lightwarp: основы — полоски самой игры.
+        # Конструктор полоски lightwarp: основы - полоски самой игры
         'lightwarp': {
             'defaults': dict(lightwarp.DEFAULTS),
             'max_steps': lightwarp.MAX_STEPS,
@@ -122,7 +122,7 @@ def material_map_schema(lang: str = '') -> Dict[str, object]:
                 'make', 'preset', 'steps', 'smooth', 'shadow', 'light',
                 'brightness', 'preview', 'hint', 'to_points', 'gradient_hint',
                 'point', 'position', 'remove_point', 'graph_hint', 'before', 'after')},
-            # Подсказки при наведении — что делает каждое поле.
+            # Подсказки при наведении - что делает каждое поле
             'tips': {key: t.get(f'lightwarp_tip_{key}', '') for key in (
                 'preset', 'steps', 'brightness', 'shadow', 'light', 'strip', 'graph',
                 'before', 'after')},
@@ -133,28 +133,28 @@ def material_map_schema(lang: str = '') -> Dict[str, object]:
 @endpoint
 def map_preview(material: str = '', map_id: str = 'selfillum',
                 spec: Optional[Dict[str, object]] = None) -> Dict[str, object]:
-    """Текстура, её альфа и карта (у отражения - и кубмапа) для превью карты."""
+    """Текстура, её альфа и карта (у отражения - и кубмапа) для превью карты"""
     from src.app.session import session
     return session().materials.map_preview(material, map_id, spec)
 
 
 @endpoint
 def phongwarp_preview(params: Optional[Dict[str, object]] = None) -> Dict[str, object]:
-    """Градиент блика конструктора phongwarp для живого превью."""
+    """Градиент блика конструктора phongwarp для живого превью"""
     from src.app.session import session
     return session().materials.phongwarp_preview(params)
 
 
 @endpoint
 def lightwarp_ramp(params: Optional[Dict[str, object]] = None) -> Dict[str, object]:
-    """Полоска конструктора lightwarp для живого превью."""
+    """Полоска конструктора lightwarp для живого превью"""
     from src.app.session import session
     return session().materials.lightwarp_ramp(params)
 
 
 @endpoint
 def texture_maps(material: str = '') -> Dict[str, object]:
-    """Карты, назначенные материалу."""
+    """Карты, назначенные материалу"""
     from src.app.session import session
     return session().materials.texture_maps(material)
 
@@ -162,28 +162,28 @@ def texture_maps(material: str = '') -> Dict[str, object]:
 @endpoint
 def set_texture_maps(material: str = '',
                      maps: Optional[Dict[str, object]] = None) -> Dict[str, object]:
-    """Записывает карты материала (пустой набор — снять)."""
+    """Записывает карты материала (пустой набор - снять)"""
     from src.app.session import session
     return session().materials.set_texture_maps(material, maps)
 
 
 @endpoint
 def add_to_style(material: str = '') -> Dict[str, object]:
-    """Добавляет материал в активный вариантный стиль."""
+    """Добавляет материал в активный вариантный стиль"""
     from src.app.session import session
     return session().materials.add_to_style(material)
 
 
 @endpoint
 def drop_from_style(material: str = '') -> Dict[str, object]:
-    """Убирает материал из стиля — он вернётся к базовой текстуре."""
+    """Убирает материал из стиля - он вернётся к базовой текстуре"""
     from src.app.session import session
     return session().materials.drop_from_style(material)
 
 
 @endpoint
 def texture_settings(material: str = '') -> Dict[str, object]:
-    """Свои настройки сборки у материала."""
+    """Свои настройки сборки у материала"""
     from src.app.session import session
     return session().materials.texture_settings(material)
 
@@ -192,26 +192,26 @@ def texture_settings(material: str = '') -> Dict[str, object]:
 def set_texture_settings(material: str = '',
                          settings: Optional[Dict[str, object]] = None
                          ) -> Dict[str, object]:
-    """Задаёт материалу свои настройки (пустые — вернуть глобальные)."""
+    """Задаёт материалу свои настройки (пустые - вернуть глобальные)"""
     from src.app.session import session
     return session().materials.set_texture_settings(material, settings)
 
 
 @endpoint
 def texture_badges() -> Dict[str, object]:
-    """У каких материалов свои настройки — для пометок на карточках."""
+    """У каких материалов свои настройки - для пометок на карточках"""
     from src.app.session import session
     return session().materials.texture_badges()
 
 
 @endpoint
 def vmt_snippets(lang: str = '') -> Dict[str, object]:
-    """Что предлагает меню «Готовые эффекты» в редакторе VMT.
+    """Что предлагает меню «Готовые эффекты» в редакторе VMT
 
-    Категории → пункты. `key` — русская подпись пункта: по ней ищутся шаблон
-    и список гасимых ключей, а `label`/`hint` — на языке интерфейса. Пустой
+    Категории -> пункты. `key` - русская подпись пункта: по ней ищутся шаблон
+    и список гасимых ключей, а `label`/`hint` - на языке интерфейса. Пустой
     `snippet` означает ПОЛНЫЙ шаблон: он заменяет весь документ, и страница
-    обязана спросить. Тексты живут в `src/data/vmt_snippets.py`.
+    обязана спросить. Тексты живут в `src/data/vmt_snippets.py`
     """
     from src.data.vmt_snippets import (
         VMT_FULL_TEMPLATES, VMT_MERGE_REMOVES, VMT_SNIPPETS, VMT_SNIPPETS_EN,
@@ -235,11 +235,11 @@ def vmt_snippets(lang: str = '') -> Dict[str, object]:
                             'snippet': snippet or '',
                             'template': bool(snippet is None),
                             # Слияние: значения перекрывают одноимённые ключи
-                            # документа, `remove` гасятся (VMT_MERGE_REMOVES).
+                            # документа, `remove` гасятся (VMT_MERGE_REMOVES)
                             'merge': key in VMT_MERGE_REMOVES,
                             'remove': list(VMT_MERGE_REMOVES.get(key, ())),
                             # Эффект с настройками: страница показывает форму,
-                            # текст собирает vmt_apply_effect.
+                            # текст собирает vmt_apply_effect
                             'fields': vmt_effects.fields(key, en),
                             'replace': bool(vmt_effects.EFFECTS.get(key, {})
                                             .get('replace'))})
@@ -249,7 +249,7 @@ def vmt_snippets(lang: str = '') -> Dict[str, object]:
 
 @endpoint
 def vmt_effect_values(key: str = '', text: str = '') -> Dict[str, object]:
-    """Значения формы эффекта: из материала, если эффект уже стоит."""
+    """Значения формы эффекта: из материала, если эффект уже стоит"""
     from src.services import vmt_effects
     if key not in vmt_effects.EFFECTS:
         return {'error': 'Такого эффекта нет'}
@@ -260,8 +260,8 @@ def vmt_effect_values(key: str = '', text: str = '') -> Dict[str, object]:
 def vmt_apply_effect(key: str = '', values: Optional[Dict[str, object]] = None,
                      text: str = '', game: str = '') -> Dict[str, object]:
     """Материал с эффектом по выбранным значениям: {text, replace}. Не
-    сохраняет — текст ложится в редактор, сохраняет человек. `game` —
-    игровой оригинал материала (родная текстура для эффекта)."""
+    сохраняет - текст ложится в редактор, сохраняет человек. `game` -
+    игровой оригинал материала (родная текстура для эффекта)"""
     from src.services import vmt_effects
     values = dict(values or {})
     bounds = _sheen_bounds() if key == vmt_effects.SHEEN and (
@@ -271,12 +271,12 @@ def vmt_apply_effect(key: str = '', values: Optional[Dict[str, object]] = None,
 
 
 def _sheen_bounds() -> Optional[Dict[str, object]]:
-    """Габариты модели для полосы блеска.
+    """Габариты модели для полосы блеска
 
     Полоса блеска «всегда» и любой узор (свой или готовый) кладутся по
     габаритам модели: раскладка игры у оружия, длинного по Z (кунай), сводит
     узор в тонкую линию. Не прочиталась модель - узор возьмёт обычную
-    пропорцию ствола, «всегда» скажет об ошибке сам.
+    пропорцию ствола, «всегда» скажет об ошибке сам
     """
     from src.app.session import session
     try:
@@ -289,11 +289,11 @@ def _sheen_bounds() -> Optional[Dict[str, object]]:
 @endpoint
 def vmt_params(lang: str = '') -> List[dict]:
     """
-    Справочник $-параметров VMT по группам — для подсказок при наведении и
-    списка «Справочник» в редакторе: [{'group', 'params': [{'param','doc'}]}].
+    Справочник $-параметров VMT по группам - для подсказок при наведении и
+    списка «Справочник» в редакторе: [{'group', 'params': [{'param','doc'}]}]
 
     Словарь один (``vmt_snippets.VMT_PARAM_GROUPS``): второго списка заводить
-    нельзя, иначе подсказки разойдутся с тем, что редактор действительно знает.
+    нельзя, иначе подсказки разойдутся с тем, что редактор действительно знает
     """
     from src.data.vmt_snippets import param_reference
 
@@ -302,7 +302,7 @@ def vmt_params(lang: str = '') -> List[dict]:
 
 @endpoint
 def open_vmt(material: str = '', lang: str = '') -> Dict[str, object]:
-    """Текст VMT материала: сохранённая правка либо игровой оригинал."""
+    """Текст VMT материала: сохранённая правка либо игровой оригинал"""
     from src.app.session import session
 
     lang = _lang(lang)
@@ -312,7 +312,7 @@ def open_vmt(material: str = '', lang: str = '') -> Dict[str, object]:
 @endpoint
 def save_vmt(material: str = '', content: str = '',
              original: str = '') -> Dict[str, object]:
-    """Сохраняет правку VMT."""
+    """Сохраняет правку VMT"""
     from src.app.session import session
     return session().materials.save_vmt(material, content, original, _lang())
 
@@ -322,7 +322,7 @@ def save_vmt_all(material: str = '', content: str = '', before: str = '',
                  original: str = '', materials: Optional[List[str]] = None) -> Dict[str, object]:
     """Правка VMT без шестерёнки: в этот материал и во все остальные
     материалы предмета (эффекты - заново в каждом, ключи - без путей
-    текстур). `before` - текст материала до правки."""
+    текстур). `before` - текст материала до правки"""
     from src.app.session import session
     from src.services import vmt_effects
     bounds = _sheen_bounds() if vmt_effects.present(vmt_effects.SHEEN, content) else None
@@ -332,14 +332,14 @@ def save_vmt_all(material: str = '', content: str = '', before: str = '',
 
 @endpoint
 def reset_vmt_all(materials: Optional[List[str]] = None) -> Dict[str, object]:
-    """«Как в игре» без шестерёнки: снимает правки VMT у всех материалов."""
+    """«Как в игре» без шестерёнки: снимает правки VMT у всех материалов"""
     from src.app.session import session
     return session().materials.reset_vmt_all(list(materials or []))
 
 
 @endpoint
 def reset_vmt(material: str = '') -> Dict[str, object]:
-    """Удаляет правку VMT — материал вернётся к игровому оригиналу."""
+    """Удаляет правку VMT - материал вернётся к игровому оригиналу"""
     from src.app.session import session
     return session().materials.reset_vmt(material)
 
@@ -348,6 +348,6 @@ def reset_vmt(material: str = '') -> Dict[str, object]:
 def normal_preview(screen: Optional[Dict[str, object]] = None,
                    global_options: Optional[Dict[str, object]] = None,
                    editing: Optional[str] = None) -> Dict[str, object]:
-    """Карта нормалей главной текстуры для 3D-превью: {png, material, stock} или {off}."""
+    """Карта нормалей главной текстуры для 3D-превью: {png, material, stock} или {off}"""
     from src.app.session import session
     return session().normal_preview(screen, global_options, editing)

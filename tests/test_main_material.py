@@ -1,14 +1,14 @@
 """
-Главная текстура предмета — та, что покрывает модель, а не первая в QC.
+Главная текстура предмета - та, что покрывает модель, а не первая в QC
 
 Порядок столбцов $texturegroup ничего не обещает: у Quick-Fix первым идёт
-стекло (4% модели), у C.A.P.P.E.R — экранчик (0.1%). Основная картинка
+стекло (4% модели), у C.A.P.P.E.R - экранчик (0.1%). Основная картинка
 пользователя уезжала на них, а корпус оставался «доп. материалом». Веса
 берём из мешей (треугольники в SMD) и переносим главную только при явном
-перевесе — спорные 54/46 остаются на порядке автора.
+перевесе - спорные 54/46 остаются на порядке автора
 
 По стоку правило срабатывает на 7 пушках и 247 моделях шапок; c_tw_eagle
-остаётся на месте, хотя 82% модели покрывает столбец с '_gold'.
+остаётся на месте, хотя 82% модели покрывает столбец с '_gold'
 """
 
 import unittest
@@ -38,19 +38,19 @@ class ChooseMainColumnTests(unittest.TestCase):
         self.assertEqual(choose_main_column(WRANGLER, weights), 2)
 
     def test_close_call_keeps_the_author_order(self):
-        """Карамельная трость, 60/40 — не повод переезжать."""
+        """Карамельная трость, 60/40 - не повод переезжать"""
         row = ["c_candy_cane_red", "c_candy_cane_bow_red"]
         self.assertEqual(choose_main_column(row, {row[0]: 40, row[1]: 60}), 0)
 
     def test_column_zero_stays_when_it_is_big_enough(self):
-        """Mad Milk: стекла больше, но жидкость — треть модели, не мелочь."""
+        """Mad Milk: стекла больше, но жидкость - треть модели, не мелочь"""
         row = ["c_madmilk_liquid", "c_madmilk_glass"]
         self.assertEqual(
             choose_main_column(row, {"c_madmilk_liquid": 32,
                                      "c_madmilk_glass": 67}), 0)
 
     def test_moves_on_ratio_even_below_two_thirds(self):
-        """Праздничный револьвер: 58% против 13% у гирлянды — перевес вчетверо."""
+        """Праздничный револьвер: 58% против 13% у гирлянды - перевес вчетверо"""
         row = ["festive_lights_red", "festive_battery", "c_revolver_xmas"]
         self.assertEqual(
             choose_main_column(row, {"festive_lights_red": 13,
@@ -58,13 +58,13 @@ class ChooseMainColumnTests(unittest.TestCase):
                                      "c_revolver_xmas": 58}), 2)
 
     def test_australium_column_is_never_main(self):
-        """c_tw_eagle: 82% модели покрывает '_gold', красить надо базу."""
+        """c_tw_eagle: 82% модели покрывает '_gold', красить надо базу"""
         row = ["c_tw_eagle", "c_tw_eagle_gold"]
         self.assertEqual(
             choose_main_column(row, {"c_tw_eagle": 18, "c_tw_eagle_gold": 82}), 0)
 
     def test_own_festive_material_can_be_main(self):
-        """У праздничного револьвера '_xmas' — его собственный материал."""
+        """У праздничного револьвера '_xmas' - его собственный материал"""
         row = ["festive_lights_red", "c_revolver_xmas"]
         self.assertEqual(
             choose_main_column(row, {"festive_lights_red": 9,
@@ -79,7 +79,7 @@ class ChooseMainColumnTests(unittest.TestCase):
         self.assertEqual(choose_main_column(QUICK_FIX, {}), 0)
 
     def test_weights_that_do_not_match_the_row_are_ignored(self):
-        """Имена мешей разошлись со столбцами — доверять весам нельзя."""
+        """Имена мешей разошлись со столбцами - доверять весам нельзя"""
         self.assertEqual(choose_main_column(QUICK_FIX, {"совсем_другое": 999}), 0)
 
     def test_empty_row(self):
@@ -98,8 +98,8 @@ class LayoutWithWeightsTests(unittest.TestCase):
         self.assertEqual(layout.main_index, 1)
 
     def test_previous_main_becomes_a_card(self):
-        """Стекло не должно пропасть: раньше его выбрасывало правило
-        «минус имена из второй строки», хотя общий материал там есть всегда."""
+        """Стекло не должно пропасть: правило «минус имена из второй строки»
+        выбросило бы его, хотя общий материал там есть всегда"""
         layout = classify_rows(self.ROWS, self.WEIGHTS)
         self.assertEqual(layout.extra_materials, ["c_proto_medigun_glass"])
 
@@ -113,7 +113,7 @@ class LayoutWithWeightsTests(unittest.TestCase):
         self.assertEqual(layout.extra_materials, [])
 
     def test_column_absent_from_every_mesh_is_not_a_card(self):
-        """У праздничного сапёра в строке лежит материал обычного сапёра."""
+        """У праздничного сапёра в строке лежит материал обычного сапёра"""
         layout = classify_rows([["c_sapper_xmas", "c_sapper"]],
                                {"c_sapper_xmas": 500})
         self.assertEqual(layout.extra_materials, [])
@@ -183,7 +183,7 @@ end
         self.assertEqual(mesh_material_weights(""), {})
 
     def test_weights_read_the_bodygroups_of_a_qc(self):
-        """Скрытые варианты бодигрупп тоже считаются: парашют — материал."""
+        """Скрытые варианты бодигрупп тоже считаются: парашют - материал"""
         self._smd("pack.smd", self.SMD)
         self._smd("chute.smd", self.SMD.replace("body", "chute"))
         qc = self.dir / "pack.qc"

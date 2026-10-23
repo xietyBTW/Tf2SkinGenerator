@@ -8,7 +8,7 @@ import { clone } from './sheen-ui.js';
 
 const HISTORY_MAX = 80;
 //: Пауза после правки, прежде чем она встанет в историю: протяжка ползунка -
-//: один шаг отмены, а не сотня.
+//: один шаг отмены, а не сотня
 const COMMIT_DELAY = 350;
 
 export class SheenPattern {
@@ -31,7 +31,7 @@ export class SheenPattern {
   get canUndo() { return this._at > 0; }
   get canRedo() { return this._at < this._history.length - 1; }
 
-  /** Имя слоя в списке: у второго такого же - номер. */
+  /** Имя слоя в списке: у второго такого же - номер */
   layerName(i) {
     const layer = this.layers[i];
     const same = this.layers.slice(0, i + 1).filter((x) => x.type === layer.type).length;
@@ -39,8 +39,8 @@ export class SheenPattern {
     return same > 1 ? `${label} ${same}` : label;
   }
 
-  // ── История ─────────────────────────────────────────────────────────
-  /** Правку - в историю сразу. */
+  // История
+  /** Правку - в историю сразу */
   flush() {
     clearTimeout(this._timer);
     const snap = JSON.stringify(this.layers);
@@ -52,16 +52,16 @@ export class SheenPattern {
     this.onHistory();
   }
 
-  /** Правку - в историю, когда правки затихнут. */
+  /** Правку - в историю, когда правки затихнут */
   commit() {
     clearTimeout(this._timer);
     this._timer = setTimeout(() => this.flush(), COMMIT_DELAY);
   }
 
-  /** Шаг по истории (-1 - отменить, 1 - вернуть). Отдаёт, сдвинулся ли узор. */
+  /** Шаг по истории (-1 - отменить, 1 - вернуть). Отдаёт, сдвинулся ли узор */
   travel(d) {
     // Правка, что ещё ждёт записи, сначала встаёт в историю: иначе
-    // Ctrl+Z сразу после неё терял бы её без возврата.
+    // Ctrl+Z сразу после неё терял бы её без возврата
     this.flush();
     const j = this._at + d;
     if (j < 0 || j >= this._history.length) return false;
@@ -74,8 +74,8 @@ export class SheenPattern {
 
   dispose() { clearTimeout(this._timer); }
 
-  // ── Правки слоёв ────────────────────────────────────────────────────
-  /** Новый слой в конец списка, выбранным. */
+  // Правки слоёв
+  /** Новый слой в конец списка, выбранным */
   add(layer) {
     this.layers.push(layer);
     this.selected = this.layers.length - 1;
@@ -112,16 +112,16 @@ export class SheenPattern {
     this.solo = this.solo === i ? -1 : i;
   }
 
-  /** Слои для превью: «только этот слой» в узор не уходит. */
+  /** Слои для превью: «только этот слой» в узор не уходит */
   previewLayers() {
     // Маску в одиночку показываем как обычный слой: под ней всё равно
-    // ничего нет.
+    // ничего нет
     return this.solo >= 0
       ? this.layers.map((l, i) => ({ ...l, on: i === this.solo, blend: 'max' }))
       : this.layers;
   }
 
-  /** Узор, как его сохраняет и считает Python. */
+  /** Узор, как его сохраняет и считает Python */
   spec() {
     return { layers: this.layers, quality: this.quality };
   }

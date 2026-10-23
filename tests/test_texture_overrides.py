@@ -26,7 +26,7 @@ class EffectiveSettingsTests(unittest.TestCase):
     def test_partial_override_inherits_global(self):
         eff = effective_settings(self.GLOBAL, {'size': (256, 256)})
         self.assertEqual(eff['size'], (256, 256))
-        self.assertEqual(eff['format'], 'DXT1')   # формат — глобальный
+        self.assertEqual(eff['format'], 'DXT1')   # формат - глобальный
 
     def test_none_value_in_override_ignored(self):
         eff = effective_settings(self.GLOBAL, {'format': None})
@@ -50,8 +50,8 @@ class OverrideBadgeTests(unittest.TestCase):
 
 
 class OwnSettingsTests(unittest.TestCase):
-    """Карточка и материал модели называются не всегда одинаково — свои
-    настройки карточки до сборки при этом молча не доходили."""
+    """Карточка и материал модели называются не всегда одинаково - свои
+    настройки карточки до сборки при этом молча не доходили"""
 
     def test_by_card_name(self):
         self.assertEqual(own_settings({'scout_head_red': {'format': 'DXT1'}}, 'scout_head_red'),

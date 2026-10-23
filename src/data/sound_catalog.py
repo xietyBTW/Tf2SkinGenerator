@@ -1,7 +1,7 @@
 """
-Каталог игровых звуков: что звучит, когда и у кого.
+Каталог игровых звуков: что звучит, когда и у кого
 
-Звук в Source зовут не файлом, а ИМЕНЕМ ЗАПИСИ — `Weapon_Shotgun.Single`.
+Звук в Source зовут не файлом, а ИМЕНЕМ ЗАПИСИ - `Weapon_Shotgun.Single`.
 Запись лежит в звуковом скрипте (`scripts/game_sounds_*.txt`) и говорит, какой
 файл играть, по какому каналу и с какой громкостью::
 
@@ -13,19 +13,19 @@
         "wave"          ")weapons/shotgun_shoot.wav"
     }
 
-Имя записи само себя объясняет: до точки — чей звук, после — какое событие.
+Имя записи само себя объясняет: до точки - чей звук, после - какое событие.
 Событий в одном оружейном скрипте 345 штук, поэтому по ним не фильтруют, а
 сводят в группы (выстрел, перезарядка, удар…): человеку нужен «звук выстрела»,
 а не выбор между `Single`, `Fire` и `FireStart`. Словарь групп у каждого
-раздела свой — у оружия не бывает боли, у реплик перезарядки.
+раздела свой - у оружия не бывает боли, у реплик перезарядки
 
 У трети реплик имя без точки вовсе (`engineer_dominationdemoman03`,
-`cm_sniper_pregamelostlast_02`): субъект там — приставка класса, а когда и её
-нет, говорящего выдаёт папка файла (`vo/taunts/spy/`).
+`cm_sniper_pregamelostlast_02`): субъект там - приставка класса, а когда и её
+нет, говорящего выдаёт папка файла (`vo/taunts/spy/`)
 
 Кого именно звук озвучивает, точно знает items_game: у предмета в `visuals`
 стоит `sound_single_shot` с именем записи. Это единственный надёжный источник
-класса — из имени `Weapon_Shotgun` класс не выводится, дробовик носят четверо.
+класса - из имени `Weapon_Shotgun` класс не выводится, дробовик носят четверо
 """
 
 from __future__ import annotations
@@ -40,15 +40,15 @@ from src.shared.logging_config import get_logger
 
 logger = get_logger(__name__)
 
-#: Скрипт оружейных звуков: в нём 610 записей `Weapon_*` из 624 во всей игре.
+#: Скрипт оружейных звуков: в нём 610 записей `Weapon_*` из 624 во всей игре
 WEAPON_SCRIPT = 'scripts/game_sounds_weapons.txt'
 
-#: Разделы каталога: ключ → скрипты, из которых он собирается.
+#: Разделы каталога: ключ -> скрипты, из которых он собирается
 #:
 #: Делить надо: в игре звуков под семь тысяч, и одним списком их не смотрят.
-#: Реплики устроены удобнее оружия — `Scout.PainSharp01` называет и КЛАСС, и
+#: Реплики устроены удобнее оружия - `Scout.PainSharp01` называет и КЛАСС, и
 #: положение, в котором эта реплика звучит, так что фильтры по ним работают
-#: точнее, чем по оружию.
+#: точнее, чем по оружию
 SECTIONS: Dict[str, Tuple[str, ...]] = {
     'weapon': (WEAPON_SCRIPT,),
     'voice': ('scripts/game_sounds_vo.txt',
@@ -69,34 +69,34 @@ SECTIONS: Dict[str, Tuple[str, ...]] = {
 }
 
 #: Подписи разделов. По-русски: английские берёт словарь страницы
-#: (frontend/mockup/strings.js), как у всех остальных подписей.
+#: (frontend/mockup/strings.js), как у всех остальных подписей
 SECTION_NAMES: Dict[str, str] = {
     'weapon': 'Оружие', 'voice': 'Реплики', 'player': 'Игрок', 'world': 'Мир',
 }
 
-#: Классы игры. У реплики класс стоит прямо в имени записи — это самый точный
-#: источник из всех, что есть: у оружия его приходится угадывать.
+#: Классы игры. У реплики класс стоит прямо в имени записи - это самый точный
+#: источник из всех, что есть: у оружия его приходится угадывать
 CLASSES = ('scout', 'soldier', 'pyro', 'demoman', 'heavy',
            'engineer', 'medic', 'sniper', 'spy')
 
 #: Картинка для того, чей это звук. Ключ `mat/…` уходит в общий `icon_png`,
-#: который достаёт её прямо из игрового архива.
+#: который достаёт её прямо из игрового архива
 #:
 #: Портрет класса (`CLASS_ICON`) живёт в данных о классах: те же портреты
-#: стоят на карточках каталога персонажей. У построек — их значки из
-#: интерфейса инженера, у диктора — значок голоса с миникарты: собственной
-#: картинки у Администратора в игре нет.
+#: стоят на карточках каталога персонажей. У построек - их значки из
+#: интерфейса инженера, у диктора - значок голоса с миникарты: собственной
+#: картинки у Администратора в игре нет
 ALL_CLASS_ICON = 'mat/vgui/class_portraits/all_class'
 VOICE_ICON = 'mat/sprites/minimap_icons/voiceicon'
 
-#: Субъект звука → предмет игры, когда имя записи с ним не сходится.
+#: Субъект звука -> предмет игры, когда имя записи с ним не сходится
 #:
-#: Valve зовёт оружие в звуках своими рабочими именами: «Латунный монстр» —
-#: `Gatling`, «Мачина» — `SniperRailgun`, «Наташа» — `Minifun` (так её и
+#: Valve зовёт оружие в звуках своими рабочими именами: «Латунный монстр» -
+#: `Gatling`, «Мачина» - `SniperRailgun`, «Наташа» - `Minifun` (так её и
 #: называет items_game у `TF_Unique_Achievement_Minigun`). Ни каталог, ни
 #: локализация, ни items_game такой связки не знают, а картинка предмета от
-#: этого есть. Значение — ИМЯ предмета в игре: по нему картинка и находится,
-#: и в отличие от пути её не надо править, когда Valve переложит файл.
+#: этого есть. Значение - ИМЯ предмета в игре: по нему картинка и находится,
+#: и в отличие от пути её не надо править, когда Valve переложит файл
 SUBJECT_ITEMS: Dict[str, str] = {
     'BallBuster': 'Wrap Assassin',
     'BumperCar': 'Taunt: The Victory Lap',
@@ -134,15 +134,15 @@ SUBJECT_ITEMS: Dict[str, str] = {
     'Weapon_mittens': 'Holiday Punch',
 }
 
-#: Слово субъекта → токен локализации постройки. У построек нет предмета в
-#: каталоге оружия, а имя в игре есть: «Турель», а не «Building Sentrygun».
+#: Слово субъекта -> токен локализации постройки. У построек нет предмета в
+#: каталоге оружия, а имя в игре есть: «Турель», а не «Building Sentrygun»
 BUILDING_TOKENS: Dict[str, str] = {
     'sentry': 'TF_Object_Sentry', 'sentrygun': 'TF_Object_Sentry',
     'minisentrygun': 'TF_Object_Sentry', 'dispenser': 'TF_Object_Dispenser',
     'teleporter': 'TF_Object_Tele', 'sapper': 'TF_Object_Sapper',
 }
 
-#: Субъект (в нижнем регистре, по вхождению) → картинка.
+#: Субъект (в нижнем регистре, по вхождению) -> картинка
 SUBJECT_ICONS: Tuple[Tuple[str, str], ...] = (
     ('sentry', 'mat/hud/hud_obj_status_sentry_3'),
     ('dispenser', 'mat/hud/hud_obj_status_dispenser'),
@@ -159,9 +159,9 @@ SUBJECT_ICONS: Tuple[Tuple[str, str], ...] = (
 
 
 #: Запасная картинка раздела. Своей у записи может не быть вовсе: под сотню
-#: субъектов — это остатки Half-Life 2 (`357_fire2`) и служебные эффекты, у
+#: субъектов - это остатки Half-Life 2 (`357_fire2`) и служебные эффекты, у
 #: которых предмета в игре нет. Пустая ячейка выглядит поломкой, поэтому
-#: показываем хотя бы то, о чём этот раздел.
+#: показываем хотя бы то, о чём этот раздел
 SECTION_ICONS: Dict[str, str] = {
     'weapon': 'mat/hud/hud_obj_status_ammo_64',
     'voice': VOICE_ICON,
@@ -171,12 +171,12 @@ SECTION_ICONS: Dict[str, str] = {
 
 
 def icon_for(subject: str, section: str = '', who: str = '') -> str:
-    """Картинка по субъекту записи, иначе по говорящему, иначе по разделу.
+    """Картинка по субъекту записи, иначе по говорящему, иначе по разделу
 
-    Субъект раньше говорящего: у `Building_Sentrygun` говорящий — инженер,
+    Субъект раньше говорящего: у `Building_Sentrygun` говорящий - инженер,
     а картинка нужна турели. Класс в субъекте проверяется по полному
-    совпадению: `Scout` — это класс, а `scout_taunt_dosido_intro` — имя
-    файла, и чей это голос, решает `speaker_of`, а не подстрока.
+    совпадению: `Scout` - это класс, а `scout_taunt_dosido_intro` - имя
+    файла, и чей это голос, решает `speaker_of`, а не подстрока
     """
     low = (subject or '').lower()
     if low in CLASSES:
@@ -186,44 +186,44 @@ def icon_for(subject: str, section: str = '', who: str = '') -> str:
             return icon
     if who in CLASSES:
         return CLASS_ICON.format(who)
-    # Значок «все классы» — последняя догадка по субъекту: у `taunt_yeti_spy`
-    # говорящий известен, и портрет шпиона точнее.
+    # Значок «все классы» - последняя догадка по субъекту: у `taunt_yeti_spy`
+    # говорящий известен, и портрет шпиона точнее
     for word, icon in SUBJECT_ICONS:
         if word in low:
             return icon
     return SECTION_ICONS.get(section, '')
 
 
-#: Папка, файлы которой считаем оружейными.
+#: Папка, файлы которой считаем оружейными
 WEAPON_SOUND_DIR = 'sound/weapons/'
 
-#: Начало записи: имя в кавычках и скобка на следующей строке.
+#: Начало записи: имя в кавычках и скобка на следующей строке
 _ENTRY = re.compile(r'^"([^"]+)"\s*\r?\n\s*\{', re.M)
 _PAIR = re.compile(r'"(\w+)"\s+"([^"]*)"')
 _BRACE = re.compile(r'[{}]')
 
 #: Служебные приставки пути в Source: пространственный звук, поток, без потерь.
-#: К файлу они не относятся — на диске его зовут без них.
+#: К файлу они не относятся - на диске его зовут без них
 _PREFIXES = ')(}$!?@#^*<>'
 
 #: Как Valve сокращает классы в именах файлов и записей: `cm_engie_…`,
-#: `demo_taunt_…`, `snipes_taunt_…`.
+#: `demo_taunt_…`, `snipes_taunt_…`
 CLASS_ALIASES: Dict[str, str] = {
     'demo': 'demoman', 'engie': 'engineer', 'engy': 'engineer',
     'eng': 'engineer', 'snipes': 'sniper', 'heavyweapons': 'heavy',
 }
 
-#: Говорящие, которые не классы. Ключ — то, что уходит в фильтр «кто».
-#: `other` — всё, чьего голоса мы не узнали: строке нужен хоть какой-то ключ,
-#: иначе под фильтром до неё не добраться.
+#: Говорящие, которые не классы. Ключ - то, что уходит в фильтр «кто».
+#: `other` - всё, чьего голоса мы не узнали: строке нужен хоть какой-то ключ,
+#: иначе под фильтром до неё не добраться
 WHO_NAMES: Dict[str, str] = {
     'announcer': 'Диктор', 'pauling': 'Мисс Полинг',
     'halloween': 'Хэллоуин', 'wheatley': 'Ап-Сап', 'other': 'Прочие',
 }
 
-#: Субъект записи (в нижнем регистре) → говорящий, когда это не класс.
-#: `AttackDefend.EnemyStolen` и `CaptureFlag.*` — объявления диктора о
-#: разведданных, `sf14` — Мерасмус на карте 2014 года, `PSap` — жучок-болтун.
+#: Субъект записи (в нижнем регистре) -> говорящий, когда это не класс.
+#: `AttackDefend.EnemyStolen` и `CaptureFlag.*` - объявления диктора о
+#: разведданных, `sf14` - Мерасмус на карте 2014 года, `PSap` - жучок-болтун
 _SUBJECT_WHO: Dict[str, str] = {
     'announcer': 'announcer', 'attackdefend': 'announcer',
     'captureflag': 'announcer', 'controlpoint': 'announcer',
@@ -234,9 +234,9 @@ _SUBJECT_WHO: Dict[str, str] = {
     'plng': 'pauling', 'toughbreak': 'pauling',
 }
 
-#: Папка файла → говорящий. Имя записи о голосе молчит у трети реплик
+#: Папка файла -> говорящий. Имя записи о голосе молчит у трети реплик
 #: (`taunt_yeti_spy`, `true_scotsmans_music`), а путь к файлу Valve кладёт
-#: последовательно: `vo/taunts/spy/`, `vo/pauling/`, `vo/halloween_merasmus/`.
+#: последовательно: `vo/taunts/spy/`, `vo/pauling/`, `vo/halloween_merasmus/`
 _WAVE_WHO: Tuple[Tuple[str, str], ...] = (
     ('vo/announcer', 'announcer'), ('vo/intel_', 'announcer'),
     ('vo/invade_', 'announcer'), ('vo/mvm_', 'announcer'),
@@ -244,17 +244,17 @@ _WAVE_WHO: Tuple[Tuple[str, str], ...] = (
     ('vo/halloween', 'halloween'), ('vo/items/wheatley', 'wheatley'),
 )
 
-#: Группы событий — свой словарь у каждого раздела. Общий список не работал:
-#: у оружия «charge» — раскрутка щита, у медика — убер, у диктора — захват.
+#: Группы событий - свой словарь у каждого раздела. Общий список не работал:
+#: у оружия «charge» - раскрутка щита, у медика - убер, у диктора - захват
 #:
-#: Проверяется ПО СЛОВАМ, а не по вхождению: «GoLoop» — это не команда «Go»,
-#: «NoTarget» — не «No», «Removed» — не «Move». Слово короче пяти букв
-#: совпадает только целиком; длиннее — и как часть имени, потому что у
+#: Проверяется ПО СЛОВАМ, а не по вхождению: «GoLoop» - это не команда «Go»,
+#: «NoTarget» - не «No», «Removed» - не «Move». Слово короче пяти букв
+#: совпадает только целиком, длиннее - и как часть имени, потому что у
 #: трети реплик оно записано без разделителей (`engineer_dominationdemoman03`).
-#: Порядок важен: первое совпадение побеждает.
+#: Порядок важен: первое совпадение побеждает
 _GROUPS: Dict[str, Tuple[Tuple[str, Tuple[str, ...]], ...]] = {
     'weapon': (
-        # Хитсаунд — раньше удара: «HitSoundNotes» иначе уходил в «Удар».
+        # Хитсаунд - раньше удара: «HitSoundNotes» иначе уходил в «Удар»
         ('hitsound', ('hitsound', 'killsound')),
         ('build', ('build', 'built', 'building', 'sentry', 'dispenser',
                    'teleporter', 'sapper')),
@@ -269,7 +269,7 @@ _GROUPS: Dict[str, Tuple[Tuple[str, Tuple[str, ...]], ...]] = {
         ('fire', ('single', 'fire', 'shoot', 'shot', 'burst', 'launch',
                   'throw', 'altfire', 'attack', 'zap', 'pull', 'strum',
                   'scoped')),
-        # Лечение раньше раскрутки: «Charged» у медигана — это убер.
+        # Лечение раньше раскрутки: «Charged» у медигана - это убер
         ('heal', ('heal', 'healing', 'healer', 'medigun', 'protection',
                   'invulnerable', 'uber', 'buff', 'buffed', 'horn', 'flag',
                   'power', 'resist', 'drain', 'charged')),
@@ -280,8 +280,8 @@ _GROUPS: Dict[str, Tuple[Tuple[str, Tuple[str, ...]], ...]] = {
                   'inspect', 'open', 'ready', 'grab', 'catch')),
     ),
     'voice': (
-        # Хэллоуин первым: боль босса — это реплика босса, а не «Боль».
-        # `sf12_badmagic` — цифры не слово, от приставки остаётся `sf`.
+        # Хэллоуин первым: боль босса - это реплика босса, а не «Боль».
+        # `sf12_badmagic` - цифры не слово, от приставки остаётся `sf`
         ('halloween', ('sf', 'hall', 'halloween', 'helltower', 'merasmus',
                        'spell', 'magic', 'skeleton', 'monoculus',
                        'headless', 'eyeball', 'ghost', 'haunted',
@@ -355,7 +355,7 @@ _GROUPS: Dict[str, Tuple[Tuple[str, Tuple[str, ...]], ...]] = {
 }
 
 #: Подписи групп. Ключ уходит в фильтр, подпись видит человек. Ключи общие
-#: на все разделы: «taunt» в реплике и в звуках игрока — одно и то же слово.
+#: на все разделы: «taunt» в реплике и в звуках игрока - одно и то же слово
 GROUP_NAMES: Dict[str, str] = {
     # Оружие
     'fire': 'Выстрел', 'crit': 'Крит', 'reload': 'Перезарядка',
@@ -375,54 +375,54 @@ GROUP_NAMES: Dict[str, str] = {
     'other': 'Прочее',
 }
 
-#: Чем считать не подошедшую ни под одно слово запись — зависит от того, кто
-#: говорит. У класса всё, что не команда и не боль, — реакция на событие
-#: («захватил точку», «убер готов»); у диктора — ход матча.
+#: Чем считать не подошедшую ни под одно слово запись - зависит от того, кто
+#: говорит. У класса всё, что не команда и не боль, - реакция на событие
+#: («захватил точку», «убер готов»), у диктора - ход матча
 _FALLBACK_WHO: Dict[str, str] = {'announcer': 'match'}
 
 #: Варианты записи: обычная и роботизированный дубль для MvM. Ключ уходит в
-#: фильтр.
+#: фильтр
 VARIANT_NAMES: Dict[str, str] = {'normal': 'Обычные', 'mvm': 'Роботы MvM'}
 
 #: Формат файлов записи: по нему игра выбирает читалку, и свой файл обязан
-#: совпасть (см. сборку). Смешанные записи — где вперемешку — подходят под
-#: любой из двух фильтров.
+#: совпасть (см. сборку). Смешанные записи - где вперемешку - подходят под
+#: любой из двух фильтров
 FORMAT_NAMES: Dict[str, str] = {'wav': 'WAV', 'mp3': 'MP3'}
 
 
 @dataclass(frozen=True)
 class SoundEntry:
-    """Одна запись звукового скрипта."""
+    """Одна запись звукового скрипта"""
 
-    #: Имя записи целиком: `Weapon_Shotgun.Single`.
+    #: Имя записи целиком: `Weapon_Shotgun.Single`
     name: str
-    #: До точки — чей звук.
+    #: До точки - чей звук
     subject: str
-    #: После точки — какое событие. У реплик там же номер дубля
-    #: (`PainSharp01`): по группе он не считается, но в имени остаётся.
+    #: После точки - какое событие. У реплик там же номер дубля
+    #: (`PainSharp01`): по группе он не считается, но в имени остаётся
     event: str
-    #: Группа события: по ней фильтруют.
+    #: Группа события: по ней фильтруют
     group: str
     #: Файлы без служебных приставок, от корня `sound/`. Их бывает несколько:
-    #: игра выбирает случайный, и заменять надо все.
+    #: игра выбирает случайный, и заменять надо все
     waves: Tuple[str, ...]
-    #: Раздел каталога: оружие, реплики, игрок, мир.
+    #: Раздел каталога: оружие, реплики, игрок, мир
     section: str = 'weapon'
     #: Кто звучит: классы или говорящий из `WHO_NAMES`. Из имени записи, из
-    #: приставки файла или из пути к нему. Пусто — не узнали.
+    #: приставки файла или из пути к нему. Пусто - не узнали
     who: Tuple[str, ...] = ()
-    #: Роботизированный дубль реплики для MvM (`Scout.MVM_Go01`).
+    #: Роботизированный дубль реплики для MvM (`Scout.MVM_Go01`)
     mvm: bool = False
-    #: Предметы, у которых этот звук прописан в items_game.
+    #: Предметы, у которых этот звук прописан в items_game
     items: Tuple[str, ...] = ()
-    #: Классы этих предметов. Пусто — звук общий или стоковый.
+    #: Классы этих предметов. Пусто - звук общий или стоковый
     classes: Tuple[str, ...] = ()
-    #: Дубли одной реплики, свёрнутые в эту запись (`Scout.Go01`…`Go08` →
+    #: Дубли одной реплики, свёрнутые в эту запись (`Scout.Go01`…`Go08` ->
     #: `Scout.Go`): имя записи игры для КАЖДОГО файла, по порядку `waves`
-    #: (у дубля бывает и несколько файлов). Пусто — запись настоящая.
+    #: (у дубля бывает и несколько файлов). Пусто - запись настоящая
     takes: Tuple[str, ...] = ()
-    #: Как игра играет запись: канал, громкость, уровень, высота — как в
-    #: скрипте. Свой файл зазвучит с теми же значениями, и знать их полезно.
+    #: Как игра играет запись: канал, громкость, уровень, высота - как в
+    #: скрипте. Свой файл зазвучит с теми же значениями, и знать их полезно
     channel: str = ''
     volume: str = ''
     level: str = ''
@@ -430,11 +430,11 @@ class SoundEntry:
 
 
 def words_of(text: str) -> List[str]:
-    """Слова имени: `CartMovingForward_01` → cart, moving, forward.
+    """Слова имени: `CartMovingForward_01` -> cart, moving, forward
 
     Границей служит и смена регистра, и разделитель, и цифра. Регулярка «а
-    потом Б» ловит обычный CamelCase, вторая — стык аббревиатуры со словом
-    (`RPGDraw` → rpg, draw).
+    потом Б» ловит обычный CamelCase, вторая - стык аббревиатуры со словом
+    (`RPGDraw` -> rpg, draw)
     """
     text = re.sub(r'([a-z])([A-Z])', r'\1 \2', text or '')
     text = re.sub(r'([A-Z]+)([A-Z][a-z])', r'\1 \2', text)
@@ -442,12 +442,12 @@ def words_of(text: str) -> List[str]:
 
 
 def _compile(rules) -> List[Tuple[str, frozenset, Tuple[str, ...], Tuple[str, ...]]]:
-    """Словарь раздела → (группа, целые слова, части имени, единственные).
+    """Словарь раздела -> (группа, целые слова, части имени, единственные)
 
-    Слово совпадает целиком; от пяти букв — и как часть склеенного имени:
-    короче нельзя, «comp» иначе находился в «completed», «hell» — в «shell».
-    С `=` — событие состоит из этого слова и только из него: команда «No» —
-    это `No01`, а не `NoTarget`.
+    Слово совпадает целиком, от пяти букв - и как часть склеенного имени:
+    короче нельзя, «comp» иначе находился в «completed», «hell» - в «shell».
+    С `=` - событие состоит из этого слова и только из него: команда «No» -
+    это `No01`, а не `NoTarget`
     """
     out = []
     for group, keywords in rules:
@@ -472,17 +472,17 @@ def _group_by_words(section: str, words: List[str]) -> str:
 
 
 #: Разделы, где о группе говорит субъект, а не событие: `Taunt.SoldierShotgunFire`
-#: — реквизит насмешки, а не выстрел; `MVM.GiantHeavyStep` — MvM, а не шаги.
+#: - реквизит насмешки, а не выстрел; `MVM.GiantHeavyStep` - MvM, а не шаги
 _SUBJECT_FIRST = frozenset(('player', 'world'))
 
 
 def group_of(section: str, subject: str, event: str,
              who: Tuple[str, ...] = ()) -> str:
-    """Группа записи: `SingleCrit` — крит, `PainSharp01` — боль.
+    """Группа записи: `SingleCrit` - крит, `PainSharp01` - боль
 
-    У оружия и реплик событие важнее субъекта: `Weapon_BuffBanner.Draw` — это
+    У оружия и реплик событие важнее субъекта: `Weapon_BuffBanner.Draw` - это
     «достать», а не «лечение». Субъект-класс (`Medic.AutoChargeReady`) о
-    группе не говорит вовсе — иначе всё у медика было бы командой «Medic!».
+    группе не говорит вовсе - иначе всё у медика было бы командой «Medic!»
     """
     low = (subject or '').lower()
     if section == 'weapon' and low.startswith('building'):
@@ -503,7 +503,7 @@ def group_of(section: str, subject: str, event: str,
 
 
 def _class_in(words: List[str]) -> str:
-    """Класс среди слов, с учётом сокращений Valve. Пусто — нет."""
+    """Класс среди слов, с учётом сокращений Valve. Пусто - нет"""
     for w in words:
         w = CLASS_ALIASES.get(w, w)
         if w in CLASSES:
@@ -511,18 +511,18 @@ def _class_in(words: List[str]) -> str:
     return ''
 
 
-#: Слова субъекта, за которыми стоит инженер: постройки — его.
+#: Слова субъекта, за которыми стоит инженер: постройки - его
 _ENGINEER_WORDS = frozenset(('building', 'sentry', 'sentrygun',
                              'minisentrygun', 'dispenser', 'teleporter'))
 
 
 def speaker_of(subject: str, name: str,
                waves: Tuple[str, ...]) -> Tuple[str, ...]:
-    """Кто звучит: класс или говорящий из `WHO_NAMES`. Пусто — не узнали.
+    """Кто звучит: класс или говорящий из `WHO_NAMES`. Пусто - не узнали
 
     От точного к догадке: субъект записи, слова её имени, путь к файлу.
-    `Spy.DominationScout01` — шпион, хотя в имени есть и разведчик: субъект
-    проверяется первым и целиком.
+    `Spy.DominationScout01` - шпион, хотя в имени есть и разведчик: субъект
+    проверяется первым и целиком
     """
     low = (subject or '').lower()
     if low in CLASSES:
@@ -533,7 +533,7 @@ def speaker_of(subject: str, name: str,
         return ('engineer',)
     words = words_of(name)
     # Приставка говорящего раньше класса в словах: `plng_give_contract_demo`
-    # говорит Полинг, а подрывник в имени — кому она даёт контракт.
+    # говорит Полинг, а подрывник в имени - кому она даёт контракт
     for w in words[:2]:
         if w in _SUBJECT_WHO:
             return (_SUBJECT_WHO[w],)
@@ -546,7 +546,7 @@ def speaker_of(subject: str, name: str,
             if path.startswith(prefix):
                 return (who,)
         # `vo/scout_go01.mp3`, `vo/taunts/scout/…`, `vo/mvm/norm/heavy_…`,
-        # `vo/compmode/cm_engie_…` — класс стоит в имени папки или файла.
+        # `vo/compmode/cm_engie_…` - класс стоит в имени папки или файла
         if path.startswith('vo/'):
             found = _class_in(words_of(path[3:])[:4])
             if found:
@@ -555,11 +555,11 @@ def speaker_of(subject: str, name: str,
 
 
 def split_name(name: str) -> Tuple[str, str]:
-    """(субъект, событие). У имени без точки субъект — приставка класса.
+    """(субъект, событие). У имени без точки субъект - приставка класса
 
-    `Weapon_Shotgun.Single` → (Weapon_Shotgun, Single);
-    `cm_scout_gamewon_01` → (cm_scout, gamewon_01);
-    `taunt_yeti_spy` → (taunt_yeti_spy, '') — приставки класса нет.
+    `Weapon_Shotgun.Single` -> (Weapon_Shotgun, Single);
+    `cm_scout_gamewon_01` -> (cm_scout, gamewon_01);
+    `taunt_yeti_spy` -> (taunt_yeti_spy, '') - приставки класса нет
     """
     if '.' in name:
         subject, _, event = name.partition('.')
@@ -571,27 +571,27 @@ def split_name(name: str) -> Tuple[str, str]:
 
 
 #: Папка роботизированных дублей реплик. Имя записи признаком не годится:
-#: `heavy_mvm_ask_ready01` — обычная реплика пулемётчика «вы готовы?» в MvM,
-#: а `Heavy.MVM_Go01` — тот же «Go!», но голосом робота, и лежит он здесь.
+#: `heavy_mvm_ask_ready01` - обычная реплика пулемётчика «вы готовы?» в MvM,
+#: а `Heavy.MVM_Go01` - тот же «Go!», но голосом робота, и лежит он здесь
 MVM_VOICE_DIR = 'vo/mvm/'
 
 
 def is_mvm_take(waves: Tuple[str, ...]) -> bool:
-    """Роботизированный дубль реплики для MvM."""
+    """Роботизированный дубль реплики для MvM"""
     return bool(waves) and all(
         w.lower().lstrip('/').startswith(MVM_VOICE_DIR) for w in waves)
 
 
 def wave_path(raw: str) -> str:
-    """Путь файла без служебных приставок Source."""
+    """Путь файла без служебных приставок Source"""
     return raw.strip().lstrip(_PREFIXES).replace('\\', '/').strip()
 
 
 def _blocks(text: str) -> List[Tuple[str, str]]:
-    """(имя записи, тело) по балансу скобок.
+    """(имя записи, тело) по балансу скобок
 
     Регуляркой «до закрывающей» такой блок не взять: внутри лежит `rndwave`
-    со своим списком файлов, и первая же скобка оборвала бы запись на нём.
+    со своим списком файлов, и первая же скобка оборвала бы запись на нём
     """
     out: List[Tuple[str, str]] = []
     for head in _ENTRY.finditer(text):
@@ -606,15 +606,15 @@ def _blocks(text: str) -> List[Tuple[str, str]]:
 
 
 def parse_script(text: str, section: str = 'weapon') -> List[SoundEntry]:
-    """Записи одного звукового скрипта."""
+    """Записи одного звукового скрипта"""
     out: List[SoundEntry] = []
     for name, body in _blocks(text):
         pairs = _PAIR.findall(body)
         waves = tuple(dict.fromkeys(
             wave_path(value) for key, value in pairs
             if key.lower() == 'wave' and wave_path(value)))
-        # Заглушки тишины (`misc/null.wav`) — не звук, а «ничего»: одна на
-        # полтора десятка записей, и подменив её у одной, подменишь у всех.
+        # Заглушки тишины (`misc/null.wav`) - не звук, а «ничего»: одна на
+        # полтора десятка записей, и подменив её у одной, подменишь у всех
         if not waves or all(is_silence(w) for w in waves):
             continue
         props = {key.lower(): value.strip() for key, value in pairs}
@@ -623,47 +623,47 @@ def parse_script(text: str, section: str = 'weapon') -> List[SoundEntry]:
 
 
 def is_silence(wave: str) -> bool:
-    """Файл-заглушка: `misc/null.wav`, `common/null.wav`, `vo/null.mp3`."""
+    """Файл-заглушка: `misc/null.wav`, `common/null.wav`, `vo/null.mp3`"""
     return os.path.basename(wave).lower().split('.')[0] == 'null'
 
 
 def make_entry(name: str, waves: Tuple[str, ...], section: str = 'weapon',
                props: Optional[Dict[str, str]] = None) -> SoundEntry:
-    """Запись со всем, что выводится из её имени и файлов."""
+    """Запись со всем, что выводится из её имени и файлов"""
     props = props or {}
     subject, event = split_name(name)
-    # У звуков мира говорящего нет: `MVM.GiantHeavyStep` — шаги робота, а не
-    # реплика диктора, и фильтр «кто» в этом разделе только путал бы.
+    # У звуков мира говорящего нет: `MVM.GiantHeavyStep` - шаги робота, а не
+    # реплика диктора, и фильтр «кто» в этом разделе только путал бы
     who = () if section == 'world' else speaker_of(subject, name, waves)
-    # У дубля приставка `MVM_` в группе не участвует: `Scout.MVM_Go01` — та
-    # же команда «Go!», только голосом робота.
+    # У дубля приставка `MVM_` в группе не участвует: `Scout.MVM_Go01` - та
+    # же команда «Go!», только голосом робота
     mvm = is_mvm_take(waves)
     bare = event[4:] if mvm and event[:4].upper() == 'MVM_' else event
     return SoundEntry(
         name=name, subject=subject, event=event,
         group=group_of(section, subject, bare, who), waves=waves,
         section=section, who=who, mvm=mvm,
-        # У реплики класс стоит прямо в имени — точнее источника нет.
+        # У реплики класс стоит прямо в имени - точнее источника нет
         classes=tuple(w for w in who if w in CLASSES),
         channel=props.get('channel', ''), volume=props.get('volume', ''),
         level=props.get('soundlevel', ''), pitch=props.get('pitch', ''),
     )
 
 
-#: Имя с номером дубля на конце: `Scout.Go01`, `taunt_demo_rps_win_08`.
+#: Имя с номером дубля на конце: `Scout.Go01`, `taunt_demo_rps_win_08`
 _TAKE = re.compile(r'^(.*\D)(\d+)$')
 
 
 def fold_takes(entries: List[SoundEntry]) -> List[SoundEntry]:
-    """Сворачивает пронумерованные дубли в одну запись с их файлами.
+    """Сворачивает пронумерованные дубли в одну запись с их файлами
 
-    `Scout.Go01`…`Go08` — восемь записей по одному файлу, и это одна реплика
-    «Go!»: игра берёт любой из дублей. Заменять их по одному — восемь раз
-    выбрать файл; в одной записи это один клик, а по одному по-прежнему
-    можно через файлы записи. Реплик так вчетверо меньше.
+    `Scout.Go01`…`Go08` - восемь записей по одному файлу, и это одна реплика
+    «Go!»: игра берёт любой из дублей. Заменять их по одному - восемь раз
+    выбрать файл, в одной записи это один клик, а по одному по-прежнему
+    можно через файлы записи. Реплик так вчетверо меньше
 
     Не сворачиваем, если стебель уже занят настоящей записью
-    (`Building_Sentrygun.Fire` рядом с `Fire2`): подменять её собой нельзя.
+    (`Building_Sentrygun.Fire` рядом с `Fire2`): подменять её собой нельзя
     """
     names = {e.name for e in entries}
     groups: Dict[Tuple[str, str], List[SoundEntry]] = {}
@@ -711,10 +711,10 @@ def fold_takes(entries: List[SoundEntry]) -> List[SoundEntry]:
 
 
 def item_bindings(items_game_text: str) -> Dict[str, Tuple[set, set]]:
-    """{имя записи: (предметы, классы)} — из блоков `visuals` в items_game.
+    """{имя записи: (предметы, классы)} - из блоков `visuals` в items_game
 
     Единственное место, где сказано, ЧЕЙ это звук: имя записи о классе молчит,
-    дробовик носят трое.
+    дробовик носят трое
     """
     from src.data.taunt_catalog import _item_bodies
 
@@ -737,12 +737,12 @@ def item_bindings(items_game_text: str) -> Dict[str, Tuple[set, set]]:
 
 
 def _orphan_files(paks, known: set) -> List[SoundEntry]:
-    """Файлы `sound/weapons/`, которых не называет ни одна запись.
+    """Файлы `sound/weapons/`, которых не называет ни одна запись
 
-    Их полсотни: связку «событие — файл» для части оружия Valve держит в
+    Их полсотни: связку «событие - файл» для части оружия Valve держит в
     зашифрованных `scripts/tf_weapon_*.ctx`, и через записи до этих звуков не
     добраться. Заменяются они всё равно по пути, поэтому показываем их сами по
-    себе — иначе часть звуков оружия просто недоступна.
+    себе - иначе часть звуков оружия просто недоступна
     """
     out: List[SoundEntry] = []
     seen = set()
@@ -766,10 +766,10 @@ def _orphan_files(paks, known: set) -> List[SoundEntry]:
 
 def load(vpk_paths: Sequence[Optional[str]],
          items_game_path: str = '') -> List[SoundEntry]:
-    """Оружейные звуки игры, уже связанные с предметами.
+    """Оружейные звуки игры, уже связанные с предметами
 
     Returns:
-        Пустой список, если скрипт не достался: игры может не быть на месте.
+        Пустой список, если скрипт не достался: игры может не быть на месте
     """
     from src.services import vtf_preview_service as vps
 
@@ -802,7 +802,7 @@ def load(vpk_paths: Sequence[Optional[str]],
             # Одна и та же запись встречается в двух скриптах (MvM повторяет
             # оружейные): первая побеждает, чтобы раздел не двоился. Внутри
             # одного скрипта тоже бывают повторы (`Weapon_BoneSaw.Miss`
-            # дважды) — там побеждает последняя, как у движка.
+            # дважды) - там побеждает последняя, как у движка
             fresh = list({e.name: e for e in parse_script(body, section)
                           if e.name not in known}.values())
             entries += fresh

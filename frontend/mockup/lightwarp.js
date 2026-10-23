@@ -1,8 +1,8 @@
 /*
- * Конструктор полоски $lightwarptexture внутри карточки карты.
+ * Конструктор полоски $lightwarptexture внутри карточки карты
  *
  * Полоску считает Python (services/lightwarp.py): основы - файлы игры, и
- * правило одно на превью и сборку. Здесь поля, редактор точек и рисование.
+ * правило одно на превью и сборку. Здесь поля, редактор точек и рисование
  *
  * Шар показывает формулу игры: освещённость half-lambert 0.5·N·L + 0.5 -
  * координата полоски, свет = 2 · полоска (полоска линейная). Окружения и
@@ -13,7 +13,7 @@ import * as api from './api.js';
 
 export const ALBEDO = 0.35;                       // серая модель, линейная (~0.63 в sRGB)
 //: Окружающий свет (ambient cube) - ровный, как в помещении карты. В игре
-//: он свой на каждой точке карты; здесь одно значение для сравнения.
+//: он свой на каждой точке карты, здесь одно значение для сравнения
 export const AMBIENT = 0.12;
 export const LIGHT = (() => {                     // свет сверху слева, к зрителю
   const v = [-0.55, 0.6, 0.58];
@@ -67,7 +67,7 @@ function drawSphere(canvas, ramp) {
   ctx.putImageData(img, 0, 0);
 }
 
-/** Яркость каналов по полоске; пунктир - 128, то есть обычная яркость в игре. */
+/** Яркость каналов по полоске, пунктир - 128, то есть обычная яркость в игре */
 function drawGraph(canvas, ramp) {
   const { width: w, height: h } = canvas;
   const ctx = canvas.getContext('2d');
@@ -85,7 +85,7 @@ function drawGraph(canvas, ramp) {
   ctx.setLineDash([]);
   ctx.lineWidth = 1.5;
   // Серая полоска: каналы совпадают, и от трёх линий видна была бы последняя
-  // (синяя) - рисуем одну нейтральную.
+  // (синяя) - рисуем одну нейтральную
   const grey = ramp.every(([r, g, b]) => r === g && g === b);
   const lines = grey ? [css.getPropertyValue('--ink').trim() || '#ddd'] : CHANNELS;
   lines.forEach((colour, c) => {
@@ -99,7 +99,7 @@ function drawGraph(canvas, ramp) {
   });
 }
 
-/** Цвет градиента точек в позиции `pos` (как `_stops_curve` в Python). */
+/** Цвет градиента точек в позиции `pos` (как `_stops_curve` в Python) */
 function colourAt(stops, pos) {
   if (pos <= stops[0].pos) return hexRgb(stops[0].colour);
   for (let i = 1; i < stops.length; i++) {
@@ -230,14 +230,14 @@ export function stopsEditor(L, maxStops, onChange) {
     };
     live.setPointerCapture(e.pointerId);
     live.addEventListener('pointermove', move);
-    // На тач-экране жест может отмениться - ручка не должна «прилипнуть».
+    // На тач-экране жест может отмениться - ручка не должна «прилипнуть»
     for (const end of ['pointerup', 'pointercancel', 'lostpointercapture']) {
       live.addEventListener(end, up, { once: true });
     }
   }
 
   function keys(e, st) {
-    // Фокус клавиатурой (Tab) - тоже выбор: поля и стрелки про эту точку.
+    // Фокус клавиатурой (Tab) - тоже выбор: поля и стрелки про эту точку
     selected = st;
     if ((e.key === 'Delete' || e.key === 'Backspace') && stops.length > 2) {
       stops = stops.filter((x) => x !== st);
@@ -336,7 +336,7 @@ export function lightwarpEditor(schema, saved, onChange = () => {}) {
   preset.value = values.preset;
   presetBox.append(preset);
 
-  // «Сделать точками»: текущая полоска со всеми настройками - в редактор.
+  // «Сделать точками»: текущая полоска со всеми настройками - в редактор
   const toPoints = document.createElement('button');
   toPoints.type = 'button';
   toPoints.className = 'textbtn textbtn--sm';
@@ -385,7 +385,7 @@ export function lightwarpEditor(schema, saved, onChange = () => {}) {
   graphNote.className = 'mapcard__tip lwarp__note';
   graphNote.textContent = L.graph_hint;
   // Два шара рядом: «как было» и «как будет» - разница видна сразу, а не
-  // по памяти. Свет и материал у них одни.
+  // по памяти. Свет и материал у них одни
   const figure = (caption) => {
     const fig = document.createElement('figure');
     fig.className = 'lwarp__fig';
@@ -417,7 +417,7 @@ export function lightwarpEditor(schema, saved, onChange = () => {}) {
   view.append(spheres, stripBox);
 
   // Сверху то, что меняют (основа, точки), под ним результат, ниже ползунки:
-  // двигая ползунок, видишь шары, а не прокручиваешь к ним.
+  // двигая ползунок, видишь шары, а не прокручиваешь к ним
   node.append(presetRow, editor.node, view, grid, note);
 
   const isCustom = () => preset.value === schema.custom;
@@ -430,17 +430,17 @@ export function lightwarpEditor(schema, saved, onChange = () => {}) {
     light: Number(light.value),
     brightness: Number(brightness.value),
     // Точки уходят всегда: переключились на основу игры и обратно - свои
-    // точки на месте, и в сохранённой работе тоже.
+    // точки на месте, и в сохранённой работе тоже
     stops: editor.get(),
   });
 
-  // Ответы приходят не по порядку: рисуем только последний запрос.
+  // Ответы приходят не по порядку: рисуем только последний запрос
   let ticket = 0;
   let timer = null;
   function refresh() {
     editor.node.hidden = !isCustom();
     toPoints.hidden = isCustom();
-    // В своём градиенте цвет задают точки - оттенки поверх лишние.
+    // В своём градиенте цвет задают точки - оттенки поверх лишние
     shadowCell.hidden = lightCell.hidden = isCustom();
     stepsOut.textContent = Number(steps.value) < 2 ? L.smooth : steps.value;
     brightnessOut.textContent = brightness.value;
@@ -459,10 +459,10 @@ export function lightwarpEditor(schema, saved, onChange = () => {}) {
   }
   toPoints.addEventListener('click', async () => {
     // Свежий расчёт, а не ответ прошлого запроса: ползунок могли двинуть
-    // только что, и в точки ушла бы старая полоска.
+    // только что, и в точки ушла бы старая полоска
     const res = await api.lightwarpRamp(params());
     if (!res || !res.stops) return;
-    // Настройки уже «впечены» в точки: сбрасываем их, иначе легли бы дважды.
+    // Настройки уже «впечены» в точки: сбрасываем их, иначе легли бы дважды
     editor.set(res.stops);
     preset.value = schema.custom;
     steps.value = '0';

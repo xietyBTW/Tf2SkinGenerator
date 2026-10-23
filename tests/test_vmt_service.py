@@ -71,7 +71,7 @@ class VMTServiceTests(unittest.TestCase):
             self.assertFalse(vmt_path.exists())
     
     def test_animated_bumpmap_adds_second_proxy(self):
-        """Гифка + normal map: прокси $bumpmap добавляется, $basetexture не теряется."""
+        """Гифка + normal map: прокси $bumpmap добавляется, $basetexture не теряется"""
         with tempfile.TemporaryDirectory() as tmp:
             vmt_path = Path(tmp) / "a.vmt"
             vmt_path.write_text(
@@ -89,11 +89,11 @@ class VMTServiceTests(unittest.TestCase):
             self.assertIn('"$bumpframe" "0"', content)
             self.assertIn('"animatedtextureframenumvar" "$bumpframe"', content)
             self.assertEqual(content.count('"animatedtexture"'), 2)
-            # Оба прокси на одном fps, иначе бамп уедет по фазе от картинки.
+            # Оба прокси на одном fps, иначе бамп уедет по фазе от картинки
             self.assertEqual(content.count('"animatedtextureframerate" "12"'), 2)
 
     def test_animated_bumpmap_idempotent(self):
-        """Повторный вызов не дублирует прокси, только обновляет fps."""
+        """Повторный вызов не дублирует прокси, только обновляет fps"""
         with tempfile.TemporaryDirectory() as tmp:
             vmt_path = Path(tmp) / "a.vmt"
             vmt_path.write_text(
@@ -140,7 +140,7 @@ if __name__ == "__main__":
 
 
 def test_bumpmap_skips_commented_line(tmp_path):
-    """У снайперской винтовки $bumpmap только в комментарии: нужна живая строка."""
+    """У снайперской винтовки $bumpmap только в комментарии: нужна живая строка"""
     from src.services.vmt_service import VMTService
     vmt = tmp_path / 'c_sniperrifle.vmt'
     vmt.write_text('"VertexLitGeneric"\n{\n\t"$basetexture"\t"models/weapons/c_items/c_sniperrifle"\n'

@@ -1,26 +1,27 @@
 """
-War Paint из игры: рецепты раскраски оружия (`tf/scripts/protodefs/proto_defs.vpd`).
+War Paint из игры: рецепты раскраски оружия (`tf/scripts/protodefs/proto_defs.vpd`)
 
-Рецепт — дерево операций над текстурами (`texture_lookup`, `combine_*`,
+Рецепт - дерево операций над текстурами (`texture_lookup`, `combine_*`,
 `select`, `apply_sticker`), которое игра собирает компоновщиком прямо во
 время игры и кладёт на оружие прокси `WeaponSkin`. Здесь рецепт только
 ЧИТАЕТСЯ: файл подписан (`proto_defs.vpd.sig`), и правленый игра не
-запустит. Собирает картинку `services/paintkit_compositor.py`.
+запустит. Собирает картинку `services/paintkit_compositor.py`
 
-Формат файла — блоки `[тип u32][кол-во u32]`, за ними сообщения
-`[размер u32][protobuf]`. Схема — `tf_proto_def_messages.proto` из
-source-sdk-2013 (TF2 SDK); декодер свой, без protoc: нужны десяток типов
-сообщений, а зависимость ради них не окупается.
+Формат файла - блоки `[тип u32][кол-во u32]`, за ними сообщения
+`[размер u32][protobuf]`. Схема - `tf_proto_def_messages.proto` из
+source-sdk-2013 (TF2 SDK), декодер свой, без protoc: нужны десяток типов
+сообщений, а зависимость ради них не окупается
 
 Значения переменных подставляются так же, как в `econ_paintkit.cpp`
 (`CPaintKitDefinition::GetItemPaintKitDefinitionKV`): переменные шаблона
-War Paint, поверх — переменные пушки в War Paint, заголовка описания пушки и
+War Paint, поверх - переменные пушки в War Paint, заголовка описания пушки и
 выбранного уровня износа. Переопределять можно только переменные с
-`inherit` (по умолчанию да).
+`inherit` (по умолчанию да)
 """
 
 from __future__ import annotations
 
+import functools
 import os
 import re
 import struct
@@ -31,17 +32,17 @@ from src.shared.logging_config import get_logger
 
 logger = get_logger(__name__)
 
-# Типы определений (enum ProtoDefTypes).
+# Типы определений (enum ProtoDefTypes)
 _T_OPERATION = 7
 _T_ITEM_DEF = 8
 _T_PAINTKIT = 9
 _T_HEADER_ONLY = 10
 
-#: Поля CMsgPaintKit_OperationStage → вид узла.
+#: Поля CMsgPaintKit_OperationStage -> вид узла
 STAGES = {1: 'texture_lookup', 2: 'combine_add', 3: 'combine_lerp',
           4: 'combine_multiply', 5: 'select', 6: 'apply_sticker'}
 
-#: Поля-переменные стадий (номер поля → имя), см. .proto.
+#: Поля-переменные стадий (номер поля -> имя), см. .proto
 _TEXTURE_FIELDS = {1: 'texture', 2: 'texture_red', 3: 'texture_blue',
                    4: 'adjust_black', 5: 'adjust_offset', 6: 'adjust_gamma',
                    7: 'rotation', 8: 'translate_u', 9: 'translate_v',
@@ -53,12 +54,12 @@ _STICKER_STAGE_FIELDS = {2: 'dest_tl', 3: 'dest_tr', 4: 'dest_bl',
                          5: 'adjust_black', 6: 'adjust_offset', 7: 'adjust_gamma'}
 _STICKER_FIELDS = {1: 'base', 2: 'weight', 3: 'spec'}
 
-#: Уровни износа War Paint по порядку (1…5 в рецепте).
+#: Уровни износа War Paint по порядку (1…5 в рецепте)
 WEAR_LEVELS = ('Factory New', 'Minimal Wear', 'Field-Tested',
                'Well-Worn', 'Battle Scarred')
 
 
-# ── protobuf wire format ───────────────────────────────────────────────── #
+# protobuf wire format
 
 def _varint(b: bytes, i: int) -> Tuple[int, int]:
     result = shift = 0
@@ -72,7 +73,7 @@ def _varint(b: bytes, i: int) -> Tuple[int, int]:
 
 
 def _fields(b: bytes) -> List[Tuple[int, object]]:
-    """[(номер поля, значение)]: varint → int, length-delimited → bytes."""
+    """[(номер поля, значение)]: varint -> int, length-delimited -> bytes"""
     out, i = [], 0
     while i < len(b):
         key, i = _varint(b, i)
@@ -105,7 +106,7 @@ def _str(v) -> str:
 
 
 def _var_field(b: bytes) -> Tuple[str, str]:
-    """CMsgVarField → (имя переменной или '', значение по умолчанию)."""
+    """CMsgVarField -> (имя переменной или '', значение по умолчанию)"""
     fs = _fields(b)
     name = _str(_first(fs, 1, b''))
     value = ''
@@ -120,7 +121,7 @@ def _var_field(b: bytes) -> Tuple[str, str]:
 
 
 def _def_id(b: bytes) -> Tuple[int, int]:
-    """CMsgProtoDefID → (defindex, тип)."""
+    """CMsgProtoDefID -> (defindex, тип)"""
     fs = _fields(b)
     return int(_first(fs, 1, 0)), int(_first(fs, 2, 0))
 
@@ -147,11 +148,20 @@ def _header(b: bytes) -> Header:
                   tags=[_str(t) for t in _all(fs, 4)], variables=variables)
 
 
-# ── Определения ─────────────────────────────────────────────────────────── #
+
+@functools.lru_cache(maxsize=None)
+def _op_header(op: bytes) -> Header:
+    """Заголовок шаблона операций. Списки War Paint спрашивают его у каждого
+    скина на каждый выбор оружия, а разбор protobuf дорогой, шаблоны за
+    запуск не меняются (bytes неизменяемы и сами служат ключом)"""
+    return _header(_first(_fields(op), 1, b''))
+
+
+# Определения
 
 @dataclass
 class ItemDef:
-    """Описание пушки для War Paint (CMsgPaintKit_ItemDefinition)."""
+    """Описание пушки для War Paint (CMsgPaintKit_ItemDefinition)"""
     header: Header
     item_index: int                     # номер предмета в items_game
     #: Уровни износа: [(шаблон операций или None, [(переменная, значение)])]
@@ -160,7 +170,7 @@ class ItemDef:
 
 @dataclass
 class KitItem:
-    """Пушка в War Paint (CMsgPaintKit_Definition.Item)."""
+    """Пушка в War Paint (CMsgPaintKit_Definition.Item)"""
     item_def: int
     can_apply: bool
     material_override: str
@@ -189,7 +199,7 @@ def _kit_item(b: bytes) -> Optional[KitItem]:
 
 
 class PaintKitDefs:
-    """Разобранный proto_defs.vpd: War Paint, описания пушек, шаблоны операций."""
+    """Разобранный proto_defs.vpd: War Paint, описания пушек, шаблоны операций"""
 
     def __init__(self, blob: bytes):
         self.operations: Dict[int, bytes] = {}
@@ -229,8 +239,8 @@ class PaintKitDefs:
             kit = PaintKit(header=header, loc_token=_str(_first(fs, 2, b'')),
                            operation=_def_id(op)[0] if op else None,
                            has_team_textures=bool(_first(fs, 4, 0)))
-            # Поле 5 — список старых декорированных пушек, 6…50 — по полю на
-            # пушку War Paint. Порядок полей неважен: пушку ищут по описанию.
+            # Поле 5 - список старых декорированных пушек, 6…50 - по полю на
+            # пушку War Paint. Порядок полей неважен: пушку ищут по описанию
             for num, val in fs:
                 if num >= 5 and isinstance(val, bytes):
                     item = _kit_item(val)
@@ -238,10 +248,10 @@ class PaintKitDefs:
                         kit.items.append(item)
             self.kits[header.defindex] = kit
 
-    # ── Рецепт ──────────────────────────────────────────────────────────── #
+    # Рецепт
 
     def item_variables(self, item_def: ItemDef) -> Dict[str, str]:
-        """Переменные заголовка описания пушки вместе с префабами (префаб — под своими)."""
+        """Переменные заголовка описания пушки вместе с префабами (префаб - под своими)"""
         merged: Dict[str, str] = {}
         for pid in item_def.header.prefabs:
             prefab = self.header_only.get(pid)
@@ -253,7 +263,7 @@ class PaintKitDefs:
     def variables(self, kit: PaintKit, item: KitItem,
                   wear: int) -> Optional[Tuple[int, Dict[str, str]]]:
         """(операция, значения переменных) War Paint на пушке при износе
-        ``wear`` — то, что рецепт подставляет в узлы. None — рецепта нет."""
+        ``wear`` - то, что рецепт подставляет в узлы. None - рецепта нет"""
         item_def = self.item_defs.get(item.item_def)
         if item_def is None or not item_def.wears:
             return None
@@ -263,11 +273,11 @@ class PaintKitDefs:
         op_id, base_header = kit.operation, kit.header
         if wear_op is not None and wear_op in self.operations:
             op_id = wear_op
-            base_header = _header(_first(_fields(self.operations[wear_op]), 1, b''))
+            base_header = _op_header(self.operations[wear_op])
         if op_id is None or op_id not in self.operations:
             return None
 
-        # {имя: [значение, можно переопределить]} — как itemVarDict в игре.
+        # {имя: [значение, можно переопределить]} - как itemVarDict в игре
         values = {k: [v, inh] for k, (v, inh) in base_header.variables.items()}
 
         def override(name: str, value: str) -> None:
@@ -289,12 +299,12 @@ class PaintKitDefs:
                strip_stickers: bool = False) -> Optional[dict]:
         """
         Дерево операций War Paint на пушке при износе ``wear`` (1…5) с
-        подставленными значениями переменных. None — рецепта нет.
+        подставленными значениями переменных. None - рецепта нет
 
-        ``forced`` — значения поверх всего, без оглядки на inherit: так
+        ``forced`` - значения поверх всего, без оглядки на inherit: так
         универсальный режим подменяет входы пушки своими (альбедо, группы…).
-        ``strip_stickers`` — наклейки убираются (их место задано в развёртке
-        пушки-донора, на чужой модели оно ничего не значит).
+        ``strip_stickers`` - наклейки убираются (их место задано в развёртке
+        пушки-донора, на чужой модели оно ничего не значит)
         """
         found = self.variables(kit, item, wear)
         if found is None:
@@ -306,14 +316,14 @@ class PaintKitDefs:
             roots = [_without_stickers(r) for r in roots]
         if not roots:
             return None
-        # Корень у рецепта верхнего уровня один; несколько бывает только у
-        # вложенных шаблонов (ao), и там они становятся детьми родителя.
+        # Корень у рецепта верхнего уровня один, несколько бывает только у
+        # вложенных шаблонов (ao), и там они становятся детьми родителя
         return roots[0] if len(roots) == 1 else {
             'type': 'combine_multiply', 'fields': {}, 'nodes': roots}
 
     def _nodes(self, msg: bytes, field_no: int, values: Dict[str, str],
                depth: int) -> List[dict]:
-        """Узлы (CMsgPaintKit_OperationNode) из поля ``field_no`` сообщения."""
+        """Узлы (CMsgPaintKit_OperationNode) из поля ``field_no`` сообщения"""
         if depth > 32:
             raise ValueError('слишком глубокая вложенность шаблонов')
         out = []
@@ -327,7 +337,7 @@ class PaintKitDefs:
                     out.append(parsed)
             elif ref is not None:
                 # Шаблон подставляется своими узлами прямо в родителя
-                # (OperationToKV по CMsgProtoDefID).
+                # (OperationToKV по CMsgProtoDefID)
                 sub = self.operations.get(_def_id(ref)[0])
                 if sub is not None:
                     out.extend(self._nodes(sub, 2, values, depth + 1))
@@ -371,32 +381,32 @@ class PaintKitDefs:
 
 
 def _without_stickers(node: dict) -> dict:
-    """Узел без наклеек: наклейка заменяется поверхностью, на которую ложилась."""
+    """Узел без наклеек: наклейка заменяется поверхностью, на которую ложилась"""
     while node.get('type') == 'apply_sticker' and node.get('nodes'):
         node = node['nodes'][0]
     return dict(node, nodes=[_without_stickers(n) for n in node.get('nodes') or []])
 
 
-# ── Универсальный режим: War Paint на оружии, у которого его нет ───────── #
+# Универсальный режим: War Paint на оружии, у которого его нет
 
-#: Шаблон, нарисованный под одну развёртку: на чужую модель не переносится.
+#: Шаблон, нарисованный под одну развёртку: на чужую модель не переносится
 _UV_BOUND_TEMPLATES = ('custom_uv',)
 
 #: Картинка, нарисованная под развёртку одной пушки: акулья пасть Warhawk
-#: (``patterns/combat/c_rocketlauncher_flyingtigers``), котик Mister Cuddles.
+#: (``patterns/combat/c_rocketlauncher_flyingtigers``), котик Mister Cuddles
 _WEAPON_DRAWN = re.compile(r'^patterns/(?:.+/)?c_[a-z0-9_]+$')
 
 
 def weapon_drawn(texture: str) -> bool:
-    """Картинка рецепта нарисована под развёртку одной пушки."""
+    """Картинка рецепта нарисована под развёртку одной пушки"""
     return bool(_WEAPON_DRAWN.match((texture or '').replace(chr(92), '/').lower()))
 
 
 def _drawn_whole(node: dict) -> bool:
     """
-    Узор рецепта — одна картинка под развёртку своей пушки, без групп
+    Узор рецепта - одна картинка под развёртку своей пушки, без групп
     (Warhawk, Balloonicorn, Mister Cuddles): на чужой модели от неё остались
-    бы обрывки в случайных местах.
+    бы обрывки в случайных местах
     """
     found = {'select': False, 'drawn': False}
 
@@ -411,47 +421,69 @@ def _drawn_whole(node: dict) -> bool:
     return found['drawn'] and not found['select']
 
 #: Пушки-доноры по порядку предпочтения: у них средняя плотность развёртки,
-#: и масштаб узоров с них на чужой модели выглядит естественно.
+#: и масштаб узоров с них на чужой модели выглядит естественно
 _DONORS = ('c_scattergun.mdl', 'c_shotgun.mdl', 'c_smg.mdl', 'c_rocketlauncher.mdl',
            'c_pistol.mdl', 'c_grenadelauncher.mdl', 'c_minigun.mdl')
 
 
 def template_layers(defs: PaintKitDefs, kit: PaintKit) -> Tuple[List[int], bool]:
-    """(слои узора по порядку, «поверх альбедо») шаблона War Paint.
+    """(слои узора по порядку, «поверх альбедо») шаблона War Paint
 
-    У обычного шаблона первый слой — основа (лежит везде, где не выбран
-    другой), у «over_albedo» основа — сама текстура пушки, а слои кладутся
-    только на выбранные группы.
+    У обычного шаблона первый слой - основа (лежит везде, где не выбран
+    другой), у «over_albedo» основа - сама текстура пушки, а слои кладутся
+    только на выбранные группы
     """
     import re
 
     op = defs.operations.get(kit.operation) if kit.operation is not None else None
     if op is None:
         return [], False
-    header = _header(_first(_fields(op), 1, b''))
+    header = _op_header(op)
     layers = sorted({int(m.group(1)) for name in header.variables
                      if (m := re.match(r'texture_layer_(\d+)$', name))})
     return layers, 'over_albedo' in header.name
 
 
 def by_parts(defs: PaintKitDefs, kit: PaintKit) -> bool:
-    """War Paint раскладывается по деталям любой модели (универсальный режим).
+    """War Paint раскладывается по деталям любой модели (универсальный режим)
 
     Нужен шаблон с группами пушки (``weapon_groups``) и не привязанный к её
-    развёртке: рецепт, нарисованный под одну пушку, на чужую не разложить.
+    развёртке: рецепт, нарисованный под одну пушку, на чужую не разложить
     """
     op = defs.operations.get(kit.operation) if kit.operation is not None else None
     if op is None:
         return False
-    header = _header(_first(_fields(op), 1, b''))
+    header = _op_header(op)
     return header.name not in _UV_BOUND_TEMPLATES and 'weapon_groups' in header.variables
+
+
+#: Готовые списки War Paint: {(вид, игра, язык): (разбор, список)}. Страница
+#: спрашивает их на каждый выбор оружия, а собирать заново - 0,2 с разбора
+#: заголовков и тысячи stat на файлы локализации. Разбор сменился (игра
+#: обновилась) - список собирается заново
+_LISTS: Dict[tuple, Tuple['PaintKitDefs', List[dict]]] = {}
+
+
+def _remembered(kind: str, tf2_root: str, lang: str, build) -> List[dict]:
+    defs = load(tf2_root)
+    if defs is None:
+        return []
+    key = (kind, tf2_root, lang)
+    got = _LISTS.get(key)
+    if got is None or got[0] is not defs:
+        got = _LISTS[key] = (defs, build(tf2_root, lang))
+    return list(got[1])
 
 
 def generic_kits(tf2_root: str, lang: str = 'ru') -> List[dict]:
     """
     War Paint, которые можно положить на любое оружие: [{id, name, item,
-    wears, team, generic}] по алфавиту. ``item`` — описание пушки-донора.
+    wears, team, generic}] по алфавиту. ``item`` - описание пушки-донора
     """
+    return _remembered('generic', tf2_root, lang, _generic_kits)
+
+
+def _generic_kits(tf2_root: str, lang: str) -> List[dict]:
     defs = load(tf2_root)
     if defs is None:
         return []
@@ -482,16 +514,20 @@ def decorated_kits(tf2_root: str, lang: str = 'ru') -> List[dict]:
     """
     Украшенное оружие коллекций (Gun Mettle и позже: Current Event, Night Owl
     и другие) на любой пушке: [{id, name, en, item, wears, team, generic,
-    decorated, layered, by_parts, weapons}] по алфавиту.
+    decorated, layered, by_parts, weapons}] по алфавиту
 
-    В игре каждый скин есть только у своих пушек (``weapons`` — их названия):
+    В игре каждый скин есть только у своих пушек (``weapons`` - их названия):
     шаблона у него нет, рецепт каждого износа нарисован под маски пушки и
     номера её групп. Приложение раскладывает его виды по деталям любой модели
-    (paintkit_generic.recipe_looks). ``item`` — пушка-оригинал, чей рецепт
+    (paintkit_generic.recipe_looks). ``item`` - пушка-оригинал, чей рецепт
     берётся: из ряда _DONORS, если скин есть у неё. Скины, нарисованные
-    целиком под одну развёртку (_drawn_whole), сюда не входят — они остаются
-    у своих пушек.
+    целиком под одну развёртку (_drawn_whole), сюда не входят - они остаются
+    у своих пушек
     """
+    return _remembered('decorated', tf2_root, lang, _decorated_kits)
+
+
+def _decorated_kits(tf2_root: str, lang: str) -> List[dict]:
     defs = load(tf2_root)
     if defs is None:
         return []
@@ -523,7 +559,7 @@ def decorated_kits(tf2_root: str, lang: str = 'ru') -> List[dict]:
 
 
 def _weapon_title(model: str, lang: str) -> str:
-    """Название оружия по файлу модели: c_scattergun.mdl → «Обрез»."""
+    """Название оружия по файлу модели: c_scattergun.mdl -> «Обрез»"""
     from src.data.weapons import TF2_WEAPONS
 
     key = model.rsplit('.', 1)[0]
@@ -535,28 +571,28 @@ def _weapon_title(model: str, lang: str) -> str:
     return key
 
 
-# ── Каталог: какие War Paint ложатся на модель ─────────────────────────── #
+# Каталог: какие War Paint ложатся на модель
 
 _MODELS: Dict[Tuple[str, int], Dict[int, str]] = {}
 
 
 def item_models(tf2_root: str) -> Dict[int, str]:
-    """{номер предмета: имя файла модели (c_scattergun.mdl)}."""
+    """{номер предмета: имя файла модели (c_scattergun.mdl)}"""
     return {i: p.rsplit('/', 1)[-1] for i, p in item_model_paths(tf2_root).items()}
 
 
 def item_model_path(tf2_root: str, defs: 'PaintKitDefs', item_def: int) -> str:
-    """Модель, на которую игра кладёт War Paint этого описания пушки.
+    """Модель, на которую игра кладёт War Paint этого описания пушки
 
     Не путь из таблицы оружия приложения: у двадцати с лишним пушек две
-    версии модели (старая c_items и мастерская), War Paint — у мастерской.
+    версии модели (старая c_items и мастерская), War Paint - у мастерской
     """
     idef = defs.item_defs.get(int(item_def))
     return item_model_paths(tf2_root).get(idef.item_index, '') if idef else ''
 
 
 def item_model_paths(tf2_root: str) -> Dict[int, str]:
-    """{номер предмета: путь модели в игре (models/…/c_scattergun.mdl)} из items_game."""
+    """{номер предмета: путь модели в игре (models/…/c_scattergun.mdl)} из items_game"""
     path = os.path.join(tf2_root, 'tf', 'scripts', 'items', 'items_game.txt')
     try:
         key = (path, os.stat(path).st_mtime_ns)
@@ -585,9 +621,9 @@ def _names(tf2_root: str, lang: str) -> Dict[str, str]:
 
 
 def kit_name(tf2_root: str, kit: PaintKit, lang: str = 'ru') -> str:
-    """Название War Paint на языке интерфейса (английское, если перевода нет)."""
+    """Название War Paint на языке интерфейса (английское, если перевода нет)"""
     for names in (_names(tf2_root, lang), _names(tf2_root, 'en')):
-        # В файле названия в кавычках-ёлочках самой игры: \"Night Owl\".
+        # В файле названия в кавычках-ёлочках самой игры: \"Night Owl\"
         text = (names.get(kit.loc_token) or '').strip().strip('"').strip()
         if text and not text[0].isdigit():
             return text
@@ -597,17 +633,22 @@ def kit_name(tf2_root: str, kit: PaintKit, lang: str = 'ru') -> str:
 def for_model(tf2_root: str, model: str, lang: str = 'ru') -> List[dict]:
     """
     War Paint, которые игра кладёт на модель ``model`` (имя или путь .mdl):
-    [{id, name, item, wears, team}] по алфавиту.
+    [{id, name, item, wears, team}] по алфавиту
 
-    ``item`` — номер описания пушки внутри War Paint: у одной модели их
-    бывает несколько (обычная и «улучшаемая» версии предмета), берём первое.
+    ``item`` - номер описания пушки внутри War Paint: у одной модели их
+    бывает несколько (обычная и «улучшаемая» версии предмета), берём первое
     """
-    defs = load(tf2_root)
-    if defs is None:
-        return []
     want = str(model or '').replace('\\', '/').rsplit('/', 1)[-1].lower()
     if not want.endswith('.mdl'):
         want += '.mdl'
+    return _remembered('model:' + want, tf2_root, lang,
+                       lambda root, lng: _for_model(root, want, lng))
+
+
+def _for_model(tf2_root: str, want: str, lang: str) -> List[dict]:
+    defs = load(tf2_root)
+    if defs is None:
+        return []
     models = item_models(tf2_root)
     out = []
     for kit in defs.kits.values():
@@ -622,12 +663,12 @@ def for_model(tf2_root: str, model: str, lang: str = 'ru') -> List[dict]:
                         'item': item.item_def,
                         'wears': len(item_def.wears),
                         'team': kit.has_team_textures,
-                        # Шаблонный War Paint раскладывается по группам —
-                        # раскладку можно переделать; ручной (рецепт под одну
-                        # пушку) — нет.
+                        # Шаблонный War Paint раскладывается по группам -
+                        # раскладку можно переделать, ручной (рецепт под одну
+                        # пушку) - нет
                         'layered': bool(template_layers(defs, kit)[0]),
                         # Ляжет и на материалы, которые игра не красит: по
-                        # их деталям, как в универсальном режиме.
+                        # их деталям, как в универсальном режиме
                         'by_parts': by_parts(defs, kit)})
             break
     out.sort(key=lambda k: k['name'].lower())
@@ -640,7 +681,7 @@ def find_item(defs: PaintKitDefs, kit_id: int, item_def: int) -> Tuple[Optional[
     return kit, item
 
 
-# ── Загрузка ────────────────────────────────────────────────────────────── #
+# Загрузка
 
 _CACHE: Dict[Tuple[str, int], PaintKitDefs] = {}
 
@@ -650,7 +691,7 @@ def vpd_path(tf2_root: str) -> str:
 
 
 def load(tf2_root: str) -> Optional[PaintKitDefs]:
-    """Разобранный proto_defs.vpd игры (кэш по mtime) или None, если файла нет."""
+    """Разобранный proto_defs.vpd игры (кэш по mtime) или None, если файла нет"""
     path = vpd_path(tf2_root)
     try:
         key = (path, os.stat(path).st_mtime_ns)

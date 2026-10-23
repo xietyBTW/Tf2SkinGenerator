@@ -1,19 +1,19 @@
 """
 Справочник параметров частиц: что делает модуль, что значит атрибут и какие
-значения осмысленны у числовых перечислений.
+значения осмысленны у числовых перечислений
 
 Зачем отдельный файл, а не translations.py: это не строки интерфейса, а
-предметный справочник по формату Source — сотни коротких пояснений, привязанных
+предметный справочник по формату Source - сотни коротких пояснений, привязанных
 к именам атрибутов из PCF. В общем словаре переводов они утроили бы файл и
 перемешались бы с подписями кнопок. Здесь пара (ru, en) лежит рядом с ключом,
-поэтому пояснение и перевод правятся одной строкой.
+поэтому пояснение и перевод правятся одной строкой
 
-Ключи — имена атрибутов В НИЖНЕМ РЕГИСТРЕ: systems_json отдаёт их casefold-нутыми
-(srctools), а в самих PCF регистр гуляет от файла к файлу.
+Ключи - имена атрибутов В НИЖНЕМ РЕГИСТРЕ: systems_json отдаёт их casefold-нутыми
+(srctools), а в самих PCF регистр гуляет от файла к файлу
 
 Источники: заголовки particles.h/particles_internal.h (индексы полей),
 DMXELEMENT_UNPACK-блоки движка Source и срез 134 стоковых PCF игры
-(10 426 систем) — по нему выбрано, какие параметры вообще стоит описывать.
+(10 426 систем) - по нему выбрано, какие параметры вообще стоит описывать
 """
 
 from typing import Dict, Optional, Tuple
@@ -65,7 +65,7 @@ _COLLISION_MODE = {
 
 _COLLISION_GROUP = {
     "NONE": ("сталкивается со всем", "collides with everything"),
-    "DEBRIS": ("как мусор — только мир", "debris: world only"),
+    "DEBRIS": ("как мусор - только мир", "debris: world only"),
     "PROJECTILE": ("как снаряд", "projectile"),
     "ROCKETS": ("как ракета", "rocket"),
 }
@@ -76,8 +76,8 @@ _SCALE_EMISSION = {
     2: ("по числу частиц родителя", "by parent particle count"),
 }
 
-#: Атрибуты с фиксированным набором значений: имя → {значение: (ru, en)}.
-#: Редактор показывает их списком, а не голым числом.
+#: Атрибуты с фиксированным набором значений: имя -> {значение: (ru, en)}.
+#: Редактор показывает их списком, а не голым числом
 ENUMS: Dict[str, dict] = {
     "output field": PARTICLE_FIELDS,
     "input field": PARTICLE_FIELDS,
@@ -92,10 +92,10 @@ ENUMS: Dict[str, dict] = {
     "scale emission to used control points": _SCALE_EMISSION,
 }
 
-#: Пояснения к атрибутам: имя → (ru, en). Покрывают верх частотного среза
-#: стоковых PCF — то, что пользователь видит в дереве чаще всего.
+#: Пояснения к атрибутам: имя -> (ru, en). Покрывают верх частотного среза
+#: стоковых PCF - то, что пользователь видит в дереве чаще всего
 ATTRS: Dict[str, Tuple[str, str]] = {
-    # ── Сама система ──────────────────────────────────────────────────────
+    # Сама система
     "max_particles": (
         "Потолок одновременно живущих частиц. Пока он забит, эмиттер молчит.",
         "Cap on particles alive at once. While it is full the emitter stalls."),
@@ -124,8 +124,8 @@ ATTRS: Dict[str, Tuple[str, str]] = {
         "Номер последовательности во втором спрайт-листе материала.",
         "Sequence number in the material second sprite sheet."),
     # Границы игра считает по самим частицам (CParticleCollection::
-    # RecomputeBounds) и лишь РАСШИРЯЕТ на эту коробку — это запас, а не
-    # ограничение: маленькая коробка эффект не обрезает.
+    # RecomputeBounds) и лишь РАСШИРЯЕТ на эту коробку - это запас, а не
+    # ограничение: маленькая коробка эффект не обрезает
     "bounding_box_min": (
         "Запас к нижнему углу границ эффекта. Границы игра считает по "
         "частицам, а эту коробку добавляет сверху.",
@@ -138,7 +138,7 @@ ATTRS: Dict[str, Tuple[str, str]] = {
         "Эффект рисуется только на вьюмодели (руки от первого лица).",
         "The effect draws on the view model (first-person hands) only."),
     "control point to disable rendering if it is the camera": (
-        "Если на этой контрольной точке камера — эффект не рисуется. "
+        "Если на этой контрольной точке камера - эффект не рисуется. "
         "-1 отключает проверку.",
         "Hides the effect when the camera sits on this control point. "
         "-1 turns the check off."),
@@ -161,15 +161,15 @@ ATTRS: Dict[str, Tuple[str, str]] = {
         "System group id: operators address child systems by it."),
     "cull_radius": (
         "Радиус, внутри которого одинаковые эффекты схлопываются в один. "
-        "0 — не схлопывать.",
+        "0 - не схлопывать.",
         "Radius within which identical effects collapse into one. "
         "0 disables it."),
-    # ── Эмиттеры ──────────────────────────────────────────────────────────
+    # Эмиттеры
     "emission_rate": (
         "Частиц в секунду.",
         "Particles per second."),
     "emission_duration": (
-        "Сколько секунд идёт эмиссия. 0 — бесконечно.",
+        "Сколько секунд идёт эмиссия. 0 - бесконечно.",
         "How long emission lasts, in seconds. 0 means forever."),
     "emission_start_time": (
         "Задержка перед началом эмиссии, секунды.",
@@ -178,11 +178,11 @@ ATTRS: Dict[str, Tuple[str, str]] = {
         "Сколько частиц выпускается одним залпом.",
         "How many particles a single burst releases."),
     "num_to_emit_minimum": (
-        "Нижняя граница залпа при масштабировании. -1 — не ограничивать.",
+        "Нижняя граница залпа при масштабировании. -1 - не ограничивать.",
         "Lower bound of the burst when scaled. -1 means no bound."),
     "maximum emission per frame": (
         "Потолок частиц за кадр: залп растянется на несколько кадров. "
-        "-1 — без ограничения.",
+        "-1 - без ограничения.",
         "Cap on particles per frame: a burst spreads over several frames. "
         "-1 means no cap."),
     "emission minimum": (
@@ -191,12 +191,12 @@ ATTRS: Dict[str, Tuple[str, str]] = {
     "emission maximum": (
         "Верхняя граница шумового темпа эмиссии.",
         "Upper bound of the noisy emission rate."),
-    # ── Позиция и движение ────────────────────────────────────────────────
+    # Позиция и движение
     "control_point_number": (
-        "Контрольная точка, от которой считается модуль. 0 — начало эффекта.",
+        "Контрольная точка, от которой считается модуль. 0 - начало эффекта.",
         "Control point the module works from. 0 is the effect origin."),
     "control point number": (
-        "Контрольная точка, от которой считается модуль. 0 — начало эффекта.",
+        "Контрольная точка, от которой считается модуль. 0 - начало эффекта.",
         "Control point the module works from. 0 is the effect origin."),
     "distance_min": (
         "Ближняя граница области рождения от контрольной точки.",
@@ -226,10 +226,10 @@ ATTRS: Dict[str, Tuple[str, str]] = {
         "Верхняя граница добавки по осям контрольной точки.",
         "Upper bound of the extra speed along control point axes."),
     "gravity": (
-        "Постоянное ускорение по осям мира. Z вниз — падение.",
+        "Постоянное ускорение по осям мира. Z вниз - падение.",
         "Constant acceleration in world axes. Negative Z falls down."),
     "drag": (
-        "Торможение средой за 1/30 секунды: 0 — инерция, 1 — мгновенный стоп.",
+        "Торможение средой за 1/30 секунды: 0 - инерция, 1 - мгновенный стоп.",
         "Medium drag per 1/30 s: 0 coasts, 1 stops almost instantly."),
     "maximum velocity": (
         "Потолок скорости частицы, юнитов в секунду.",
@@ -258,7 +258,7 @@ ATTRS: Dict[str, Tuple[str, str]] = {
     "lock rotation": (
         "Тянуть частицы и за поворотом контрольной точки, не только за позицией.",
         "Follow the control point rotation too, not just its position."),
-    # ── Жизнь, цвет, прозрачность ─────────────────────────────────────────
+    # Жизнь, цвет, прозрачность
     "lifetime_min": (
         "Нижняя граница времени жизни частицы, секунды.",
         "Lower bound of the particle lifetime, in seconds."),
@@ -302,7 +302,7 @@ ATTRS: Dict[str, Tuple[str, str]] = {
         "Верхняя граница длительности угасания перед смертью.",
         "Upper bound of the fade-out duration before death."),
     "proportional 0/1": (
-        "Время задано долей жизни частицы (иначе — секундами).",
+        "Время задано долей жизни частицы (иначе - секундами).",
         "Times are fractions of the particle life (otherwise seconds)."),
     "start_alpha": (
         "Непрозрачность в начале жизни (доля от стартовой).",
@@ -328,7 +328,7 @@ ATTRS: Dict[str, Tuple[str, str]] = {
     "ease_in_and_out": (
         "Сглаживать начало и конец перехода вместо линейного.",
         "Smooth the start and end of the transition instead of linear."),
-    # ── Размер и вращение ─────────────────────────────────────────────────
+    # Размер и вращение
     "radius_min": (
         "Нижняя граница радиуса частицы при рождении.",
         "Lower bound of the particle radius at birth."),
@@ -348,13 +348,13 @@ ATTRS: Dict[str, Tuple[str, str]] = {
         "Доля жизни, к которой оператор заканчивает действовать.",
         "Life fraction at which the operator stops acting."),
     "scale_bias": (
-        "Смещение кривой перехода: <0.5 — быстрее в начале, >0.5 — в конце.",
+        "Смещение кривой перехода: <0.5 - быстрее в начале, >0.5 - в конце.",
         "Bias of the transition curve: <0.5 front-loaded, >0.5 back-loaded."),
     "spin_rate_degrees": (
         "Скорость вращения спрайта вокруг оси взгляда, градусов в секунду.",
         "Sprite spin speed around the view axis, degrees per second."),
     "spin_stop_time": (
-        "Доля жизни, к которой вращение останавливается. 0 — не тормозить.",
+        "Доля жизни, к которой вращение останавливается. 0 - не тормозить.",
         "Life fraction by which the spin stops. 0 never stops."),
     "rotation_initial": (
         "Базовый угол поворота спрайта, градусы.",
@@ -368,10 +368,10 @@ ATTRS: Dict[str, Tuple[str, str]] = {
     "flip percentage": (
         "Доля частиц, у которых спрайт зеркалится по горизонтали (0-1).",
         "Fraction of particles whose sprite is mirrored horizontally (0-1)."),
-    # ── Рендеринг ─────────────────────────────────────────────────────────
+    # Рендеринг
     "animation rate": (
         "Скорость анимации спрайт-листа: кадров в секунду или циклов в "
-        "секунду — зависит от «use animation rate as fps».",
+        "секунду - зависит от «use animation rate as fps».",
         "Sprite sheet animation speed: frames per second or cycles per "
         "second, depending on 'use animation rate as fps'."),
     "use animation rate as fps": (
@@ -401,7 +401,7 @@ ATTRS: Dict[str, Tuple[str, str]] = {
     "texel_size": (
         "Размер текселя текстуры вдоль ленты.",
         "Texture texel size along the rope."),
-    # ── Remap / шум ───────────────────────────────────────────────────────
+    # Remap / шум
     "input field": (
         "Какое поле частицы берётся входом пересчёта.",
         "Which particle field is used as the remap input."),
@@ -433,18 +433,18 @@ ATTRS: Dict[str, Tuple[str, str]] = {
         "Умножать результат на исходное значение поля, а не заменять его.",
         "Multiply the field by the result instead of replacing it."),
     "spatial noise coordinate scale": (
-        "Масштаб шума по пространству: больше — мельче узор.",
+        "Масштаб шума по пространству: больше - мельче узор.",
         "Noise scale in space: larger means a finer pattern."),
     "time noise coordinate scale": (
-        "Масштаб шума по времени: больше — быстрее меняется.",
+        "Масштаб шума по времени: больше - быстрее меняется.",
         "Noise scale in time: larger means faster change."),
     "absolute value": (
-        "Брать модуль шума — узор становится «складчатым».",
+        "Брать модуль шума - узор становится «складчатым».",
         "Take the absolute value of the noise, folding the pattern."),
     "invert absolute value": (
         "Брать 1 минус модуль шума.",
         "Take one minus the absolute value of the noise."),
-    # ── Общая часть всех операторов ───────────────────────────────────────
+    # Общая часть всех операторов
     "operator start fadein": (
         "Секунда жизни ЭФФЕКТА, с которой оператор начинает включаться.",
         "Effect time in seconds at which the operator starts ramping up."),
@@ -460,7 +460,7 @@ ATTRS: Dict[str, Tuple[str, str]] = {
     "operator fade oscillate": (
         "Период мигания силы оператора между включением и выключением.",
         "Period of oscillation of the operator strength."),
-    # ── Столкновения ──────────────────────────────────────────────────────
+    # Столкновения
     "amount of bounce": (
         "Доля скорости, сохраняемая при отскоке от поверхности.",
         "Fraction of speed kept when bouncing off a surface."),
@@ -485,7 +485,7 @@ ATTRS: Dict[str, Tuple[str, str]] = {
     "maximum distance": (
         "Дальше этого расстояния от точки частицу не пускать.",
         "Particles are kept no farther than this from the point."),
-    # ── Форсы ─────────────────────────────────────────────────────────────
+    # Форсы
     "amount of force": (
         "Величина силы. Знак задаёт направление.",
         "Force magnitude. The sign sets the direction."),
@@ -500,7 +500,7 @@ ATTRS: Dict[str, Tuple[str, str]] = {
         "Upper bound of the random force per axis."),
 }
 
-#: Что делает модуль: (группа, functionName в нижнем регистре) → (ru, en).
+#: Что делает модуль: (группа, functionName в нижнем регистре) -> (ru, en)
 MODULES: Dict[Tuple[str, str], Tuple[str, str]] = {
     ("emitters", "emit_continuously"): (
         "Ровный поток частиц с заданным темпом.",
@@ -545,7 +545,7 @@ MODULES: Dict[Tuple[str, str], Tuple[str, str]] = {
         "Случайная стартовая скорость, в том числе по осям точки.",
         "Random initial velocity, optionally in control point axes."),
     ("initializers", "velocity noise"): (
-        "Стартовая скорость из шумового поля — вихри и разнобой.",
+        "Стартовая скорость из шумового поля - вихри и разнобой.",
         "Initial velocity from a noise field: swirls and variety."),
     ("initializers", "trail length random"): (
         "Случайная длина шлейфа (для render_sprite_trail).",
@@ -603,7 +603,7 @@ MODULES: Dict[Tuple[str, str], Tuple[str, str]] = {
         "Колеблет одно числовое поле частицы (радиус, альфу, угол).",
         "Oscillates one scalar particle field (radius, alpha, angle)."),
     ("operators", "oscillate vector"): (
-        "Колеблет векторное поле — обычно позицию: трепет, дрожание.",
+        "Колеблет векторное поле - обычно позицию: трепет, дрожание.",
         "Oscillates a vector field, usually position: flutter and jitter."),
     ("operators", "set child control points from particle positions"): (
         "Ставит контрольные точки дочерних систем на позиции своих частиц.",
@@ -615,7 +615,7 @@ MODULES: Dict[Tuple[str, str], Tuple[str, str]] = {
         "Притягивает или отталкивает частицы от точки.",
         "Pulls particles toward a point, or pushes them away."),
     ("forces", "twist around axis"): (
-        "Закручивает частицы вокруг оси — воронка.",
+        "Закручивает частицы вокруг оси - воронка.",
         "Twists particles around an axis: a vortex."),
     ("constraints", "collision via traces"): (
         "Столкновения с миром: отскок, скольжение или смерть.",
@@ -627,10 +627,10 @@ MODULES: Dict[Tuple[str, str], Tuple[str, str]] = {
         "Обычный рендер частиц спрайтами с анимацией спрайт-листа.",
         "The usual particle renderer: sprites with sheet animation."),
     ("renderers", "render_sprite_trail"): (
-        "Рисует частицы вытянутыми по движению — искры, капли.",
+        "Рисует частицы вытянутыми по движению - искры, капли.",
         "Draws particles stretched along their motion: sparks, drops."),
     ("renderers", "render_rope"): (
-        "Соединяет частицы лентой — лучи, струи, кровь.",
+        "Соединяет частицы лентой - лучи, струи, кровь.",
         "Connects particles with a rope: beams, jets, blood."),
     ("renderers", "render_screen_velocity_rotate"): (
         "Доворачивает спрайт по направлению движения НА ЭКРАНЕ.",
@@ -645,28 +645,28 @@ def _pick(pair: Optional[Tuple[str, str]], lang: str) -> Optional[str]:
 
 
 def attr_help(attr_name: str, lang: str = "en") -> Optional[str]:
-    """Пояснение к атрибуту либо None, если его нет в справочнике."""
+    """Пояснение к атрибуту либо None, если его нет в справочнике"""
     return _pick(ATTRS.get((attr_name or "").strip().lower()), lang)
 
 
 def module_help(group: str, function_name: str,
                 lang: str = "en") -> Optional[str]:
-    """Пояснение к модулю либо None."""
+    """Пояснение к модулю либо None"""
     key = ((group or "").strip().lower(),
            (function_name or "").strip().lower())
     return _pick(MODULES.get(key), lang)
 
 
 def enum_values(attr_name: str) -> Optional[dict]:
-    """Набор значений атрибута-перечисления либо None."""
+    """Набор значений атрибута-перечисления либо None"""
     return ENUMS.get((attr_name or "").strip().lower())
 
 
 def enum_label(attr_name: str, value, lang: str = "en") -> Optional[str]:
-    """Подпись значения перечисления («альфа» для output field = 7)."""
+    """Подпись значения перечисления («альфа» для output field = 7)"""
     values = enum_values(attr_name)
     if not values:
         return None
-    if isinstance(value, bool):     # bool — не перечисление, хоть и int
+    if isinstance(value, bool):     # bool - не перечисление, хоть и int
         return None
     return _pick(values.get(value), lang)

@@ -1,22 +1,22 @@
 """
-Данные о моделях снарядов TF2 (w_models — то, что летит: ракеты, гранаты,
-липучки, стрелы и т.п.).
+Данные о моделях снарядов TF2 (w_models - то, что летит: ракеты, гранаты,
+липучки, стрелы и т.п.)
 
 Мод строится через тот же полный pipeline, что у оружия:
-  MDL из VPK → Crowbar декомпилирует → QC отдаёт текстуры/skinfamilies →
-  команда RED/BLU и варианты работают автоматически.
+  MDL из VPK -> Crowbar декомпилирует -> QC отдаёт текстуры/skinfamilies ->
+  команда RED/BLU и варианты работают автоматически
 
-mode снаряда формируется как f"projectile_{key}" — благодаря этому
+mode снаряда формируется как f"projectile_{key}" - благодаря этому
 _resolve_3d_weapon_key/сборка трактуют его как обычное оружие
-(weapon_key = key), а путь к MDL берётся из PROJECTILE_MDL_PATHS.
+(weapon_key = key), а путь к MDL берётся из PROJECTILE_MDL_PATHS
 
-Пути выверены по tf2_misc_dir.vpk (папка models/weapons/w_models/).
+Пути выверены по tf2_misc_dir.vpk (папка models/weapons/w_models/)
 """
 
 from typing import Dict
 
-# key → {ru, en, mdl_path}. key совпадает с weapon_key (basename без расширения),
-# кроме случаев, когда модель лежит в подпапке (тогда путь задан явно).
+# key -> {ru, en, mdl_path}. key совпадает с weapon_key (basename без расширения),
+# кроме случаев, когда модель лежит в подпапке (тогда путь задан явно)
 PROJECTILES: Dict[str, dict] = {
     "w_rocket": {
         "ru": "Ракета", "en": "Rocket",
@@ -40,14 +40,14 @@ PROJECTILES: Dict[str, dict] = {
     },
     # `w_stickybomb_defender` здесь БЫЛ, и это ошибка: снаряда с таким именем
     # не существует. Это старая мировая модель САМОГО «Шотландского
-    # сопротивления» — пара к `v_stickybomb_defender` с общей текстурой,
+    # сопротивления» - пара к `v_stickybomb_defender` с общей текстурой,
     # кость `weapon_bone`, точка крепления `lasersight` и длина 25 единиц
     # против 12 у липучки. Игра её больше не грузит: `items_game` объявляет
     # оружию `c_scottish_resistance`, а эта пара осталась с тех времён, когда
-    # оружие делили на v_/w_. Мод из неё ничего бы не изменил.
+    # оружие делили на v_/w_. Мод из неё ничего бы не изменил
     #
-    # Само оружие в каталоге есть: «Оружие» → Подрывник → Второе оружие, и
-    # текстуру оно правит ту же (см. WEAPON_TEXTURE_PATHS).
+    # Само оружие в каталоге есть: «Оружие» -> Подрывник -> Второе оружие, и
+    # текстуру оно правит ту же (см. WEAPON_TEXTURE_PATHS)
     "w_arrow": {
         "ru": "Стрела", "en": "Arrow",
         "mdl_path": "models/weapons/w_models/w_arrow.mdl",
@@ -100,7 +100,7 @@ PROJECTILES: Dict[str, dict] = {
         "ru": "Липучка (вариант D)", "en": "Stickybomb (variant D)",
         "mdl_path": "models/weapons/w_models/w_stickybomb_d.mdl",
     },
-    # Своя летящая модель через атрибут "custom projectile model" в items_game.
+    # Своя летящая модель через атрибут "custom projectile model" в items_game
     "w_quadball_grenade": {
         "ru": "Граната Железного бомбардира", "en": "Iron Bomber Grenade",
         "mdl_path": "models/workshop/weapons/c_models/c_quadball/w_quadball_grenade.mdl",
@@ -111,10 +111,10 @@ PROJECTILES: Dict[str, dict] = {
     },
 }
 
-#: Префикс mode для снарядов (mode = f"{PROJECTILE_MODE_PREFIX}{key}").
+#: Префикс mode для снарядов (mode = f"{PROJECTILE_MODE_PREFIX}{key}")
 PROJECTILE_MODE_PREFIX = "projectile_"
 
-#: key → путь MDL (для подмешивания в WEAPON_MDL_PATHS).
+#: key -> путь MDL (для подмешивания в WEAPON_MDL_PATHS)
 PROJECTILE_MDL_PATHS: Dict[str, str] = {
     key: data["mdl_path"] for key, data in PROJECTILES.items()
 }

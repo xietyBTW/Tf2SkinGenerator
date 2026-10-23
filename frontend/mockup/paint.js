@@ -1,28 +1,30 @@
 /*
- * Краска из игры в превью шапки.
+ * Краска из игры в превью шапки
  *
  * Две трети косметики красится по альфа-маске текстуры: что именно
  * закрасится у своей текстуры, автор иначе видит только в игре. Кнопка у
- * команд открывает банки игры; выбор красит и карточки, и модель - решает
+ * команд открывает банки игры, выбор красит и карточки, и модель - решает
  * Python (view_state), страница применяет ответ, как у команд.
  */
 
 import * as api from './api.js';
 import { applyView } from './preview.js';
+import { still, staggerIn } from './motion.js';
 
 const button = document.getElementById('paint');
 const box = document.getElementById('paints');
-//: Банки: [{key, name, red, blu}], один раз за сеанс.
+//: Банки: [{key, name, red, blu}], один раз за сеанс
 let list = null;
-//: Ключ выбранной банки - из ответа Python (см. syncPaint).
+//: Ключ выбранной банки - из ответа Python (см. syncPaint)
 let chosen = '';
 
-/** Точка цвета на кнопке: видно, что превью покрашено, не открывая список. */
+/** Точка цвета на кнопке: видно, что превью покрашено, не открывая список */
 export function syncPaint(st) {
+  const was = chosen;
   chosen = st.paint || '';
   const dot = button.querySelector('.paint__dot');
   // Краска выбрана до того, как список спросили (Python помнит её между
-  // перезагрузками страницы): цвет точки узнаём и возвращаемся.
+  // перезагрузками страницы): цвет точки узнаём и возвращаемся
   if (chosen && !list) {
     api.paints().then((got) => { list = got; syncPaint(st); });
     return;
@@ -32,6 +34,11 @@ export function syncPaint(st) {
   if (paint) {
     dot.style.setProperty('--c', paint.red);
     dot.style.setProperty('--c2', paint.blu);
+    // Краска сменилась - точка на кнопке подпрыгивает: превью перекрашено
+    if (paint.key !== was && !still()) {
+      dot.animate([{ transform: 'scale(.3)' }, { transform: 'scale(1.35)' }, { transform: 'none' }],
+                  { duration: 460, easing: 'cubic-bezier(.2, .7, .2, 1)' });
+    }
   }
   button.classList.toggle('is-active', Boolean(chosen));
 }
@@ -73,7 +80,8 @@ async function open() {
   }
   box.append(grid);
   box.showPopover();
-  // Под кнопкой, правым краем к ней: кнопка у правого края экрана.
+  staggerIn(grid.children, Infinity);     // банки высыпаются лесенкой
+  // Под кнопкой, правым краем к ней: кнопка у правого края экрана
   const at = button.getBoundingClientRect();
   const size = box.getBoundingClientRect();
   box.style.top = (at.bottom + 8) + 'px';

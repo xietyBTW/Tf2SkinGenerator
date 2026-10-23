@@ -1,10 +1,10 @@
 """
-Разделение папки установки и папки данных.
+Разделение папки установки и папки данных
 
-Смысл разделения — обновление: оно заменяет папку установки целиком, и всё,
+Смысл разделения - обновление: оно заменяет папку установки целиком, и всё,
 что человек сделал, обязано лежать в другом месте. Проверяем обе стороны: в
 разработке ничего не изменилось, в собранном приложении данные ушли в
-%LOCALAPPDATA%, а старые данные переезжают туда один раз и не затирают новые.
+%LOCALAPPDATA%, а старые данные переезжают туда один раз и не затирают новые
 """
 
 import tempfile
@@ -16,7 +16,7 @@ from src.shared import paths
 
 
 class DevModeTest(unittest.TestCase):
-    """Из репозитория пути обязаны остаться прежними — иначе поедут тесты."""
+    """Из репозитория пути обязаны остаться прежними - иначе поедут тесты"""
 
     def test_both_roots_are_the_current_folder(self):
         with patch.object(paths, "is_frozen", return_value=False):
@@ -27,7 +27,7 @@ class DevModeTest(unittest.TestCase):
 
 
 class ExportDirTest(unittest.TestCase):
-    """Папка экспорта из настроек: относительная — от папки данных."""
+    """Папка экспорта из настроек: относительная - от папки данных"""
 
     def _export(self, configured):
         from src.config.app_config import AppConfig
@@ -36,8 +36,8 @@ class ExportDirTest(unittest.TestCase):
             return paths.export_dir()
 
     def test_default_lives_in_data_folder(self):
-        """Раньше «export» считался от текущей папки процесса: в собранном
-        приложении мод уходил мимо папки данных, и там было пусто."""
+        """«export» считается от папки данных, а не от текущей папки
+        процесса"""
         self.assertEqual(self._export("export"), Path(r"C:\Data\export"))
         self.assertEqual(self._export(""), Path(r"C:\Data\export"))
 
@@ -54,7 +54,7 @@ class FrozenModeTest(unittest.TestCase):
                     Path(r"C:\Users\x\AppData\Local") / paths.APP_DIR_NAME)
 
     def test_without_localappdata_falls_back_to_install_dir(self):
-        """Урезанное окружение не повод падать — ведём себя как раньше."""
+        """Урезанное окружение не повод падать - ведём себя как раньше"""
         with patch.object(paths, "is_frozen", return_value=True):
             with patch.object(paths, "install_dir", return_value=Path(r"C:\App")):
                 with patch.dict("os.environ", {}, clear=True):
@@ -85,7 +85,7 @@ class MigrationTest(unittest.TestCase):
                          "моя работа")
 
     def test_existing_data_is_never_overwritten(self):
-        """Второй запуск не должен затирать то, что человек уже наработал."""
+        """Второй запуск не должен затирать то, что человек уже наработал"""
         (self.install / "config").mkdir()
         (self.install / "config" / "app_config.json").write_text("старое", encoding="utf-8")
         (self.data / "config").mkdir()

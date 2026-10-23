@@ -1,8 +1,8 @@
-"""Тесты обнаружения текстур custom-VPK мода (CustomVPKService.discover_textures).
+"""Тесты обнаружения текстур custom-VPK мода (CustomVPKService.discover_textures)
 
-Обнаружение идёт по самим VTF-файлам — чтобы показать ВСЕ текстуры мода
+Обнаружение идёт по самим VTF-файлам - чтобы показать ВСЕ текстуры мода
 (включая стили), не завися от полноты VMT. Порядок RED-перед-BLU и отрисовка
-превью — это слой 2D-карточек UI (preview_vpk_mod_worker), здесь не проверяется.
+превью - это слой 2D-карточек UI (preview_vpk_mod_worker), здесь не проверяется
 """
 
 import os
@@ -16,7 +16,7 @@ from src.services.custom_vpk_service import CustomVPKService
 def _touch(path: str):
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, "wb") as f:
-        f.write(b"\x00")  # содержимое неважно — discovery по факту наличия файла
+        f.write(b"\x00")  # содержимое неважно - discovery по факту наличия файла
 
 
 class DiscoverTexturesTests(unittest.TestCase):

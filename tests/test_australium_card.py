@@ -1,10 +1,9 @@
 """
-Австралий — своя карточка, а не переключатель показа поверх главной.
+Австралий - своя карточка, а не переключатель показа поверх главной
 
-Раньше вариант только подменял картинку главной карточки игровым gold-кадром:
-положить свою текстуру австралия было некуда, а части красили главную. Теперь
-у варианта своя карточка с той же геометрией, и всё, что умеет карточка, —
-текстура, части, настройки — у него своё.
+У варианта своя карточка с той же геометрией, и всё, что умеет карточка, -
+текстура, части, настройки - у него своё. Иначе положить свою текстуру
+австралия было бы некуда, а части красили бы главную
 """
 
 from __future__ import annotations
@@ -41,7 +40,7 @@ class VariantCardTests(unittest.TestCase):
         self._dir.cleanup()
 
     def test_the_variant_card_stands_in_for_the_main_one_while_toggled(self):
-        """Как RED/BLU: карточка одна, что на ней — решает переключатель."""
+        """Как RED/BLU: карточка одна, что на ней - решает переключатель"""
         self.assertEqual(self.s.card_materials(), [SINGLE_TEX_KEY])
         self.assertEqual(self.s.visible_textures(), {SINGLE_TEX_KEY: self.base})
         self.t.australium_active = True
@@ -50,7 +49,7 @@ class VariantCardTests(unittest.TestCase):
 
     def test_own_texture_on_the_variant_shows_on_the_model_when_toggled(self):
         self.t.set_texture('c_scattergun_gold', self.mine)
-        # Главная не тронута ни в альбоме, ни на модели, пока вариант выключен.
+        # Главная не тронута ни в альбоме, ни на модели, пока вариант выключен
         self.assertEqual(self.s.visible_textures()[SINGLE_TEX_KEY], self.base)
         self.assertEqual(self.s.scene_textures()[SINGLE_TEX_KEY], self.base)
         self.t.australium_active = True

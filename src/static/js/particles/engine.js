@@ -1,18 +1,18 @@
 /**
- * Движок частиц Source (TF2) — порт логики noclip.website ParticleSystem.ts
- * (MIT) на упрощённое AoS-хранение для редактора.
+ * Движок частиц Source (TF2) - порт логики noclip.website ParticleSystem.ts
+ * (MIT) на упрощённое AoS-хранение для редактора
  *
- * Вход: JSON от particle_editor_service.py —
+ * Вход: JSON от particle_editor_service.py -
  *   systems:   {имя: {attrs, initializers, operators, emitters, renderers,
  *                     children: [{delay, childName}]}}
  *   materials: {путь: {dataUrl, sheet, additive, shader, width, height}}
- * Все имена атрибутов — в нижнем регистре (так хранит srctools).
+ * Все имена атрибутов - в нижнем регистре (так хранит srctools)
  *
  * Рендеринг здесь не выполняется: ParticleSystemInstance только симулирует,
  * particles3d.html снимает состояние через collectSprites().
  */
 
-// ── Утилиты ──────────────────────────────────────────────────────────────── //
+// Утилиты
 
 const DEG_TO_RAD = Math.PI / 180;
 const TWO_PI = Math.PI * 2;
@@ -25,7 +25,7 @@ function schlickBias(t, bias) {
     return t / ((((1.0 / bias) - 2.0) * (1.0 - t)) + 1.0);
 }
 
-/** Генератор случайных Numerical Recipes — как в noclip (детерминизм рестарта). */
+/** Генератор случайных Numerical Recipes - как в noclip (детерминизм рестарта) */
 class SeededRNG {
     constructor(seed) { this.state = (seed >>> 0) || ((Math.random() * 0xFFFFFFFF) >>> 0); }
     nextU32() {
@@ -35,14 +35,14 @@ class SeededRNG {
     nextF32() { return this.nextU32() / 0xFFFFFFFF; }
 }
 
-/** Чтение атрибута модуля/системы: attr(mod, 'lifetime_min', 0). */
+/** Чтение атрибута модуля/системы: attr(mod, 'lifetime_min', 0) */
 function attr(el, name, def) {
     const a = el.attrs[name.toLowerCase()];
     if (a === undefined || a.v === null || a.v === undefined) return def;
     return a.v;
 }
 
-/** Цвет [r,g,b,a] 0–255 → [r,g,b,a] 0–1. */
+/** Цвет [r,g,b,a] 0-255 -> [r,g,b,a] 0-1 */
 function colorF(c, def) {
     if (!Array.isArray(c) || c.length < 3) return def;
     return [c[0] / 255, c[1] / 255, c[2] / 255, (c.length > 3 ? c[3] : 255) / 255];
@@ -55,8 +55,8 @@ function randRangeExp(rand, min, max, exp) {
     return lerp(min, max, v);
 }
 
-// ── Шум ──────────────────────────────────────────────────────────────────── //
-// ponytail: value-noise вместо SparseConvolutionNoise Valve — гладкий [-1,1],
+// Шум
+// ponytail: value-noise вместо SparseConvolutionNoise Valve - гладкий [-1,1],
 // формы траекторий близки, побайтового совпадения с игрой нет
 
 function _hash3(x, y, z) {
@@ -80,11 +80,11 @@ function valueNoise3(x, y, z) {
 }
 
 /**
- * NoiseSIMD из mathlib/ssenoise.cpp — шум, которым Source считает Remap
+ * NoiseSIMD из mathlib/ssenoise.cpp - шум, которым Source считает Remap
  * Noise to Scalar и Velocity Noise. Не Перлин: решётка 256³ из таблиц
  * перестановок и трилинейная (без сглаживания) интерполяция значений 0..1,
  * дробная часть координаты квантуется до 1/256 (трюк с добавлением 2^15 к
- * float). Результат 2·(v − 0.5) ∈ [−1, 1]. Таблицы — noisedata.h из SDK.
+ * float). Результат 2·(v − 0.5) ∈ [−1, 1]. Таблицы - noisedata.h из SDK.
  * Сверено с симуляцией Valve через ParticleOracle до 4-го знака.
  */
 const NOISE_PERM_A = [
@@ -185,7 +185,7 @@ function _noiseLattice(ix, iy, iz) {
 
 // Младшие 16 бит float32(v + 32768): 8 бит целой части и 8 бит дроби. Для
 // отрицательных v число попадает в соседнюю двоичную октаву и биты значат
-// другое, но игра делает ровно то же, поэтому повторяем битовый трюк.
+// другое, но игра делает ровно то же, поэтому повторяем битовый трюк
 const _noiseF32 = new Float32Array(1);
 const _noiseU32 = new Uint32Array(_noiseF32.buffer);
 function _noiseSplit(v) {
@@ -206,8 +206,8 @@ function valveNoise(x, y, z) {
 }
 
 /**
- * Шум → выходное значение, как у Valve: «absolute value» берёт |n| и отдаёт
- * его БЕЗ перевода в 0..1, «invert» — 1 − v поверх; без флагов — (n+1)/2.
+ * Шум -> выходное значение, как у Valve: «absolute value» берёт |n| и отдаёт
+ * его БЕЗ перевода в 0..1, «invert» - 1 − v поверх, без флагов - (n+1)/2.
  * Результат не зажимается (с инверсией без abs выходит и больше 1).
  */
 function valveNoiseOut(n, absVal, invert, outMin, outMax) {
@@ -216,7 +216,7 @@ function valveNoiseOut(n, absVal, invert, outMin, outMax) {
     return lerp(outMin, outMax, absVal ? v : v * 0.5 + 0.5);
 }
 
-// ── Поля частицы по индексам Source (particles.h) ────────────────────────── //
+// Поля частицы по индексам Source (particles.h)
 
 const SCALAR_FIELDS = {
     1: 'lifetime', 3: 'radius', 4: 'rotation', 5: 'rotSpeed',
@@ -247,14 +247,14 @@ function outputRange(field, lo, hi) {
 }
 
 /**
- * Активен ли осциллятор для частицы сейчас.
+ * Активен ли осциллятор для частицы сейчас
  *
  * Окно задаётся парами «start/end time min..max» (на частицу выбирается
- * случайное значение в диапазоне). Трактовка времени — по флагу
- * «start/end proportional» (доля жизни vs секунды); отдельный флаг
- * «proportional 0/1» к окну НЕ относится, и раньше окно считалось по нему —
- * из-за этого у эффектов вроде halloween_ghosts (proportional 0/1 = false,
- * start/end proportional = true) осцилляция обрывалась почти сразу.
+ * случайное значение в диапазоне). Трактовка времени - по флагу
+ * «start/end proportional» (доля жизни vs секунды), отдельный флаг
+ * «proportional 0/1» к окну НЕ относится: по нему у эффектов вроде
+ * halloween_ghosts (proportional 0/1 = false, start/end proportional = true)
+ * осцилляция обрывалась бы почти сразу.
  */
 function oscActive(mod, sys, p, slot) {
     const proportional = attr(mod, 'start/end proportional',
@@ -273,13 +273,13 @@ function oscActive(mod, sys, p, slot) {
 /**
  * Аргумент синуса осцилляторов (Oscillate Scalar/Vector), в единицах
  * SinEst01SIMD: 1.0 = π. По умолчанию «proportional 0/1» = ИСТИНА (так в
- * Source и во всех стоковых модулях) — фаза считается от ДОЛИ ЖИЗНИ частицы,
+ * Source и во всех стоковых модулях) - фаза считается от ДОЛИ ЖИЗНИ частицы,
  * а не от абсолютного времени. За жизнь аргумент проходит всего mult*freq,
  * поэтому знак синуса обычно не меняется: оператор работает не как колебание,
  * а как постоянный снос в свою сторону у каждой частицы.
  */
 /**
- * SinEst01SIMD из ssemath.h — то, чем Source считает синус осцилляторов:
+ * SinEst01SIMD из ssemath.h - то, чем Source считает синус осцилляторов:
  * НЕ синус, а парабола x*(4-4x) на полупериоде, период 2 (1.0 = π). У нулей
  * она «толще» синуса на 15-20%, и настоящий Math.sin давал на Oscillate
  * Vector накопленный разъезд с игрой в 3% амплитуды. Снято с симуляции Valve.
@@ -306,11 +306,11 @@ function oscPhase(mod, sys, p, freq, mult, phase) {
  * «operator start/end fadein», «operator start/end fadeout» и
  * «operator fade oscillate»: по ним движок считает силу от ВРЕМЕНИ СИСТЕМЫ и
  * при нуле не запускает оператор вовсе (CheckIfOperatorShouldRun).
- * Инициализаторы силу НЕ получают — в Source это прямо прокомментировано
- * («initializers don't support it»), поэтому их огибающая ни на что не влияет.
+ * Инициализаторы силу НЕ получают - в Source это прямо прокомментировано
+ * («initializers don't support it»), поэтому их огибающая ни на что не влияет
  *
  * Возвращает null, когда все параметры нулевые (подавляющее большинство
- * модулей) — тогда сила всегда 1 и лишней работы в кадре нет.
+ * модулей) - тогда сила всегда 1 и лишней работы в кадре нет.
  */
 function opEnvelope(mod) {
     const inStart = attr(mod, 'operator start fadein', 0);
@@ -322,14 +322,14 @@ function opEnvelope(mod) {
     return { inStart, inEnd, outStart, outEnd, period };
 }
 
-/** FadeInOut из particles.cpp: сила оператора в момент времени системы. */
+/** FadeInOut из particles.cpp: сила оператора в момент времени системы */
 function opStrength(env, curTime) {
     if (env === null) return 1;
     let t = curTime;
     if (env.period > 0) t = (t / env.period) % 1;
     if (env.inStart > t) return 0;
     if (env.outEnd > 0 && env.outEnd < t) return 0;
-    // порядок границ может быть нарушен автором — Source их выправляет
+    // порядок границ может быть нарушен автором - Source их выправляет
     const inEnd = Math.max(env.inEnd, env.inStart);
     const outStart = Math.max(env.outStart, inEnd);
     const outEnd = Math.max(env.outEnd, outStart);
@@ -341,7 +341,7 @@ function opStrength(env, curTime) {
     return strength;
 }
 
-/** Обёртка силы под огибающую: масштабируется её вклад в ускорение. */
+/** Обёртка силы под огибающую: масштабируется её вклад в ускорение */
 function withForceStrength(fn, env) {
     if (env === null) return fn;
     const contrib = [0, 0, 0];
@@ -354,16 +354,16 @@ function withForceStrength(fn, env) {
     };
 }
 
-/** SimpleSplineRemapValClamped из mathlib: линейный remap + сглаживание. */
+/** SimpleSplineRemapValClamped из mathlib: линейный remap + сглаживание */
 function splineRemapClamped(val, a, b, c, d) {
     if (a === b) return val >= b ? d : c;
     return lerp(c, d, smoothstep(saturate(invlerp(a, b, val))));
 }
 
 /**
- * Bias() из mathlib — СТЕПЕННАЯ форма: x^(log(amt)/log(0.5)).
- * Это не тот bias, что в schlickBias (та форма — BiasSIMD, у Alpha Fade Out
- * и Radius Scale); в Source обе живут рядом под похожими именами.
+ * Bias() из mathlib - СТЕПЕННАЯ форма: x^(log(amt)/log(0.5)).
+ * Это не тот bias, что в schlickBias (та форма - BiasSIMD, у Alpha Fade Out
+ * и Radius Scale), в Source обе живут рядом под похожими именами.
  */
 function valveBias(x, amt) {
     return Math.pow(x, Math.log(amt) * -1.4427);
@@ -374,7 +374,7 @@ function remapValClamped(val, inMin, inMax, outMin, outMax) {
     return lerp(outMin, outMax, saturate(invlerp(inMin, inMax, val)));
 }
 
-// ── Алиасы старых имён (DMX v1 PCF) и вариантов написания ────────────────── //
+// Алиасы старых имён (DMX v1 PCF) и вариантов написания
 
 const FN_ALIASES = {
     'lifetime_random': 'lifetime random',
@@ -394,11 +394,11 @@ const FN_ALIASES = {
     'oscillate_scalar': 'oscillate scalar',
     'oscillate_vector': 'oscillate vector',
     'postion_lock_to_controlpoint': 'movement lock to control point',
-    // ponytail: кости в превью нет — привязка к точке с теми же спадами
+    // ponytail: кости в превью нет - привязка к точке с теми же спадами
     // (у Valve без модели оператор тоже держит частицу у точки)
     'movement lock to bone': 'movement lock to control point',
     'position_lock_to_controlpoint': 'movement lock to control point',
-    // Найдено аудитом стоковых PCF: те же модули, но через подчёркивания —
+    // Найдено аудитом стоковых PCF: те же модули, но через подчёркивания -
     // без алиасов превью считало их нереализованными и не отыгрывало
     'alpha_fade_in_random': 'alpha fade in random',
     'alpha_fade_out_random': 'alpha fade out random',
@@ -414,15 +414,15 @@ function resolveFnName(name) {
 
 /**
  * Базис контрол-пойнта по умолчанию (particles.cpp): Forward=(0,1,0),
- * Right=(1,0,0), Up=(0,0,1) — он НЕ совпадает с мировыми осями. Свой базис
+ * Right=(1,0,0), Up=(0,0,1) - он НЕ совпадает с мировыми осями. Свой базис
  * задаётся через controller.controlPointBases (см. setControlPointOrientation
- * в particles3d.html); отсюда же будет питаться привязка к attachment модели.
+ * в particles3d.html), отсюда же будет питаться привязка к attachment модели.
  */
 const CP_DEFAULT_BASIS = { fwd: [0, 1, 0], right: [1, 0, 0], up: [0, 0, 1] };
 
 /**
- * Локальные координаты CP → мир по МАТРИЦЕ CP: x*Forward - y*Right + z*Up.
- * Так Source строит matrix3x4 Init(Forward, -Right, Up, позиция) — по ней идут
+ * Локальные координаты CP -> мир по МАТРИЦЕ CP: x*Forward - y*Right + z*Up.
+ * Так Source строит matrix3x4 Init(Forward, -Right, Up, позиция) - по ней идут
  * и позиции («bias in local system»), и скорость в Velocity Random.
  */
 function cpLocalToWorld(b, v, out) {
@@ -434,7 +434,7 @@ function cpLocalToWorld(b, v, out) {
 
 /**
  * Порт TransformAxis (particles.h): x*Right + y*Forward + z*Up.
- * Да, это ТРЕТЬЕ сопоставление осей в Source — у матрицы CP минус по Y,
+ * Да, это ТРЕТЬЕ сопоставление осей в Source - у матрицы CP минус по Y,
  * у скорости в Position Within Sphere Random плюс, здесь переставлены X и Y.
  * Каждое перенесено как есть: иначе эффект развернёт.
  */
@@ -446,8 +446,8 @@ function cpTransformAxis(b, v, out) {
 }
 
 /**
- * Переход от одного базиса контрольной точки к другому — то есть поворот,
- * который CP совершила между кадрами. null, если она не поворачивалась.
+ * Переход от одного базиса контрольной точки к другому - то есть поворот,
+ * который CP совершила между кадрами. null, если она не поворачивалась
  *
  * Знаки осей здесь не важны: одна и та же тройка используется и для
  * разложения, и для сборки, поэтому договорённость сокращается.
@@ -461,7 +461,7 @@ function basisDelta(from, to) {
     return null;
 }
 
-/** Поворачивает точку v вокруг center по basisDelta; k — сила (0..1). */
+/** Поворачивает точку v вокруг center по basisDelta; k - сила (0..1) */
 function applyBasisDelta(delta, v, center, k) {
     const { from, to } = delta;
     const rx = v[0] - center[0], ry = v[1] - center[1], rz = v[2] - center[2];
@@ -475,7 +475,7 @@ function applyBasisDelta(delta, v, center, k) {
     }
 }
 
-/** Поворот вектора v вокруг оси axis (единичной) на angle — формула Родрига. */
+/** Поворот вектора v вокруг оси axis (единичной) на angle - формула Родрига */
 function rotateAboutAxis(v, axis, angle, out) {
     const c = Math.cos(angle), sn = Math.sin(angle);
     const x = v[0], y = v[1], z = v[2];   // out может быть тем же массивом, что v
@@ -507,10 +507,10 @@ function vec3RandomUnit(rand) {
     return [r * Math.cos(a), r * Math.sin(a), z];
 }
 
-// ── Sheet (спрайт-лист из VTF-ресурса) ───────────────────────────────────── //
+// Sheet (спрайт-лист из VTF-ресурса)
 
 class Sheet {
-    /** @param {object} json — {sequences: {no: {clamp, duration, frames}}} */
+    /** @param {object} json - {sequences: {no: {clamp, duration, frames}}} */
     constructor(json) {
         this.sequences = {};
         for (const [no, seq] of Object.entries(json.sequences || {}))
@@ -554,7 +554,7 @@ class Sheet {
             setScaleBias(out1, f1.coords[coord]);
             return (time - t0) / f0.duration;
         }
-        // время за пределами суммы кадров (погрешность float) — последний кадр
+        // время за пределами суммы кадров (погрешность float) - последний кадр
         setScaleBias(out0, seq.frames[seq.frames.length - 1].coords[coord]);
         out1[0] = out0[0]; out1[1] = out0[1]; out1[2] = out0[2]; out1[3] = out0[3];
         return 0;
@@ -568,12 +568,12 @@ function setScaleBias(dst, c) {
     dst[3] = c[1];
 }
 
-// ── Инициализаторы ───────────────────────────────────────────────────────── //
+// Инициализаторы
 
 /**
  * Какие атрибуты инициализатор ЗАДАЁТ (а не правит поверх). В Source второй
  * инициализатор того же атрибута молча пропускается (InitMultipleOverride):
- * сфера, а за ней бокс — частица остаётся в сфере; две Lifetime Random —
+ * сфера, а за ней бокс - частица остаётся в сфере, две Lifetime Random -
  * действует первая. «Модификаторы» (offset, warp, velocity, remap) правят
  * поверх и здесь не перечислены. Снято с симуляции Valve (particles.lib).
  */
@@ -622,14 +622,14 @@ const INITIALIZERS = {
         const speedLocalMin = attr(mod, 'speed_in_local_coordinate_system_min', [0, 0, 0]);
         const speedLocalMax = attr(mod, 'speed_in_local_coordinate_system_max', [0, 0, 0]);
 
-        // C_INIT_CreateWithinSphere: направление и дистанция — из ОДНОГО
+        // C_INIT_CreateWithinSphere: направление и дистанция - из ОДНОГО
         // броска (RandomVectorInUnitSphere возвращает точку и её длину).
         // У точки, равномерной по объёму шара, CDF длины = r³, то есть
-        // cbrt(random) — это и есть доля для лерпа distance_min..max.
+        // cbrt(random) - это и есть доля для лерпа distance_min..max
         let dir = vec3RandomUnit(sys.rand);
         const unitLen = Math.cbrt(sys.rand.nextF32());
         // distance_bias_absolute_value: ненулевая компонента складывает
-        // соответствующую полусферу в другую (fabs у Valve) — в стоке так
+        // соответствующую полусферу в другую (fabs у Valve) - в стоке так
         // сделаны 195 «полусферических» систем
         for (let i = 0; i < 3; i++)
             if (distBiasAbs[i] !== 0) dir[i] = Math.abs(dir[i]);
@@ -643,7 +643,7 @@ const INITIALIZERS = {
         const basis = sys.getControlPointBasis(cpNo);
         const off = [dir[0] * distance, dir[1] * distance, dir[2] * distance];
         // Source: локальную систему включает ТОЛЬКО сочетание «есть distance_bias»
-        // и «bias in local system» — иначе точка просто смещается на позицию CP
+        // и «bias in local system» - иначе точка просто смещается на позицию CP
         const hasBias = distBias[0] !== 1 || distBias[1] !== 1 || distBias[2] !== 1;
         if (hasBias && biasLocal) cpLocalToWorld(basis, off, off);
         const px = off[0] + cp[0], py = off[1] + cp[1], pz = off[2] + cp[2];
@@ -717,9 +717,9 @@ const INITIALIZERS = {
             if (propRadius) off[i] *= p.radius;
         }
         // «offset in local space 0/1»: смещение поворачивается матрицей CP
-        // (VectorRotate, без переноса). Раньше флаг игнорировался, и точка
-        // спавна в превью уезжала относительно игры на всю длину смещения —
-        // особенно заметно у эффектов, привязанных к оружию
+        // (VectorRotate, без переноса). Без этого точка спавна уезжает
+        // относительно игры на всю длину смещения - особенно заметно у
+        // эффектов, привязанных к оружию
         if (attr(mod, 'offset in local space 0/1', false)) {
             const cpNo = attr(mod, 'control_point_number', 0);
             cpLocalToWorld(sys.getControlPointBasis(cpNo), off, off);
@@ -785,8 +785,7 @@ const INITIALIZERS = {
 
     'velocity random': (mod, sys, p) => {
         // C_INIT_VelocityRandom. Параметры называются random_speed_*, а НЕ
-        // speed_* (те есть только у Position Within Sphere Random) — раньше
-        // движок читал несуществующие имена и терял всю случайную скорость.
+        // speed_* (те есть только у Position Within Sphere Random)
         const cpNo = attr(mod, 'control_point_number', 0);
         let speedMin = attr(mod, 'random_speed_min', 0);
         let speedMax = attr(mod, 'random_speed_max', 0);
@@ -801,7 +800,7 @@ const INITIALIZERS = {
             cpLocalToWorld(sys.getControlPointBasis(cpNo), local, vel);
         }
         // RandomVector: покомпонентно в КУБЕ [min..max], а не направление на
-        // сфере × скорость. При min=0 игра толкает частицы в один октант.
+        // сфере × скорость. При min=0 игра толкает частицы в один октант
         if (speedMax > 0)
             for (let i = 0; i < 3; i++)
                 vel[i] += lerp(speedMin, speedMax, sys.rand.nextF32());
@@ -823,12 +822,12 @@ const INITIALIZERS = {
         const off = Array.isArray(so) ? so : [0, 0, 0];
         const cx = (p.pos[0] + off[0]) * ss + t, cy = (p.pos[1] + off[1]) * ss + t,
               cz = (p.pos[2] + off[2]) * ss + t;
-        // Точка шума — позиция ЧАСТИЦЫ (в отличие от Remap Noise to Scalar).
-        // X-компонента — ровно NoiseSIMD(точка), сверено с Valve. Y и Z у
+        // Точка шума - позиция ЧАСТИЦЫ (в отличие от Remap Noise to Scalar).
+        // X-компонента - ровно NoiseSIMD(точка), сверено с Valve. Y и Z у
         // Valve берутся из того же шума, но с ячейкой в 4 раза крупнее по X
         // и в 8 по Y и почти без зависимости от Z (снято с симуляции по
-        // сеткам); точные смещения не восстановлены — здесь та же
-        // решётка с этими масштабами и своим сдвигом на компоненту.
+        // сеткам), точные смещения не восстановлены - здесь та же
+        // решётка с этими масштабами и своим сдвигом на компоненту
         const ns = [valveNoise(cx, cy, cz),
                     valveNoise(cx / 4 + 100.125, cy / 8 + 0.0625, cz / 256),
                     valveNoise(cx / 4 + 200.125, cy / 8 + 50.0625, cz / 256)];
@@ -865,15 +864,15 @@ const INITIALIZERS = {
         const inc = Math.max(1, attr(mod, 'particle increment amount', 1) | 0);
         const parent = sys.parent;
         if (!parent || parent.particles.length === 0) {
-            p.dead = true;  // некуда спавниться — не оставлять мусор в (0,0,0)
+            p.dead = true;  // некуда спавниться - не оставлять мусор в (0,0,0)
             return;
         }
         const src = parent.particles[(sys.spawnSeq * inc) % parent.particles.length];
         // Снято с симуляции Valve: ребёнок рождается там, где родитель БЫЛ в
         // момент рождения (между прошлым и текущим кадром, доля f), а
-        // «наследуемая скорость» — это scale × путь родителя от начала кадра
+        // «наследуемая скорость» - это scale × путь родителя от начала кадра
         // до этого момента (то есть f × шаг родителя, а не весь шаг). Дети,
-        // рождённые в начале кадра, почти стоят; в конце — летят быстрее всех.
+        // рождённые в начале кадра, почти стоят, в конце - летят быстрее всех
         const dt = sys.deltaTime || 1;
         const f = saturate((p.spawnTime - (sys.curTime - dt)) / dt);
         for (let i = 0; i < 3; i++) {
@@ -915,17 +914,17 @@ const INITIALIZERS = {
         const ts = attr(mod, 'time noise coordinate scale', 1);
         const to = attr(mod, 'time coordinate offset', 0);
         const so = attr(mod, 'spatial coordinate offset', [0, 0, 0]);
-        // Точка шума — позиция частицы ДО модификаторов (то, что дал первый
-        // инициализатор позиции; смещения offset/warp Valve тут не видит),
+        // Точка шума - позиция частицы ДО модификаторов (то, что дал первый
+        // инициализатор позиции, смещения offset/warp Valve тут не видит),
         // время рождения прибавляется ко всем трём осям. Снято с симуляции
         // Valve: бокс совпадает точно, у сферы со случайным направлением
-        // остаётся расхождение, не разобранное.
+        // остаётся расхождение, не разобранное
         const at = p.posInit || p.pos;
         const t = (p.spawnTime + to) * ts;
         const n = valveNoise((at[0] + so[0]) * ss + t, (at[1] + so[1]) * ss + t,
                              (at[2] + so[2]) * ss + t);
         // Скалярный вариант пишет имена целиком ('invert absolute value'),
-        // сокращённые 'invert abs value' — у ВЕКТОРНОГО Velocity Noise
+        // сокращённые 'invert abs value' - у ВЕКТОРНОГО Velocity Noise
         setScalarField(p, attr(mod, 'output field', 3), valveNoiseOut(
             n, attr(mod, 'absolute value', false), attr(mod, 'invert absolute value', false),
             attr(mod, 'output minimum', 0), attr(mod, 'output maximum', 1)));
@@ -934,7 +933,7 @@ const INITIALIZERS = {
     'remap control point to vector': (mod, sys, p) => {
         const cpNo = attr(mod, 'input control point number', 0);
         // CP задаёт код игры (напр. CP9 = цвет шина килстрика). Пока он не
-        // выставлен в превью — не затирать цвет/поля нулями
+        // выставлен в превью - не затирать цвет/поля нулями
         if (!sys.isControlPointDefined(cpNo)) return;
         const cp = sys.getControlPoint(cpNo);
         const inMin = attr(mod, 'input minimum', [0, 0, 0]);
@@ -953,7 +952,7 @@ const INITIALIZERS = {
         if (!sys.isControlPointDefined(cpNo)) return;
         const cp = sys.getControlPoint(cpNo);
         // Имя поля тут именно такое: у скалярного remap-а от CP игра пишет
-        // 'input field 0-2 X/Y/Z' (короткое 'input field' — у remap initial scalar)
+        // 'input field 0-2 X/Y/Z' (короткое 'input field' - у remap initial scalar)
         const axis = attr(mod, 'input field 0-2 x/y/z', 0);
         setScalarField(p, attr(mod, 'output field', 3), remapValClamped(
             cp[Math.min(2, Math.max(0, axis))],
@@ -973,18 +972,18 @@ const INITIALIZERS = {
         }
     },
 
-    // Контрол-пойнты в превью статичны — скорость CP всегда нулевая
+    // Контрол-пойнты в превью статичны - скорость CP всегда нулевая
     'velocity inherit from control point': () => {},
 
     'move particles between 2 control points': (mod, sys, p) => {
         // Рождается у своей точки (плюс «start offset» вдоль пути), летит к
         // конечной со случайной скоростью и живёт ровно столько, сколько
         // нужно, чтобы долететь (жизнь перекрывает Lifetime Random). «end
-        // spread» — разброс цели. Снято с симуляции Valve.
+        // spread» - разброс цели. Снято с симуляции Valve
         const a = sys.getControlPointAt(0, p.spawnTime);
         const b = sys.getControlPointAt(attr(mod, 'end control point', 1), p.spawnTime);
         const spread = attr(mod, 'end spread', 0);
-        // Разброс цели — равномерно по ШАРУ (разброс по осям у Valve 0.45·R,
+        // Разброс цели - равномерно по ШАРУ (разброс по осям у Valve 0.45·R,
         // у куба было бы 0.58·R)
         const end = [b[0], b[1], b[2]];
         if (spread > 0) {
@@ -1007,9 +1006,9 @@ const INITIALIZERS = {
     },
 
     'lifetime pre-age noise': (mod, sys, p) => {
-        // Частица рождается уже прожившей часть жизни: «start age» — ДОЛЯ
+        // Частица рождается уже прожившей часть жизни: «start age» - ДОЛЯ
         // времени жизни, а не секунды (0.3 при жизни 2 с даёт возраст 0.6,
-        // при 2.5 с — 0.75; симуляция particles.lib). Шум — как у Remap Noise.
+        // при 2.5 с - 0.75; симуляция particles.lib). Шум - как у Remap Noise
         const ss = attr(mod, 'spatial noise coordinate scale', 1);
         const ts = attr(mod, 'time noise coordinate scale', 1);
         const to = attr(mod, 'time coordinate offset', 0);
@@ -1023,10 +1022,10 @@ const INITIALIZERS = {
     },
 
     'position on model random': (mod, sys, p) => {
-        // Есть показанная модель — точка на её поверхности (вьювер даёт
-        // sampleModel; хитбоксов у нас нет, поверхность — ближайшее к ним).
-        // Без модели — сама контрол-пойнт (так же подставляет и оракул без
-        // мира); «direction bias» без хитбоксов не к чему прикладывать.
+        // Есть показанная модель - точка на её поверхности (вьювер даёт
+        // sampleModel; хитбоксов у нас нет, поверхность - ближайшее к ним).
+        // Без модели - сама контрол-пойнт (так же подставляет и оракул без
+        // мира), «direction bias» без хитбоксов не к чему прикладывать
         const sample = sys.controller.sampleModel;
         if (sample && sample(p.pos, attr(mod, 'hitbox scale', 1))) {
             for (let i = 0; i < 3; i++) p.prevPos[i] = p.pos[i];
@@ -1037,9 +1036,9 @@ const INITIALIZERS = {
     },
 
     'remap scalar to vector': (mod, sys, p) => {
-        // Скаляр частицы → вектор: цвет — как есть, позиция — ОТ ТОЧКИ
-        // (CP + вектор; с «use local system» вектор через матрицу точки).
-        // Снято с симуляции Valve.
+        // Скаляр частицы -> вектор: цвет - как есть, позиция - ОТ ТОЧКИ
+        // (CP + вектор, с «use local system» вектор через матрицу точки).
+        // Снято с симуляции Valve
         const inField = attr(mod, 'input field', 8);
         const inVal = inField === 8 ? p.spawnTime : getScalarField(p, inField);
         const inMin = attr(mod, 'input minimum', 0), inMax = attr(mod, 'input maximum', 1);
@@ -1058,21 +1057,21 @@ const INITIALIZERS = {
     },
 
     // Точка на отрезке между двумя CP по доле t, плюс кубический разброс
-    // «maximum distance» (каждая ось равномерно в ±d — так у Valve, не шар).
+    // «maximum distance» (каждая ось равномерно в ±d - так у Valve, не шар)
     'position along path sequential': (mod, sys, p) => {
         const N = Math.max(1, attr(mod, 'particles to map from start to end', 20));
         // Доля пути НАКАПЛИВАЕТСЯ от частицы к частице во float32 (у Valve
         // так: при 1/(N−1) = 1/3 сумма уходит чуть за 1.0, и цикл «пока
         // t > 1» бросает её в ~0, а не в 1). Повторяем ту же арифметику;
-        // при N = 20, 10, 7, 2 совпадает с симуляцией частица к частице.
+        // при N = 20, 10, 7, 2 совпадает с симуляцией частица к частице
         const per = Math.fround(N > 1 ? 1 / (N - 1) : 1);
         const st = sys.getOpState(mod, () => ({ t: 0, dir: 1, k: 0 }));
         const t = st.t;
         if (attr(mod, 'restart behavior (0 = bounce, 1 = loop )', true)) {
-            // Переход через единицу — ПО СЧЁТУ шагов, не по значению: у Valve
+            // Переход через единицу - ПО СЧЁТУ шагов, не по значению: у Valve
             // накопленная t на (N−1)-м шаге бывает 1.0000001, и она отдаётся
             // частице как есть, а следующий шаг вычитает единицу (оракул:
-            // N=4 → …1.0000001, 0.3333335…; проверка «t > 1» дала бы там ~0).
+            // N=4 -> …1.0000001, 0.3333335…; проверка «t > 1» дала бы там ~0)
             st.k += 1;
             let next = Math.fround(t + per);
             if (st.k >= N) { next = Math.fround(next - 1); st.k = 1; }
@@ -1090,7 +1089,7 @@ const INITIALIZERS = {
     },
 };
 
-// ── Операторы ────────────────────────────────────────────────────────────── //
+// Операторы
 
 const OPERATORS = {
     'lifespan decay': (mod, sys) => {
@@ -1104,9 +1103,9 @@ const OPERATORS = {
         const dt = sys.deltaTime;
         const dt2 = dt * dt;
         // C_OP_BasicMovement: adj_dt = (dt/prevDt) * ExponentialDecay(1-drag,
-        // 1/30, dt). «drag» в PCF — доля, теряемая за 1/30 с, а НЕ за кадр:
+        // 1/30, dt). «drag» в PCF - доля, теряемая за 1/30 с, а НЕ за кадр:
         // без нормировки превью тормозило частицы вдвое сильнее игры (и по-
-        // разному при разном FPS). Ускорение на drag не умножается — как в Source.
+        // разному при разном FPS). Ускорение на drag не умножается - как в Source
         const dragF = Math.pow(Math.max(0, 1 - attr(mod, 'drag', 0)), 30 * dt) *
             (dt / (sys.prevDeltaTime || dt));
         const accel = [0, 0, 0];
@@ -1127,21 +1126,21 @@ const OPERATORS = {
     },
 
     'rotation orient to 2d direction': (mod, sys) => {
-        // «2D» здесь — горизонтальная плоскость МИРА (стороны света,
+        // «2D» здесь - горизонтальная плоскость МИРА (стороны света,
         // вид сверху), НЕ экран: подтверждено вики Valve («particles always
         // face east; +90 makes north») и официальным редактором. Камера не
-        // участвует — поэтому у камеро-ориентированных спрайтов (бабочки)
+        // участвует - поэтому у камеро-ориентированных спрайтов (бабочки)
         // в игре это выглядит «боком/задом». Для разворота по движению НА
-        // ЭКРАНЕ игра использует рендерер render_screen_velocity_rotate.
+        // ЭКРАНЕ игра использует рендерер render_screen_velocity_rotate
         const offset = attr(mod, 'rotation offset', 0) * DEG_TO_RAD;
         const strength = attr(mod, 'spin strength', 1);
         for (const p of sys.particles) {
             const vx = p.pos[0] - p.prevPos[0];
             const vy = p.pos[1] - p.prevPos[1];
             if (vx * vx + vy * vy < 1e-12) continue;   // вертикальный полёт
-            // Плюс π: по симуляции Valve курс на +X даёт 180°, на +Y — 270°
+            // Плюс π: по симуляции Valve курс на +X даёт 180°, на +Y - 270°
             // (то есть atan2 от ОБРАТНОГО вектора), смещение прибавляется
-            // как есть. Без π спрайт смотрел хвостом вперёд.
+            // как есть. Без π спрайт смотрел хвостом вперёд
             const target = Math.atan2(vy, vx) + Math.PI + offset;
             let d = target - p.rotation;
             while (d > Math.PI) d -= 2 * Math.PI;
@@ -1170,9 +1169,8 @@ const OPERATORS = {
     },
 
     'alpha fade out random': (mod, sys) => {
-        // C_OP_FadeOut: значение — ДЛИТЕЛЬНОСТЬ угасания перед смертью, а не
-        // момент его начала. Гаснуть начинают с (1 - value) доли жизни; раньше
-        // движок брал value как момент старта и гасил частицы сильно раньше игры.
+        // C_OP_FadeOut: значение - ДЛИТЕЛЬНОСТЬ угасания перед смертью, а не
+        // момент его начала. Гаснуть начинают с (1 - value) доли жизни
         let min = attr(mod, 'fade out time min', 0.25);
         let max = attr(mod, 'fade out time max', 0.25);
         if (min === 0 && max === 0) min = max = 1e-7;   // как InitParams: FLT_EPSILON
@@ -1245,9 +1243,9 @@ const OPERATORS = {
         const bias = attr(mod, 'scale_bias', 0.5);
         for (const p of sys.particles) {
             let t = (sys.curTime - p.spawnTime) / p.lifetime;
-            // До start_time Valve радиус не трогает вовсе — даже стартовый
+            // До start_time Valve радиус не трогает вовсе - даже стартовый
             // множитель не применяется (симуляция particles.lib: при
-            // start_time 0.2 и множителе 2 первые 20% жизни радиус исходный).
+            // start_time 0.2 и множителе 2 первые 20% жизни радиус исходный)
             if (t < startTime) continue;
             t = saturate(invlerp(startTime, endTime, t));
             if (ease) t = smoothstep(t);
@@ -1275,8 +1273,8 @@ const OPERATORS = {
         // C_OP_PositionLock: частицы следуют за CP, но привязка ОСЛАБЕВАЕТ с
         // возрастом (start_fadeout..end_fadeout по доле жизни, у каждой частицы
         // свой момент из диапазона) и по удалению от CP (distance fade range).
-        // Раньше привязка была вечной и полной — шлейфы, которые в игре
-        // отстают и растягиваются, в превью жёстко висели на точке.
+        // Без ослабления шлейфы, которые в игре отстают и растягиваются,
+        // жёстко висят на точке
         const cpNo = attr(mod, 'control_point_number', 0);
         const cp = sys.getControlPoint(cpNo);
         const basis = sys.getControlPointBasis(cpNo);
@@ -1289,8 +1287,8 @@ const OPERATORS = {
                    (cp[2] - prevCp[2]) * strength];
         st.prev[0] = cp[0]; st.prev[1] = cp[1]; st.prev[2] = cp[2];
         // «lock rotation»: частицы едут не только за позицией точки, но и за
-        // её поворотом (1645 стоковых модулей — вихри и ауры на вращающемся
-        // CP). Поворот берём как переход от прошлого базиса к нынешнему.
+        // её поворотом (1645 стоковых модулей - вихри и ауры на вращающемся
+        // CP). Поворот берём как переход от прошлого базиса к нынешнему
         const spin = attr(mod, 'lock rotation', false)
             ? basisDelta(st.basis, basis) : null;
         st.basis = basis;
@@ -1303,22 +1301,21 @@ const OPERATORS = {
         const eMax = attr(mod, 'end_fadeout_max', attr(mod, 'lifetime fade end', 1));
         const eExp = attr(mod, 'end_fadeout_exponent', 1);
         const range = attr(mod, 'distance fade range', 0);
-        // Окно спада целиком за концом жизни (все четыре >= 1) — это «без
+        // Окно спада целиком за концом жизни (все четыре >= 1) - это «без
         // спада»: у Valve (particles.lib, probe_lock_overlife) такая привязка
         // держит и частицу СТАРШЕ своей жизни. Без Lifespan Decay она живёт
-        // вечно — так якорь анюжуала шапки держится за голову; раньше через
-        // секунду доля жизни достигала 1 и якорь отпускало.
+        // вечно - так якорь анюжуала шапки держится за голову
         const noFade = sMin >= 1 && sMax >= 1 && eMin >= 1 && eMax >= 1;
         for (const p of sys.particles) {
             // Родилась в этом кадре: в Source берётся позиция CP на момент
-            // рождения. Истории CP в превью нет — значит дельта нулевая
+            // рождения. Истории CP в превью нет - значит дельта нулевая
             if (p.spawnTime >= sys.curTime - sys.deltaTime) continue;
             const life = p.lifetime > 0
                 ? saturate((sys.curTime - p.spawnTime) / p.lifetime) : 0;
             // Линейно, не сплайном: по симуляции Valve (particles.lib) сила
-            // привязки — прямая от 1 в start до 0 в end по доле жизни; при
+            // привязки - прямая от 1 в start до 0 в end по доле жизни, при
             // start > end она так же прямо растёт. Сплайн давал S-кривую и
-            // разъезжался с игрой на 5-8% доли жизни у краёв окна.
+            // разъезжался с игрой на 5-8% доли жизни у краёв окна
             const lock = noFade ? 1 : remapValClamped(
                 life,
                 randRangeExpOp(sys, p, 9, sMin, sMax, sExp),
@@ -1332,7 +1329,7 @@ const OPERATORS = {
                     p.pos[2] + d[2] * lock - cp[2]);
                 // Кривая снята с симуляции Valve: bias Шлика 0.8 от линейной
                 // доли расстояния (0.5 дальности -> 0.80, 0.8 -> 0.50, 0.9 ->
-                // 0.31). Прежняя степенная 0.2 гасила привязку впятеро раньше.
+                // 0.31). Степенная 0.2 гасила бы привязку впятеро раньше
                 k *= schlickBias(remapValClamped(dist, 0, range, 1, 0), 0.8);
             }
             if (spin !== null) {
@@ -1350,7 +1347,7 @@ const OPERATORS = {
 
     'rotation orient relative to cp': (mod, sys) => {
         // Как Orient to 2D Direction, но по направлению ОТ точки к частице:
-        // atan2 + 180° + смещение (симуляция Valve: частица на +X даёт 180°).
+        // atan2 + 180° + смещение (симуляция Valve: частица на +X даёт 180°)
         const cp = sys.getControlPoint(attr(mod, 'control point', 0));
         const offset = attr(mod, 'rotation offset', 0) * DEG_TO_RAD;
         const strength = attr(mod, 'spin strength', 1);
@@ -1366,8 +1363,8 @@ const OPERATORS = {
     },
 
     "set control point to particles' center": (mod, sys) => {
-        // Точка ставится в среднее положение частиц плюс смещение; дети
-        // рождаются уже там (через родителя).
+        // Точка ставится в среднее положение частиц плюс смещение, дети
+        // рождаются уже там (через родителя)
         if (sys.particles.length === 0) return;
         const off = attr(mod, 'center offset', [0, 0, 0]);
         const c = [0, 0, 0];
@@ -1380,7 +1377,7 @@ const OPERATORS = {
     'movement match particle velocities': (mod, sys) => {
         // ponytail: скорости стягиваются к средней покадрово с силами из
         // модуля (у Valve сходятся с тем же темпом ≈ 0.3/кадр при 0.3);
-        // точная формула не снята.
+        // точная формула не снята
         const n = sys.particles.length;
         if (n < 2) return;
         const dirK = saturate(attr(mod, 'direction matching strength', 0.3));
@@ -1404,8 +1401,8 @@ const OPERATORS = {
     },
 
     'remap distance to control point to vector': (mod, sys) => {
-        // Расстояние до точки → вектор: в цвет — линейно; в позицию — как
-        // АБСОЛЮТНАЯ координата (Valve ставит XYZ = вектор, не смещает).
+        // Расстояние до точки -> вектор: в цвет - линейно, в позицию - как
+        // АБСОЛЮТНАЯ координата (Valve ставит XYZ = вектор, не смещает)
         const cp = sys.getControlPoint(attr(mod, 'control point', 0));
         const dMin = attr(mod, 'distance minimum', 0), dMax = attr(mod, 'distance maximum', 100);
         const outMin = attr(mod, 'output minimum', [0, 0, 0]);
@@ -1424,7 +1421,7 @@ const OPERATORS = {
 
     'cull when crossing plane': (mod, sys) => {
         // Плоскость через точку, сдвинутую ПРОТИВ нормали на offset:
-        // гибнет всё, что ушло за неё (dot(p − cp, n) < −offset). Снято с Valve.
+        // гибнет всё, что ушло за неё (dot(p − cp, n) < −offset). Снято с Valve
         const cp = sys.getControlPoint(attr(mod, 'control point for point on plane', 0));
         const n = attr(mod, 'plane normal', [1, 0, 0]);
         const nl = Math.hypot(n[0], n[1], n[2]) || 1;
@@ -1439,8 +1436,8 @@ const OPERATORS = {
     'movement dampen relative to control point': (mod, sys) => {
         // Внутри «falloff range» от точки скорость каждый кадр умножается на
         // (расстояние/дальность)^scale: у самой точки частица встаёт, на
-        // краю дальности — свободна. Множитель покадровый, как у Valve
-        // (симуляция particles.lib: при 50 из 100 и scale 1 — ×0.5 за кадр).
+        // краю дальности - свободна. Множитель покадровый, как у Valve
+        // (симуляция particles.lib: при 50 из 100 и scale 1 - ×0.5 за кадр)
         const cp = sys.getControlPoint(attr(mod, 'control_point_number', 0));
         const range = attr(mod, 'falloff range', 100);
         const scale = attr(mod, 'dampen scale', 1);
@@ -1449,7 +1446,7 @@ const OPERATORS = {
             const dist = Math.hypot(p.pos[0] - cp[0], p.pos[1] - cp[1], p.pos[2] - cp[2]);
             if (dist >= range) continue;
             // Укорачивается текущий шаг (как у Max Velocity): в кадре
-            // рождения частица уже идёт с гашением.
+            // рождения частица уже идёт с гашением
             const k = Math.pow(dist / range, scale);
             for (let i = 0; i < 3; i++)
                 p.pos[i] = p.prevPos[i] + (p.pos[i] - p.prevPos[i]) * k;
@@ -1457,18 +1454,18 @@ const OPERATORS = {
     },
 
     // Цепочка: каждый кадр частица САЖАЕТСЯ на кривую между двумя точками
-    // (квадратичная Безье: старт → «mid point position» на отрезке → конец),
+    // (квадратичная Безье: старт -> «mid point position» на отрезке -> конец),
     // скорость гасится (prev = pos). Снято с particles.lib (probe_maintain.py
     // в оракуле): «cohesion strength» и «maximum distance» на положение не
-    // влияют вовсе — при 0.25 и при 1.0 частицы стоят на кривой точь-в-точь,
-    // даже когда точка едет. Доля пути — тот же накапливающийся счётчик, что у
+    // влияют вовсе - при 0.25 и при 1.0 частицы стоят на кривой точь-в-точь,
+    // даже когда точка едет. Доля пути - тот же накапливающийся счётчик, что у
     // Position Along Path Sequential, и он НЕ сбрасывается между кадрами: при
-    // восьми частицах на пять шагов цепочка каждый кадр «проворачивается» —
+    // восьми частицах на пять шагов цепочка каждый кадр «проворачивается» -
     // так и у Valve. Отскок несимметричен: верх повторяется (…0.75, 1, 1,
-    // 0.75…), низ — нет (…0.25, 0, 0.25…). «use existing particle count»
+    // 0.75…), низ - нет (…0.25, 0, 0.25…). «use existing particle count»
     // раскладывает живые частицы равномерно от 0 до 1 и счётчик не трогает.
     // Не смоделировано: bulge (случайная выпуклость кривой) и «control point
-    // movement tolerance» (в стоковых PCF всегда 0).
+    // movement tolerance» (в стоковых PCF всегда 0)
     'movement maintain position along path': (mod, sys) => {
         const a = sys.getControlPoint(attr(mod, 'start control point number', 0));
         const b = sys.getControlPoint(attr(mod, 'end control point number', 1));
@@ -1478,8 +1475,8 @@ const OPERATORS = {
         const N = Math.max(1, attr(mod, 'particles to map from start to end', 20));
         const per = Math.fround(N > 1 ? 1 / (N - 1) : 1);
         const loop = attr(mod, 'restart behavior (0 = bounce, 1 = loop )', true);
-        // Счётчик k — номер шага на кривой; переходы по счёту, как у Valve
-        // (значение t на границе бывает 1.0000001 и всё равно отдаётся).
+        // Счётчик k - номер шага на кривой, переходы по счёту, как у Valve
+        // (значение t на границе бывает 1.0000001 и всё равно отдаётся)
         const st = sys.getOpState(mod, () => ({ k: 0, dir: 1 }));
         const n = sys.particles.length;
         for (let i = 0; i < n; i++) {
@@ -1490,7 +1487,7 @@ const OPERATORS = {
             } else {
                 t = Math.fround(st.k * per);
                 if (loop) {
-                    // …0.75, 1, 0, 0.25…: после N-го шага — снова с нуля.
+                    // …0.75, 1, 0, 0.25…: после N-го шага - снова с нуля
                     st.k = st.k + 1 >= N ? 0 : st.k + 1;
                 } else if (st.dir > 0) {
                     if (st.k >= N - 1) st.dir = -1; else st.k += 1;
@@ -1513,10 +1510,10 @@ const OPERATORS = {
         const rate = attr(mod, 'rotation rate', 180) * DEG_TO_RAD;
         const cpNo = attr(mod, 'control point', 0);
         const cp = sys.getControlPoint(cpNo);
-        // «Use Local Space»: ось задана в системе CP — через МАТРИЦУ точки
+        // «Use Local Space»: ось задана в системе CP - через МАТРИЦУ точки
         // (x*Forward - y*Right + z*Up), а не TransformAxis. Снято с симуляции
         // Valve: с базисом по умолчанию локальная ось (0,1,0) даёт мировую
-        // -X, и частица на оси не двигается; TransformAxis крутил её вокруг Y.
+        // -X, и частица на оси не двигается; TransformAxis крутил её вокруг Y
         if (attr(mod, 'use local space', false))
             axis = cpLocalToWorld(sys.getControlPointBasis(cpNo), axis, [0, 0, 0]);
         const angle = rate * sys.deltaTime;
@@ -1563,8 +1560,8 @@ const OPERATORS = {
         const mult = attr(mod, 'oscillation multiplier', 2);
         const phase = attr(mod, 'oscillation start phase', 0.5);
         // Векторные поля Source: XYZ и tint. На скалярное поле (в стоке это
-        // 285 модулей с полем 4 — вращение) кладём первую компоненту:
-        // раньше такой модуль молча не делал НИЧЕГО.
+        // 285 модулей с полем 4 - вращение) кладём первую компоненту, иначе
+        // такой модуль молча не делает НИЧЕГО
         const vectorField = field === 0 || field === 6;
         for (const p of sys.particles) {
             if (!oscActive(mod, sys, p, 3)) continue;
@@ -1583,9 +1580,9 @@ const OPERATORS = {
                 const freq = randRangeExpOp(sys, p, 8 + i, freqMin[i], freqMax[i], 1);
                 const osc = valveSin01(oscPhase(mod, sys, p, freq, mult, phase));
                 // prevPos НЕ компенсируем: в интеграторе Верле сдвиг позиции
-                // подмешивается в скорость — это и есть дёрганый трепет
-                // (бабочки, искры), как в игре. Раньше компенсация делала
-                // осцилляцию гладким дрейфом — расходилось с игрой.
+                // подмешивается в скорость - это и есть дёрганый трепет
+                // (бабочки, искры), как в игре. Компенсация сделала бы
+                // осцилляцию гладким дрейфом
                 target[i] += rate * osc * sys.deltaTime * strength;
             }
         }
@@ -1602,7 +1599,7 @@ const OPERATORS = {
             if (len > maxStep && len > 0) {
                 // Укорачивается ТЕКУЩИЙ шаг (двигается pos, не prevPos):
                 // по симуляции Valve предел действует уже в том кадре, где
-                // включился, а сдвиг prevPos опаздывал на кадр.
+                // включился, а сдвиг prevPos опаздывал на кадр
                 const k = maxStep / len;
                 p.pos[0] = p.prevPos[0] + vx * k;
                 p.pos[1] = p.prevPos[1] + vy * k;
@@ -1648,8 +1645,8 @@ const OPERATORS = {
     'set control point positions': (mod, sys) => {
         // Эффект сам расставляет свои точки: CP_n = CP_from + смещение,
         // смещение в системе точки (матрица: x·Forward − y·Right + z·Up) либо
-        // мировое. «parent» на позицию не влияет. Дети видят новые точки —
-        // через getControlPoint они спрашивают родителя. Снято с Valve.
+        // мировое. «parent» на позицию не влияет. Дети видят новые точки -
+        // через getControlPoint они спрашивают родителя. Снято с Valve
         const from = attr(mod, 'control point to offset positions from', 0);
         const world = attr(mod, 'set positions in world space', false);
         const base = sys.getControlPoint(from);
@@ -1682,13 +1679,12 @@ const OPERATORS = {
 };
 
 /**
- * Порт CGeneralSpin::Operate — общий код Rotation Spin Roll / Spin Yaw.
+ * Порт CGeneralSpin::Operate - общий код Rotation Spin Roll / Spin Yaw
  *
  * Скорость: градусы переводятся в радианы и ЕЩЁ РАЗ умножаются на 2π
  * (`drot = dt * |rate * 2π|`), то есть реальное вращение в 2π раз быстрее,
- * чем «градусы в секунду» из названия параметра. Раньше движок крутил
- * спрайты в 6.28 раза медленнее игры (медиана spin_rate_degrees в стоке — 10,
- * то есть в превью вращения не было видно вовсе).
+ * чем «градусы в секунду» из названия параметра (медиана spin_rate_degrees в
+ * стоке - 10, и без 2π вращения не было бы видно вовсе).
  */
 function generalSpin(mod, sys, strength, field, rateKey, stopKey, minKey) {
     const rate = attr(mod, rateKey, 0) * DEG_TO_RAD * strength;
@@ -1700,7 +1696,7 @@ function generalSpin(mod, sys, strength, field, rateKey, stopKey, minKey) {
     if (rate < 0) drot = -drot;
     const minStep = dt * Math.abs(attr(mod, minKey, 0) * DEG_TO_RAD * TWO_PI);
     for (const p of sys.particles) {
-        // stop time — ДОЛЯ жизни, а не секунды (в Source это помечено «HACK»),
+        // stop time - ДОЛЯ жизни, а не секунды (в Source это помечено «HACK»),
         // и скорость падает до нуля линейно, а не обрывается
         let step = drot;
         if (stopTime !== 0)
@@ -1708,7 +1704,7 @@ function generalSpin(mod, sys, strength, field, rateKey, stopKey, minKey) {
                                     (p.lifetime * stopTime));
         // Порт как есть, вместе с багом Valve (рядом стоит «FIXME: This is
         // wrong»): сравнение знаковое, поэтому отрицательная скорость всегда
-        // подменяется на spin_rate_min — в игре такие модули не вращаются
+        // подменяется на spin_rate_min - в игре такие модули не вращаются
         if (step <= minStep) step = minStep;
         let v = p[field] + step;
         if (v >= TWO_PI) v -= TWO_PI;
@@ -1717,7 +1713,7 @@ function generalSpin(mod, sys, strength, field, rateKey, stopKey, minKey) {
     }
 }
 
-/** Пер-частичный «случайный» из пула — порт randF32Op (стабилен между кадрами). */
+/** Пер-частичный «случайный» из пула - порт randF32Op (стабилен между кадрами) */
 function randRangeExpOp(sys, p, o, min, max, exp) {
     if (min === max) return min;
     let v = sys.randOpPool[(sys.randOpCounter + p.id + o) & 0x7FF];
@@ -1725,7 +1721,7 @@ function randRangeExpOp(sys, p, o, min, max, exp) {
     return lerp(min, max, v);
 }
 
-// ── Форсы (ускорения, применяются в Movement Basic) ──────────────────────── //
+// Форсы (ускорения, применяются в Movement Basic)
 
 const FORCES = {
     'random force': (mod) => {
@@ -1765,7 +1761,7 @@ const FORCES = {
             // Тангенциальное ускорение: r × axis. Порядок снят с симуляции
             // Valve: отрицательная сила с осью Z крутит против часовой,
             // глядя сверху (частица на +X уходит в +Y); axis × r давало
-            // зеркальный вихрь.
+            // зеркальный вихрь
             let tx = py * az - pz * ay, ty = pz * ax - px * az, tz = px * ay - py * ax;
             const tl = Math.hypot(tx, ty, tz);
             if (tl < 1e-3) return;
@@ -1776,15 +1772,15 @@ const FORCES = {
     },
 };
 
-// ── Констрейнты (применяются после операторов) ───────────────────────────── //
+// Констрейнты (применяются после операторов)
 
 const CONSTRAINTS = {
     'constrain distance to control point': (mod, sys) => {
         const minD = attr(mod, 'minimum distance', 0);
         const maxD = attr(mod, 'maximum distance', 100);
         const cpAt = sys.getControlPoint(attr(mod, 'control point number', 0));
-        // Центр — точка плюс «offset of center»; с «global center point»
-        // смещение и есть центр, точка не участвует (по симуляции Valve).
+        // Центр - точка плюс «offset of center», с «global center point»
+        // смещение и есть центр, точка не участвует (по симуляции Valve)
         const off = attr(mod, 'offset of center', [0, 0, 0]);
         const cp = attr(mod, 'global center point', false)
             ? off : [cpAt[0] + off[0], cpAt[1] + off[1], cpAt[2] + off[2]];
@@ -1803,13 +1799,13 @@ const CONSTRAINTS = {
     },
 
     'constrain distance to path between two control points': (mod, sys) => {
-        // Частица держится у точки пути «старт → конец», которая едет по
-        // нему за «travel time» секунд возраста (0 — сразу конец). Допуск
-        // расстояния вдоль пути — квадратичная кривая Безье по трём
+        // Частица держится у точки пути «старт -> конец», которая едет по
+        // нему за «travel time» секунд возраста (0 - сразу конец). Допуск
+        // расстояния вдоль пути - квадратичная кривая Безье по трём
         // «maximum distance» (начало, середина, конец): 60u − 50u² при
-        // 0/30/10 совпало с симуляцией Valve покадрово; отрицательные
-        // средний/конечный — как у начала. Выпуклость пути (bulge) при
-        // нулевом random bulge не проявилась — не моделируется.
+        // 0/30/10 совпало с симуляцией Valve покадрово, отрицательные
+        // средний/конечный - как у начала. Выпуклость пути (bulge) при
+        // нулевом random bulge не проявилась - не моделируется
         const start = sys.getControlPoint(attr(mod, 'start control point number', 0));
         const end = sys.getControlPoint(attr(mod, 'end control point number', 1));
         const travel = attr(mod, 'travel time', 1);
@@ -1827,8 +1823,8 @@ const CONSTRAINTS = {
             const dist = Math.hypot(dx, dy, dz);
             if (dist < 1e-6) continue;
             // Странность Valve, снятая покадрово: частица ДАЛЬШЕ наибольшего
-            // из трёх допусков притягивается к нему, а не к кривой; кривая
-            // работает только на тех, кто уже внутри этого круга.
+            // из трёх допусков притягивается к нему, а не к кривой, кривая
+            // работает только на тех, кто уже внутри этого круга
             const maxAll = Math.max(maxStart, maxMid, maxEnd);
             const maxD = dist > maxAll ? maxAll
                 : (1 - u) * (1 - u) * maxStart + 2 * (1 - u) * u * maxMid + u * u * maxEnd;
@@ -1841,8 +1837,8 @@ const CONSTRAINTS = {
 
     'prevent passing through a plane': (mod, sys) => {
         // Частицу (с её радиусом) держит по сторону нормали: если
-        // dot(p − point, n) < r — выталкивает на r. Точка — CP + point
-        // (или мировая с «global origin»), нормаль как есть. Снято с Valve.
+        // dot(p − point, n) < r - выталкивает на r. Точка - CP + point
+        // (или мировая с «global origin»), нормаль как есть. Снято с Valve
         const cp = sys.getControlPoint(attr(mod, 'control point number', 0));
         const pt = attr(mod, 'plane point', [0, 0, 0]);
         const n = attr(mod, 'plane normal', [0, 0, 1]);
@@ -1858,7 +1854,7 @@ const CONSTRAINTS = {
     },
 
     'collision via traces': (mod, sys) => {
-        // ponytail: в превью нет геометрии карты — коллизия только с полом z=0,
+        // ponytail: в превью нет геометрии карты - коллизия только с полом z=0,
         // отскок по bounce, гашение горизонтали по slide
         const bounce = attr(mod, 'amount of bounce', 0);
         const slide = attr(mod, 'amount of slide', 0);
@@ -1875,7 +1871,7 @@ const CONSTRAINTS = {
     },
 };
 
-// ── Эмиттеры ─────────────────────────────────────────────────────────────── //
+// Эмиттеры
 
 function makeEmitter(mod) {
     const fn = resolveFnName(mod.functionName);
@@ -1918,10 +1914,10 @@ function makeEmitter(mod) {
             startTime: attr(mod, 'emission_start_time', 0),
             // «По родительским частицам»: темп умножается на ЧИСЛО живых
             // частиц родителя и на «scale emission to used control points».
-            // У второго умолчание НОЛЬ — вырезанный «как дефолтный» атрибут
+            // У второго умолчание НОЛЬ - вырезанный «как дефолтный» атрибут
             // глушит эмиссию в игре целиком (проверено оракулом Valve:
-            // 2.5/с × 20 родителей × 1.0 = 50/с, без атрибута — 0). Без
-            // флага множитель не читается вовсе.
+            // 2.5/с × 20 родителей × 1.0 = 50/с, без атрибута - 0). Без
+            // флага множитель не читается вовсе
             byParent: attr(mod, 'use parent particles for emission scaling', false),
             parentScale: attr(mod, 'scale emission to used control points', 0),
             env: opEnvelope(mod),
@@ -1932,19 +1928,19 @@ function makeEmitter(mod) {
             },
             emit(sys) {
                 // Стартовое время сравнивается с КОНЦОМ кадра, и кадр, в
-                // котором оно наступило, эмитится целиком, с его начала —
-                // так у Valve (particles.lib); обрезка по start_time сдвигала
-                // первую партию на кадр позже игры.
+                // котором оно наступило, эмитится целиком, с его начала -
+                // так у Valve (particles.lib), обрезка по start_time сдвигала
+                // первую партию на кадр позже игры
                 if (this.rate <= 0 || sys.curTime < this.startTime || !this.isActive(sys))
                     return;
                 // Огибающая масштабирует темп эмиссии (flEmissionRate *= strength)
                 let rate = this.rate * opStrength(this.env, sys.curTime);
                 // Множитель «scale emission to used control points» работает
-                // на ДВА счётчика (симуляция Valve): с флагом «по родителю» —
-                // число частиц родителя (у корня — 1; множитель 0 глушит
-                // всё), без флага — НОМЕР старшей занятой точки (сколько CP
+                // на ДВА счётчика (симуляция Valve): с флагом «по родителю» -
+                // число частиц родителя (у корня - 1; множитель 0 глушит
+                // всё), без флага - НОМЕР старшей занятой точки (сколько CP
                 // дала игра или расставил Set Control Point Positions), и
-                // тогда нулевой множитель или одна точка оставляют темп как есть.
+                // тогда нулевой множитель или одна точка оставляют темп как есть
                 if (this.byParent) {
                     rate *= (sys.parent ? sys.parent.particles.length : 1) * this.parentScale;
                 } else if (this.parentScale > 0) {
@@ -1961,10 +1957,10 @@ function makeEmitter(mod) {
                 // счётчик пересёк целое: prev + (n − счётчик_до)/rate. При
                 // целом счётчике это «через 1/rate после начала кадра» (так
                 // снималось с движущейся точки), но у медленных эмиттеров
-                // (0.325/с у seamine) прежнее «prev + 1/rate» ставило рождение
-                // на три секунды В БУДУЩЕЕ: отрицательный возраст держал
+                // (0.325/с у seamine) «prev + 1/rate» ставило бы рождение на
+                // три секунды В БУДУЩЕЕ: отрицательный возраст держал бы
                 // 0.1-секундную вспышку три секунды, а её дети-пузыри
-                // (100/с «из родителя») плодились всё это время.
+                // (100/с «из родителя») плодились бы всё это время
                 let spawnTime = prevTime + (this.emitNum + 1 - before) / rate;
                 const step = 1.0 / rate;
                 let created = 0;
@@ -1972,7 +1968,7 @@ function makeEmitter(mod) {
                     if (sys.spawnParticle(spawnTime)) created++;
                     spawnTime += step;
                 }
-                // Как в эталоне: если max_particles забит и не создали ничего —
+                // Как в эталоне: если max_particles забит и не создали ничего -
                 // счётчик не двигаем, burst догонит после смертей частиц
                 if (created > 0 || count === 0)
                     this.emitNum = newEmitNum;
@@ -1985,7 +1981,7 @@ function makeEmitter(mod) {
             num: attr(mod, 'num_to_emit', 100),
             startTime: attr(mod, 'emission_start_time', 0),
             // Потолок на кадр: залп размазывается на несколько кадров
-            // (у Valve так сделаны 452 эмиттера). -1 — без ограничения
+            // (у Valve так сделаны 452 эмиттера). -1 - без ограничения
             perFrame: attr(mod, 'maximum emission per frame', -1),
             env: opEnvelope(mod),
             left: 0,
@@ -1993,7 +1989,7 @@ function makeEmitter(mod) {
             isActive(sys) { return !this.started || this.left > 0; },
             emit(sys) {
                 if (sys.curTime < this.startTime) return;
-                // Мгновенный эмиттер силу не масштабирует — только гасится ею
+                // Мгновенный эмиттер силу не масштабирует - только гасится ею
                 if (opStrength(this.env, sys.curTime) <= 0) return;
                 if (!this.started) {
                     this.started = true;
@@ -2001,7 +1997,7 @@ function makeEmitter(mod) {
                 }
                 const batch = this.perFrame > 0
                     ? Math.min(this.left, this.perFrame) : this.left;
-                // Первая порция рождается в свой заявленный момент, хвост —
+                // Первая порция рождается в свой заявленный момент, хвост -
                 // тогда, когда до него дошла очередь
                 const spawnTime = this.left === this.num
                     ? Math.max(this.startTime, 0) : Math.max(sys.curTime, 0);
@@ -2016,7 +2012,7 @@ function makeEmitter(mod) {
     return null;
 }
 
-// ── Система частиц (инстанс) ─────────────────────────────────────────────── //
+// Система частиц (инстанс)
 
 export class ParticleSystemInstance {
     /**
@@ -2037,9 +2033,9 @@ export class ParticleSystemInstance {
             ? new Sheet(this.material.sheet) : null;
 
         this.maxParticles = attr(def, 'max_particles', 1000);
-        // Кламп шага симуляции — как в игре (m_flMaximumTimeStep, дефолт 0.1):
+        // Кламп шага симуляции - как в игре (m_flMaximumTimeStep, дефолт 0.1):
         // при просадке FPS превью не должно интегрировать шагами, которых в
-        // игре не бывает. 0 в файле означает «без ограничения» — тогда 0.3.
+        // игре не бывает. 0 в файле означает «без ограничения» - тогда 0.3
         this.maxTimeStep = attr(def, 'maximum time step', 0.1) || 0.3;
         // Частицы, которые система создаёт в момент старта, помимо эмиттеров
         this.initialParticles = attr(def, 'initial_particles', 0);
@@ -2086,8 +2082,8 @@ export class ParticleSystemInstance {
             if (fn === 'render_animated_sprites' || fn === 'render_sprite_trail') {
                 this.animationRate = attr(r, 'animation rate', 1.0);
                 // Смысл 'animation rate' зависит от флага (проверено по
-                // стоковым PCF: при FPS=true медиана 30 — это кадры/сек;
-                // при FPS=false самое частое 0.1 — это ЦИКЛЫ/сек)
+                // стоковым PCF: при FPS=true медиана 30 - это кадры/сек;
+                // при FPS=false самое частое 0.1 - это ЦИКЛЫ/сек)
                 this.animationRateAsFps = !!attr(r, 'use animation rate as fps', false);
                 // Растянуть весь sheet-цикл ровно на время жизни частицы:
                 // многие мастерские-анимации (30 кадров) без этого флага
@@ -2099,7 +2095,7 @@ export class ParticleSystemInstance {
             } else if (fn === 'render_screen_velocity_rotate') {
                 // Разворот спрайта по его скорости НА ЭКРАНЕ (бабочки,
                 // пауки, призраки анюжуалов). Ставится ВТОРЫМ рендерером
-                // рядом с render_animated_sprites. Угол зависит от камеры —
+                // рядом с render_animated_sprites. Угол зависит от камеры -
                 // досчитывается в рендере (particles3d.html)
                 this.screenVelRotate = {
                     forward: attr(r, 'forward_angle', 0) * DEG_TO_RAD,
@@ -2107,9 +2103,9 @@ export class ParticleSystemInstance {
                 };
             } else if (fn === 'render_rope') {
                 // Лента по цепочке частиц (цепь, кровь, лучи). Текстура
-                // тянется вдоль ленты: texel_size — размер ОДНОГО текселя в
+                // тянется вдоль ленты: texel_size - размер ОДНОГО текселя в
                 // юнитах, то есть один проход текстуры = texel_size × высота
-                // текстуры (0.005 × 1024 у цепи seamine — звено в 5 юнитов).
+                // текстуры (0.005 × 1024 у цепи seamine - звено в 5 юнитов).
                 // ponytail: без subdivision-сглаживания и «scale … by CP
                 // distance» (в стоке единичные случаи)
                 this.rendererType = 'rope';
@@ -2165,7 +2161,7 @@ export class ParticleSystemInstance {
     }
 
     /**
-     * Положение точки в момент рождения частицы — между прошлым и текущим
+     * Положение точки в момент рождения частицы - между прошлым и текущим
      * кадром (GetControlPointAtTime у Valve). Частицы, родившиеся за кадр,
      * ложатся ВДОЛЬ пути движущейся точки, а не кучкой в её текущем месте:
      * иначе след ракеты при 600 частицах в секунду шёл бы пунктиром.
@@ -2182,7 +2178,7 @@ export class ParticleSystemInstance {
                 prev[2] + (now[2] - prev[2]) * k];
     }
 
-    /** Базис CP: свой, если задан ориентацией снаружи, иначе дефолт движка. */
+    /** Базис CP: свой, если задан ориентацией снаружи, иначе дефолт движка */
     getControlPointBasis(i) {
         if (this.parent !== null) return this.parent.getControlPointBasis(i);
         const bases = this.controller.controlPointBases;
@@ -2190,9 +2186,9 @@ export class ParticleSystemInstance {
     }
 
     /** Задан ли CP явно (оператором, родителем или извне через setControlPoint).
-        Незаданные CP в игре выставляет код (цвет килстрика и т.п.) —
-        remap-модули по ним в превью пропускаются. */
-    /** Номер старшей точки, которую кто-то задал (страница или оператор). */
+        Незаданные CP в игре выставляет код (цвет килстрика и т.п.) -
+        remap-модули по ним в превью пропускаются */
+    /** Номер старшей точки, которую кто-то задал (страница или оператор) */
     highestControlPoint() {
         let highest = this.parent !== null ? this.parent.highestControlPoint() : 0;
         for (const k of Object.keys(this.cpOverrides)) highest = Math.max(highest, Number(k));
@@ -2210,7 +2206,7 @@ export class ParticleSystemInstance {
         return this.controller.controlPoints[i] !== undefined;
     }
 
-    /** Состояние оператора между кадрами (например prev-позиция CP). */
+    /** Состояние оператора между кадрами (например prev-позиция CP) */
     getOpState(mod, init) {
         let st = this._opState.get(mod);
         if (st === undefined) {
@@ -2247,13 +2243,13 @@ export class ParticleSystemInstance {
             if (sets && sets.some(a => inited.has(a))) continue;   // как в Source
             fn(mod, this, p);
             if (sets) for (const a of sets) inited.add(a);
-            // Позиция «как родилась» — до модификаторов (offset/warp): по ней
+            // Позиция «как родилась» - до модификаторов (offset/warp): по ней
             // Valve считает Remap Noise to Scalar (симуляция particles.lib)
             if (sets && sets.includes('pos') && !p.posInit)
                 p.posInit = [p.pos[0], p.pos[1], p.pos[2]];
         }
         this.spawnSeq++;
-        // Инициализатор отбраковал частицу (нет родителя и т.п.) — не добавляем,
+        // Инициализатор отбраковал частицу (нет родителя и т.п.) - не добавляем,
         // но для счётчиков эмиттера она «создана»
         if (p.dead) return true;
         // Снимок стартовых значений для fade/scale-операторов
@@ -2281,10 +2277,10 @@ export class ParticleSystemInstance {
 
     /**
      * Шаг симуляции. Большой dt (просадка кадров) режется на куски не длиннее
-     * «maximum time step» — так у Valve: время не теряется, а интегратор
-     * не шагает шагами, которых в игре не бывает. Раньше dt просто зажимался,
-     * и превью под нагрузкой замедлялось. Кусков не больше десяти (Valve при
-     * dt 0.25 и шаге 0.02 продвигает время лишь на 0.2) — остаток отбрасывается.
+     * «maximum time step» - так у Valve: время не теряется, а интегратор
+     * не шагает шагами, которых в игре не бывает (зажатый dt замедлял бы
+     * превью под нагрузкой). Кусков не больше десяти (Valve при
+     * dt 0.25 и шаге 0.02 продвигает время лишь на 0.2) - остаток отбрасывается.
      */
     movement(dt) {
         if (dt <= 0.001) return;
@@ -2302,10 +2298,10 @@ export class ParticleSystemInstance {
         this.deltaTime = dt;
         const wasBeforeStart = this.curTime <= 0;
         // Ребёнок с задержкой: в кадре, где его время только пересекает ноль,
-        // Valve ещё не эмитит — первые частицы появляются кадром позже.
+        // Valve ещё не эмитит - первые частицы появляются кадром позже
         const crossing = this.curTime < 0;
-        // Снимок точек на начало кадра — для рождения «между кадрами»
-        // (getControlPointAt). Держит его корень: у детей точки родительские.
+        // Снимок точек на начало кадра - для рождения «между кадрами»
+        // (getControlPointAt). Держит его корень: у детей точки родительские
         if (this.parent === null) {
             const cps = this.controller.controlPoints;
             this._cpPrev = this._cpNow || cps.map(c => c && [c[0], c[1], c[2]]);
@@ -2315,8 +2311,8 @@ export class ParticleSystemInstance {
         this.curTime += this.deltaTime;
         if (this.curTime > 0) {
             // Первый кадр: операторы прогоняются ДО эмиссии (SimulateFirstFrame
-            // у Valve) — Set Control Point Positions успевает расставить
-            // точки, и первые частицы рождаются уже в них, а не в нуле.
+            // у Valve) - Set Control Point Positions успевает расставить
+            // точки, и первые частицы рождаются уже в них, а не в нуле
             if (wasBeforeStart)
                 for (const { mod, fn, env } of this.operators)
                     if (opStrength(env, this.curTime) > 0) fn(mod, this, opStrength(env, this.curTime));
@@ -2341,18 +2337,18 @@ export class ParticleSystemInstance {
 
     /**
      * Снимает состояние для рендера (см. particles3d.html).
-     * out — массив спрайтов; ropesOut (опционально) — массив лент:
-     * {material, additive, points: [{pos, radius, color, alpha}]} —
+     * out - массив спрайтов; ropesOut (опционально) - массив лент:
+     * {material, additive, points: [{pos, radius, color, alpha}]} -
      * частицы rope-систем соединяются в порядке создания.
      */
     collectSprites(out, ropesOut) {
-        // Рендерер — такой же модуль с огибающей: при нулевой силе Source его
+        // Рендерер - такой же модуль с огибающей: при нулевой силе Source его
         // не запускает, и частицы просто не рисуются (в стоке так сделана
         // одна система, но выглядит это как «эффект пропал без причины»)
         // Без рендерера система невидима: Source рисует только через
         // модули-рендереры (CParticleCollection::Render идёт по ним). Такие
-        // системы — носители контрол-пойнтов (bom_a_1/bom_a_7 у seamine):
-        // белый «спрайт по умолчанию» на их месте — выдумка приложения.
+        // системы - носители контрол-пойнтов (bom_a_1/bom_a_7 у seamine):
+        // белый «спрайт по умолчанию» на их месте - выдумка приложения
         if (!this.rendererMods.length
             || opStrength(this.rendererEnv, this.curTime) <= 0) {
             for (const c of this.children) c.collectSprites(out, ropesOut);
@@ -2422,7 +2418,7 @@ export class ParticleSystemInstance {
             };
             if (this.orientationType >= 2 && this.orientationCP >= 0) {
                 // Source путает имена: в RenderNonSpriteCardOriented «right»
-                // спрайта — это Forward контрол-пойнта, а «up» — его Right
+                // спрайта - это Forward контрол-пойнта, а «up» - его Right
                 const b = this.getControlPointBasis(this.orientationCP);
                 s.right = [b.fwd[0], b.fwd[1], b.fwd[2]];
                 s.up = [b.right[0], b.right[1], b.right[2]];
@@ -2432,7 +2428,7 @@ export class ParticleSystemInstance {
                     rotateAboutAxis(s.right, s.up, p.yaw, s.right);
             }
             if (this.screenVelRotate) {
-                // Мировая скорость + параметры — экранный угол досчитает рендер
+                // Мировая скорость + параметры - экранный угол досчитает рендер
                 s.vel = [p.pos[0] - p.prevPos[0], p.pos[1] - p.prevPos[1],
                          p.pos[2] - p.prevPos[2]];
                 s.screenVel = this.screenVelRotate;
@@ -2444,7 +2440,7 @@ export class ParticleSystemInstance {
     }
 }
 
-/** Списки реализованных модулей — для диагностики покрытия. */
+/** Списки реализованных модулей - для диагностики покрытия */
 export function implementedModules() {
     return {
         initializers: Object.keys(INITIALIZERS),

@@ -255,7 +255,7 @@ The left edge of the log can be dragged to change its width. Debug entries appea
 
 ## Tutorials
 
-The main tutorial starts by itself on the first launch. Smaller ones start the first time you open the **Cosmetics**, **Particles** and **Sounds** sections, painting by parts, model fitting and the War Paint panel. Some steps wait for you to do something, for example to pick a weapon. They say **I'll continue once you do it**.
+The main tutorial is offered at the end of the welcome window on the first launch. Smaller ones start the first time you open the **Cosmetics**, **Particles** and **Sounds** sections, painting by parts, model fitting and the War Paint panel. Some steps wait for you to do something, for example to pick a weapon. They say **I'll continue once you do it**.
 
 **Skip tutorial** closes the current one. **Settings → Replay the tutorial** shows all of them again.
 

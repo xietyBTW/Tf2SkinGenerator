@@ -11,41 +11,41 @@ import { P, hintParts } from './parts-state.js';
 import { refreshParts } from './parts.js';
 
 //: Свои материалы частей (из ответа `parts`) и куда щелчок инструментом
-//: «Материал» отдаёт часть: '' - в новый.
+//: «Материал» отдаёт часть: '' - в новый
 let partMats = [];
-//: Родные материалы модели, которым можно отдать части (`targets` разбора).
+//: Родные материалы модели, которым можно отдать части (`targets` разбора)
 let matTargets = [];
 let matTarget = '';
 
-/** Части - в материал: '' - новый, имя - этот, '-' - обратно в общий. */
+/** Части - в материал: '' - новый, имя - этот, '-' - обратно в общий */
 async function movePartsTo(ids, target) {
   const res = await api.setPartMaterial(P.material, ids, target);
   if (res.error) { hintParts(res.error); return; }
-  // Новый становится целью: следующие щелчки добавляют части в него же.
+  // Новый становится целью: следующие щелчки добавляют части в него же
   if (res.created) matTarget = res.created;
   applyView(res);
   await refreshParts();
 }
 
-/** Щелчок инструментом «Материал» по части: в выбранный материал. */
+/** Щелчок инструментом «Материал» по части: в выбранный материал */
 export function toggleMaterial(part) {
   // Часть выбранного материала возвращается в общий: так ошибочный щелчок
-  // исправляется тем же движением.
+  // исправляется тем же движением
   const own = (P.list.find((x) => x.id === part) || {}).own || '';
   movePartsTo([part], own && own === matTarget ? '-' : matTarget);
 }
 
 /** Куда пойдёт следующая часть, по порядку: свои материалы частей, потом
- *  родные материалы модели. Номер в этом списке стоит и на чипе части. */
+ *  родные материалы модели. Номер в этом списке стоит и на чипе части */
 export function matOrder() {
   return [...partMats.filter((m) => !m.existing).map((m) => m.name), ...matTargets];
 }
 
-/** Родной ли это материал модели (а не свой материал части). */
+/** Родной ли это материал модели (а не свой материал части) */
 export const isNative = (name) => Boolean(name) && matTargets.includes(name);
 
 /** Список инструмента «Материал». Родные материалы модели - ниже своих:
- *  части можно отдать и им, тогда они берут их VMT и текстуру. */
+ *  части можно отдать и им, тогда они берут их VMT и текстуру */
 export function showPartMaterials(list, natives) {
   partMats = list || [];
   if (natives !== undefined) matTargets = natives || [];
@@ -67,7 +67,7 @@ export function showPartMaterials(list, natives) {
     return b;
   };
   // Строка материала: номер, имя и крестик «вернуть части в общий» - у
-  // родного он только там, где ему уже отданы части этого материала.
+  // родного он только там, где ему уже отданы части этого материала
   const entry = (title, removable) => {
     const num = document.createElement('span');
     num.className = 'pmat__num';
@@ -105,7 +105,7 @@ export function showPartMaterials(list, natives) {
   }
 }
 
-/** Правая кнопка по чипу - свой материал без смены инструмента. */
+/** Правая кнопка по чипу - свой материал без смены инструмента */
 export async function partMenu(e, part) {
   const items = [{ heading: t('Свой материал') },
                  { label: t('В новый материал'), value: '' }];

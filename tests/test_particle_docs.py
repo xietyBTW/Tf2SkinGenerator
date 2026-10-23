@@ -1,9 +1,9 @@
-"""Справочник параметров частиц: связность данных и подписи перечислений.
+"""Справочник параметров частиц: связность данных и подписи перечислений
 
-Справочник — просто данные, но по ним строятся подсказки и списки значений в
+Справочник - просто данные, но по ним строятся подсказки и списки значений в
 редакторе, поэтому опечатка в ключе тихо выключает пояснение. Здесь ловится
 именно это: регистр ключей, полнота обоих языков и то, что параметры простого
-режима описаны.
+режима описаны
 """
 
 from src.data import particle_docs as docs
@@ -11,8 +11,8 @@ from src.services.simple_params import SIMPLE_PARAMS
 
 
 def test_keys_are_lowercase_and_stripped():
-    """systems_json отдаёт имена атрибутов casefold-нутыми — ключи должны
-    совпадать буквально, иначе поиск промахнётся."""
+    """systems_json отдаёт имена атрибутов casefold-нутыми - ключи должны
+    совпадать буквально, иначе поиск промахнётся"""
     for name in list(docs.ATTRS) + list(docs.ENUMS):
         assert name == name.strip().lower(), name
     for group, fn in docs.MODULES:
@@ -37,7 +37,7 @@ def test_module_groups_are_real():
 
 
 def test_simple_mode_attributes_are_documented():
-    """Всё, что вынесено в простой режим, объяснено и в экспертном дереве."""
+    """Всё, что вынесено в простой режим, объяснено и в экспертном дереве"""
     undocumented = sorted({
         ref.attr.lower()
         for p in SIMPLE_PARAMS for variant in p.variants for ref in variant
@@ -55,7 +55,7 @@ def test_attr_help_language_switch():
 
 
 def test_enum_label_for_particle_fields():
-    """Поле 7 — прозрачность: в дереве значение показывается подписью."""
+    """Поле 7 - прозрачность: в дереве значение показывается подписью"""
     assert docs.enum_label("output field", 7, "en") == "alpha"
     assert docs.enum_label("oscillation field", 0, "ru") == "позиция XYZ"
     assert docs.enum_label("input field 0-2 x/y/z", 2, "en") == "Z"
@@ -65,7 +65,7 @@ def test_enum_label_for_particle_fields():
 
 
 def test_enum_label_ignores_bools():
-    """bool в Python — подкласс int: True не должен превратиться в «lifetime»."""
+    """bool в Python - подкласс int: True не должен превратиться в «lifetime»"""
     assert docs.enum_label("output field", True, "en") is None
 
 

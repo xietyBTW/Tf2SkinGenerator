@@ -1,13 +1,13 @@
 """
-Косметические стили стоковой модели (Летающая гильотина).
+Косметические стили стоковой модели (Летающая гильотина)
 
 QC гильотины:
     { "c_sd_cleaver"        "c_sd_cleaver_bloody" }
     { "c_sd_cleaver_bloody" "c_sd_cleaver_bloody" }
 
-Строка стиля выровнена по колонкам с базовой, поэтому её материал — ЗАМЕНА
-базового, а не ещё один материал модели. Раньше он уезжал карточкой в базовый
-альбом (две текстуры в «Базовом»), а вкладка Bloody оставалась пустой.
+Строка стиля выровнена по колонкам с базовой, поэтому её материал - ЗАМЕНА
+базового, а не ещё один материал модели: в базовый альбом карточкой он не
+уезжает
 """
 
 import unittest
@@ -33,8 +33,8 @@ class StyleTextureTests(unittest.TestCase):
         s.textures.active_skin = 1
         self.assertEqual(s.card_materials(), ['c_sd_cleaver'])
         self.assertEqual(s.visible_textures(), {'c_sd_cleaver': __file__})
-        # Оригинал стиля — не правка человека: в сохранённую работу и в сборку
-        # уехали бы временные PNG вместо его выбора.
+        # Оригинал стиля - не правка человека: в сохранённую работу и в сборку
+        # уехали бы временные PNG вместо его выбора
         self.assertEqual(s.textures.skin_overrides, {})
 
     def test_user_texture_wins_over_the_game_one(self):
@@ -46,7 +46,7 @@ class StyleTextureTests(unittest.TestCase):
         try:
             s.textures.set_texture('c_sd_cleaver', mine)
             self.assertEqual(s.visible_textures(), {'c_sd_cleaver': mine})
-            # Сборка спрашивает материал строки стиля по ЕГО имени.
+            # Сборка спрашивает материал строки стиля по ЕГО имени
             self.assertEqual(
                 s.textures.style_upload_for('c_sd_cleaver_bloody'), mine)
         finally:
@@ -61,7 +61,7 @@ class StyleTextureTests(unittest.TestCase):
 
 class SingleMaterialModelTests(unittest.TestCase):
     """У гильотины ОДИН материал: превью держит её текстуру под служебным
-    ключом, а не под именем из QC. Под именем карточка стиля была пустой."""
+    ключом, а не под именем из QC. Под именем карточка стиля была пустой"""
 
     def _session(self):
         from src.domain.preview.texture_state import SINGLE_TEX_KEY
@@ -92,7 +92,7 @@ class SingleMaterialModelTests(unittest.TestCase):
 
 
 class WorkerPairingTests(unittest.TestCase):
-    """Пары «базовый материал → материал стиля» строит воркер по строкам QC."""
+    """Пары «базовый материал -> материал стиля» строит воркер по строкам QC"""
 
     def _worker(self, rows):
         from src.services import qc_skin_parser
@@ -111,6 +111,6 @@ class WorkerPairingTests(unittest.TestCase):
                          {1: {'c_sd_cleaver': 'c_sd_cleaver_bloody.png'}})
 
     def test_team_rows_are_not_styles(self):
-        """RED/BLU — свой тумблер, а не стиль."""
+        """RED/BLU - свой тумблер, а не стиль"""
         w = self._worker([['c_scattergun'], ['c_scattergun_blue']])
         self.assertEqual(w._extract_style_textures(), {})

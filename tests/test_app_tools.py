@@ -1,9 +1,9 @@
 """
-Инструменты прикладного слоя: что проверяется ДО запуска воркера.
+Инструменты прикладного слоя: что проверяется ДО запуска воркера
 
-Сами воркеры (декомпиляция, извлечение, объединение) тут не гоняются — им
+Сами воркеры (декомпиляция, извлечение, объединение) тут не гоняются - им
 нужна установленная игра. Проверяются решения, которые принимает сеанс:
-какие файлы предлагать по умолчанию и что считать негодным запросом.
+какие файлы предлагать по умолчанию и что считать негодным запросом
 """
 
 import os
@@ -20,7 +20,7 @@ from src.shared.constants import Team
 
 
 class DefaultExportSelectionTests(unittest.TestCase):
-    """Что отметить в списке подготовленных файлов модели."""
+    """Что отметить в списке подготовленных файлов модели"""
 
     def test_reference_smd_wins(self):
         files = ["c_scattergun.qc", "c_scattergun_physics.smd",
@@ -38,10 +38,10 @@ class DefaultExportSelectionTests(unittest.TestCase):
 
 
 class MergeVpkGuardTests(unittest.TestCase):
-    """Объединение модов: негодный запрос не должен доходить до воркера."""
+    """Объединение модов: негодный запрос не должен доходить до воркера"""
 
     def _session(self, folder: str) -> AppSession:
-        """Сеанс с подменённой папкой экспорта и без реального запуска воркера."""
+        """Сеанс с подменённой папкой экспорта и без реального запуска воркера"""
         s = AppSession()
         s._export_settings = staticmethod(lambda: (folder, 'PNG'))
         s.started = []
@@ -67,13 +67,13 @@ class MergeVpkGuardTests(unittest.TestCase):
 
     def test_path_from_the_page_cannot_leave_the_export_folder(self):
         """Страница присылает ИМЯ; путь собирает Python, иначе «..» увёл бы
-        объединение к любому файлу на диске."""
+        объединение к любому файлу на диске"""
         with tempfile.TemporaryDirectory() as tmp:
             (Path(tmp) / 'a.vpk').write_bytes(b'')
             (Path(tmp) / 'b.vpk').write_bytes(b'')
             session = self._session(tmp)
             res = session.tools.merge_vpk(['../../secret/a.vpk', 'b.vpk'], 'out.vpk')
-            # '../../secret/a.vpk' сведён к 'a.vpk' — файл внутри папки экспорта.
+            # '../../secret/a.vpk' сведён к 'a.vpk' - файл внутри папки экспорта
             self.assertNotIn('error', res)
             self.assertEqual([p.parent for p in session.started[0].vpk_files],
                              [Path(tmp), Path(tmp)])
@@ -86,11 +86,11 @@ class MergeVpkGuardTests(unittest.TestCase):
 
 
 class CardKeyTests(unittest.TestCase):
-    """К какому материалу относится правка карточки."""
+    """К какому материалу относится правка карточки"""
 
     def test_single_texture_key_never_becomes_an_edit_key(self):
-        """`__single__` — служебный ключ показа. Правка под ним легла бы в
-        хранилище именем, которого сборка не ищет, то есть пропала бы."""
+        """`__single__` - служебный ключ показа. Правка под ним легла бы в
+        хранилище именем, которого сборка не ищет, то есть пропала бы"""
         from src.domain.preview.texture_state import SINGLE_TEX_KEY
 
         s = AppSession()
@@ -110,7 +110,7 @@ class CardKeyTests(unittest.TestCase):
 
 
 class TextureSettingsTests(unittest.TestCase):
-    """Свои настройки материала: разреженная запись поверх глобальных."""
+    """Свои настройки материала: разреженная запись поверх глобальных"""
 
     def _session(self) -> AppSession:
         s = AppSession()
@@ -124,7 +124,7 @@ class TextureSettingsTests(unittest.TestCase):
                                {'size': [1024, 1024], 'format': 'DXT5'})
         self.assertEqual(s.materials.texture_settings('scattergun_extra')['settings'],
                          {'size': [1024, 1024], 'format': 'DXT5'})
-        # Соседний материал остаётся на глобальных.
+        # Соседний материал остаётся на глобальных
         self.assertEqual(s.materials.texture_settings('scattergun')['settings'], {})
 
     def test_empty_settings_return_the_material_to_global(self):
@@ -134,7 +134,7 @@ class TextureSettingsTests(unittest.TestCase):
         self.assertEqual(s.preview.texture_overrides, {})
 
     def test_unknown_keys_do_not_reach_the_build(self):
-        """В запись попадают только те ключи, которые сборка умеет наложить."""
+        """В запись попадают только те ключи, которые сборка умеет наложить"""
         s = self._session()
         res = s.materials.set_texture_settings('scattergun',
                                      {'size': [512, 512], 'filename': 'взлом.vpk'})
@@ -147,7 +147,7 @@ class TextureSettingsTests(unittest.TestCase):
         self.assertEqual(res['badge'], '1024 · DXT5')
 
     def test_switching_item_forgets_settings_and_maps(self):
-        """Имена материалов принадлежат предмету: у следующего они чужие."""
+        """Имена материалов принадлежат предмету: у следующего они чужие"""
         s = self._session()
         s.preview.begin_item('c_scattergun', 'scout_c_scattergun')
         s.materials.set_texture_settings('scattergun', {'size': [1024, 1024]})
@@ -158,14 +158,14 @@ class TextureSettingsTests(unittest.TestCase):
 
 
 class CustomModelTests(unittest.TestCase):
-    """Своя модель: что можно, пока она не загружена."""
+    """Своя модель: что можно, пока она не загружена"""
 
     def test_missing_file_is_an_error_not_a_crash(self):
         s = AppSession()
         self.assertIn('error', s.custom_model.load_custom_model('нет-такого.smd'))
 
     def test_qc_is_only_for_a_ready_model(self):
-        """У замены геометрии QC собирает сборка — править нечего."""
+        """У замены геометрии QC собирает сборка - править нечего"""
         s = AppSession()
         s.preview.custom_smd_path = 'C:/models/my.smd'
         s.preview.custom_keep_materials = False
@@ -187,8 +187,8 @@ class CustomModelTests(unittest.TestCase):
         self.assertIsNone(s.preview.custom_qc_text)
 
     def test_dropping_the_model_brings_the_game_one_back(self):
-        """Сброс только в состоянии оставлял свою геометрию в кадре до
-        перезагрузки предмета — теперь игровая грузится тут же."""
+        """После сброса своей модели игровая грузится тут же, а не остаётся
+        своя геометрия до перезагрузки предмета"""
         from unittest.mock import patch
         s = AppSession()
         s._mode = 'scout_c_scattergun'
@@ -206,7 +206,7 @@ class CustomModelTests(unittest.TestCase):
 
 
 class DiagnosticsReportTests(unittest.TestCase):
-    """Отчёт диагностики отдаётся простыми значениями."""
+    """Отчёт диагностики отдаётся простыми значениями"""
 
     def _report(self):
         from src.services.diagnostics.models import (
@@ -221,7 +221,7 @@ class DiagnosticsReportTests(unittest.TestCase):
         return report
 
     def test_enums_do_not_leak_out(self):
-        """Транспорт сериализует только простые значения."""
+        """Транспорт сериализует только простые значения"""
         data = AppSession._report_to_dict(self._report())
         self.assertTrue(all(isinstance(f['severity'], str)
                             for f in data['findings']))
@@ -241,7 +241,7 @@ class DiagnosticsReportTests(unittest.TestCase):
 
 
 class ModLibraryTests(unittest.TestCase):
-    """Библиотека модов: папка и есть список."""
+    """Библиотека модов: папка и есть список"""
 
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
@@ -264,7 +264,7 @@ class ModLibraryTests(unittest.TestCase):
                          ['weapon.vpk'])
 
     def test_same_name_does_not_overwrite(self):
-        """Два разных мода с одинаковым именем — обычное дело."""
+        """Два разных мода с одинаковым именем - обычное дело"""
         mod_library_service.add(self._vpk('weapon.vpk'))
         other = Path(self._tmp.name) / 'other'
         other.mkdir()
@@ -280,7 +280,7 @@ class ModLibraryTests(unittest.TestCase):
         self.assertEqual(len(mod_library_service.items()), 1)
 
     def test_removal_takes_a_name_not_a_path(self):
-        """Иначе «../../» увело бы удаление к любому файлу на диске."""
+        """Иначе «../../» увело бы удаление к любому файлу на диске"""
         mod_library_service.add(self._vpk('weapon.vpk'))
         outsider = Path(self._tmp.name) / 'secret.vpk'
         outsider.write_bytes(b'x')
@@ -294,7 +294,7 @@ class ModLibraryTests(unittest.TestCase):
 
 
 class ModIconTests(unittest.TestCase):
-    """Обложки модов: кэш на диске, а не пересборка на каждый показ."""
+    """Обложки модов: кэш на диске, а не пересборка на каждый показ"""
 
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
@@ -322,7 +322,7 @@ class ModIconTests(unittest.TestCase):
         self.assertTrue(mod_library_service.items()[0]['icon'])
 
     def test_list_does_not_build_icons(self):
-        """Открытие каталога не должно декодировать текстуры всей библиотеки."""
+        """Открытие каталога не должно декодировать текстуры всей библиотеки"""
         self.assertIsNone(mod_library_service.items()[0]['icon'])
 
     def test_icon_older_than_the_mod_is_not_reused(self):
@@ -331,7 +331,7 @@ class ModIconTests(unittest.TestCase):
         self.assertIsNone(mod_library_service.items()[0]['icon'])
 
     def test_removing_a_mod_takes_its_icon(self):
-        """Иначе одноимённый мод получил бы чужую обложку."""
+        """Иначе одноимённый мод получил бы чужую обложку"""
         icon = self._fake_icon()
         mod_library_service.remove(self.mod.name)
         self.assertFalse(icon.exists())
@@ -341,7 +341,7 @@ class ModIconTests(unittest.TestCase):
 
 
 class AutosaveTests(unittest.TestCase):
-    """Когда сеанс вообще берётся сохранять работу."""
+    """Когда сеанс вообще берётся сохранять работу"""
 
     def _session(self, tmp) -> AppSession:
         s = AppSession()
@@ -352,7 +352,7 @@ class AutosaveTests(unittest.TestCase):
 
     def test_no_item_no_work_key(self):
         """Без опознанного предмета работа легла бы в папку, которую потом
-        никто не найдёт: тот же предмет с ключом получил бы вторую."""
+        никто не найдёт: тот же предмет с ключом получил бы вторую"""
         s = AppSession()
         self.assertEqual(s._work_key(), '')
         s._mode = 'scout_c_scattergun'
@@ -378,7 +378,7 @@ class AutosaveTests(unittest.TestCase):
             self.assertFalse((Path(tmp) / 'work').exists())
 
     def test_emptying_the_work_removes_the_file(self):
-        """«Сбросил всё» не должно возвращаться при следующем открытии."""
+        """«Сбросил всё» не должно возвращаться при следующем открытии"""
         with tempfile.TemporaryDirectory() as tmp:
             s = self._session(tmp)
             s._mode = 'scout_c_scattergun'
@@ -393,112 +393,113 @@ class AutosaveTests(unittest.TestCase):
 
 
 class MissingTextureAnswerTests(unittest.TestCase):
-    """Ответ сборке про недостающую текстуру."""
+    """Ответ сборке про недостающую текстуру"""
 
     def _session(self) -> AppSession:
         s = AppSession()
         s._mode = 'hat'
         s.preview.weapon_key = 'models/player/items/medic/medic_gatsby.mdl'
         s.answers = []
-        s._answer_texture_request = s.answers.append
+        s.building._answer_texture_request = s.answers.append
         return s
 
     def test_apply_all_main_is_remembered(self):
-        """«Взять главную» раньше уходило как None и сливалось с «ответа не
-        было»: сборка молча выкидывала материал из мода."""
+        """«Взять главную» не сливается с «ответа не было»: иначе сборка
+        молча выкинула бы материал из мода"""
         from src.shared.constants import EXTRA_TEX_USE_MAIN
         s = self._session()
-        s.answer_texture('main', apply_all=True)
-        s._on_build_needs_texture('medic_gatsby_blue', 'medic_gatsby')
+        s.building.answer_texture('main', apply_all=True)
+        s.building._on_build_needs_texture('medic_gatsby_blue', 'medic_gatsby')
         self.assertEqual(s.answers, [EXTRA_TEX_USE_MAIN] * 2)   # ответ и авто-ответ
 
     def test_cancelled_build_is_not_asked_again(self):
-        """После отмены воркер до проверки отмены доходит только через ответ —
-        каждый следующий материал показывал бы окно заново."""
+        """После отмены воркер до проверки отмены доходит только через ответ -
+        каждый следующий материал показывал бы окно заново"""
         from src.shared.constants import EXTRA_TEX_USE_GAME_ORIGINAL
         s = self._session()
-        s._build = MagicMock(isInterruptionRequested=lambda: True)
+        s.building._build = MagicMock(isInterruptionRequested=lambda: True)
         events = []
         s._put = lambda name, **payload: events.append(name)
-        s._on_build_needs_texture('medic_gatsby_blue', 'medic_gatsby')
+        s.building._on_build_needs_texture('medic_gatsby_blue', 'medic_gatsby')
         self.assertEqual(events, [])
         self.assertEqual(s.answers, [EXTRA_TEX_USE_GAME_ORIGINAL])
 
     def test_without_apply_all_the_question_reaches_the_page(self):
         s = self._session()
-        s.answer_texture('game')
+        s.building.answer_texture('game')
         events = []
         s._put = lambda name, **payload: events.append(name)
-        s._on_build_needs_texture('medic_gatsby_blue', 'medic_gatsby')
+        s.building._on_build_needs_texture('medic_gatsby_blue', 'medic_gatsby')
         self.assertEqual(events, ['need_texture'])
 
     def test_uploaded_texture_answers_itself(self):
-        """Уже положенная текстура не должна ничего спрашивать."""
+        """Уже положенная текстура не должна ничего спрашивать"""
         s = self._session()
         s.preview.textures.set_texture('mat', __file__)
-        s._on_build_needs_texture('mat', 'key')
+        s.building._on_build_needs_texture('mat', 'key')
         self.assertEqual(s.answers, [__file__])
 
     def test_vpk_mod_keeps_its_own_texture_without_asking(self):
         """У мода из VPK текстура второго материала (брелок) уже в моде:
-        спрашивать «загрузить свою?» незачем."""
+        спрашивать «загрузить свою?» незачем"""
         from src.shared.constants import EXTRA_TEX_USE_GAME_ORIGINAL
         s = self._session()
         s.preview.custom_vpk_mode = True
         events = []
         s._put = lambda name, **payload: events.append(name)
-        s._on_build_needs_texture('keychain', 'custom')
+        s.building._on_build_needs_texture('keychain', 'custom')
         self.assertEqual(events, [])
         self.assertEqual(s.answers, [EXTRA_TEX_USE_GAME_ORIGINAL])
 
 
 class MissingPartModelAnswerTests(unittest.TestCase):
-    """Сменная часть модели (`$bodygroup`): вопрос доходит до страницы, ответ —
-    до воркера. Раньше сигнал никто не слушал, и сборка ждала пять минут на
-    каждую часть."""
+    """Сменная часть модели (`$bodygroup`): вопрос доходит до страницы, ответ -
+    до воркера. Неуслышанный сигнал стоил бы пяти минут ожидания на каждую
+    часть"""
 
     def _session(self) -> AppSession:
         s = AppSession()
         s._mode = 'demoman_c_bottle'
         s.preview.weapon_key = 'c_bottle'
-        s._build = MagicMock(isInterruptionRequested=lambda: False)
+        s.building._build = MagicMock(isInterruptionRequested=lambda: False)
         return s
 
     def test_the_question_reaches_the_page_with_the_kind_of_part(self):
         s = self._session()
         events = []
         s._put = lambda name, **payload: events.append((name, payload))
-        s._on_build_needs_model('c_bottle_broken', 'c_bottle')
+        s.building._on_build_needs_model('c_bottle_broken', 'c_bottle')
         self.assertEqual(events[0][0], 'need_model')
         self.assertEqual(events[0][1]['part'], 'c_bottle_broken')
         self.assertEqual(events[0][1]['kind'], 'broken')
 
     def test_the_answer_reaches_the_worker(self):
         s = self._session()
-        s.answer_model(__file__)
-        s._build.set_extra_model_result.assert_called_once_with(__file__)
-        s.answer_model('')
-        s._build.set_extra_model_result.assert_called_with(None)
-        self.assertIn('error', s.answer_model('C:/nowhere/part.smd'))
+        s.building.answer_model(__file__)
+        s.building._build.set_extra_model_result.assert_called_once_with(__file__)
+        s.building.answer_model('')
+        s.building._build.set_extra_model_result.assert_called_with(None)
+        self.assertIn('error', s.building.answer_model('C:/nowhere/part.smd'))
 
     def test_a_cancelled_build_keeps_the_game_part_without_asking(self):
         s = self._session()
-        s._build = MagicMock(isInterruptionRequested=lambda: True)
+        s.building._build = MagicMock(isInterruptionRequested=lambda: True)
         events = []
         s._put = lambda name, **payload: events.append(name)
-        s._on_build_needs_model('caber_exploded_bodygroup', 'c_caber')
+        s.building._on_build_needs_model('caber_exploded_bodygroup', 'c_caber')
         self.assertEqual(events, [])
-        s._build.set_extra_model_result.assert_called_once_with(None)
+        s.building._build.set_extra_model_result.assert_called_once_with(None)
 
     def test_the_build_listens_for_part_requests(self):
-        """Проводка сигнала — то, чего не хватало."""
+        """Проводка сигнала - то, чего не хватало"""
         import inspect
-        src = inspect.getsource(AppSession._start_build)
+        from src.app.build_editor import BuildEditor
+        src = inspect.getsource(BuildEditor._start_build)
         self.assertIn('request_extra_model.connect', src)
 
 
 class HatClassSelectionTests(unittest.TestCase):
-    """Какие модели мультиклассовой шапки уходят в сборку."""
+    """Какие модели мультиклассовой шапки уходят в сборку"""
 
     def _session(self) -> AppSession:
         s = AppSession()
@@ -507,29 +508,29 @@ class HatClassSelectionTests(unittest.TestCase):
         return s
 
     def test_selected_classes_only(self):
-        """Мод под все девять классов весит вдевятеро против нужного одного."""
-        models = self._session()._hat_models_for(['scout'])
+        """Мод под все девять классов весит вдевятеро против нужного одного"""
+        models = self._session().building._hat_models_for(['scout'])
         self.assertEqual(models, {'scout': 'a_scout.mdl'})
 
     def test_empty_selection_means_all(self):
-        """Пустой выбор — «все»: собрать пустую шапку хуже, чем лишнее."""
-        models = self._session()._hat_models_for([])
+        """Пустой выбор - «все»: собрать пустую шапку хуже, чем лишнее"""
+        models = self._session().building._hat_models_for([])
         self.assertEqual(len(models), 3)
 
     def test_unknown_classes_do_not_empty_the_build(self):
-        models = self._session()._hat_models_for(['pyro'])
+        models = self._session().building._hat_models_for(['pyro'])
         self.assertEqual(len(models), 3)
 
     def test_ordinary_hat_has_no_class_models(self):
         s = AppSession()
-        self.assertIsNone(s._hat_models_for(['scout']))
+        self.assertIsNone(s.building._hat_models_for(['scout']))
 
 
 class HatStyleMemoryTests(unittest.TestCase):
-    """Правки соседних стилей шапки доезжают до сборки — в тот же мод."""
+    """Правки соседних стилей шапки доезжают до сборки - в тот же мод"""
 
     def _edited(self, tmp: str, name: str) -> str:
-        """Стиль с одной положенной текстурой."""
+        """Стиль с одной положенной текстурой"""
         path = os.path.join(tmp, name)
         Path(path).write_bytes(b'png')
         return path
@@ -551,7 +552,7 @@ class HatStyleMemoryTests(unittest.TestCase):
             self.assertEqual(s._hat_styles[0]['models'], {'scout': 'style0.mdl'})
 
     def test_new_hat_forgets_previous_styles(self):
-        """Стили — у КАЖДОЙ шапки свои: правки прошлой к новой не относятся."""
+        """Стили - у КАЖДОЙ шапки свои: правки прошлой к новой не относятся"""
         with tempfile.TemporaryDirectory() as tmp:
             s = self._session(tmp)
             s._remember_hat_style(1)
@@ -566,7 +567,7 @@ class HatStyleMemoryTests(unittest.TestCase):
         self.assertEqual(s._hat_styles, {})
 
     def test_build_takes_other_styles_but_not_the_active_one(self):
-        """Активный стиль собирается основным путём — второй раз он лишний."""
+        """Активный стиль собирается основным путём - второй раз он лишний"""
         with tempfile.TemporaryDirectory() as tmp:
             s = self._session(tmp)
             s._remember_hat_style(1)
@@ -580,8 +581,8 @@ class HatStyleMemoryTests(unittest.TestCase):
             self.assertIn('hat_red', builds[0]['textures'][Team.RED])
 
     def test_forgetting_the_work_forgets_other_styles_too(self):
-        """«Забыть правки» и правки соседних стилей — иначе они всё равно
-        уедут в мод, хотя человек просил их забыть."""
+        """«Забыть правки» и правки соседних стилей - иначе они всё равно
+        уедут в мод, хотя человек просил их забыть"""
         with tempfile.TemporaryDirectory() as tmp:
             s = self._session(tmp)
             s._remember_hat_style(1)

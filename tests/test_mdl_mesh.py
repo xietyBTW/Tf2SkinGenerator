@@ -1,9 +1,9 @@
 """
-Геометрия из MDL/VVD/VTX там, где Crowbar её теряет (mdl_mesh).
+Геометрия из MDL/VVD/VTX там, где Crowbar её теряет (mdl_mesh)
 
 Бинарный разбор проверен на игре вручную (Air Head, Sheriff's Stetson, тело
-пиромана: первые группы совпадают с выводом Crowbar до шестого знака); здесь
-— правила сопоставления и дописывания, которые не требуют игры.
+пиромана: первые группы совпадают с выводом Crowbar до шестого знака), здесь
+- правила сопоставления и дописывания, которые не требуют игры
 """
 
 import os
@@ -95,7 +95,7 @@ class RepairTests(unittest.TestCase):
             open(smd, 'w', encoding='utf-8').write(SMD)
             with self._fake([1]):
                 self.assertEqual(mdl_mesh.repair_smd(qc, b'', b'', b''), {})
-            # Один треугольник в SMD, а группы по 2 — не сходится: не трогаем.
+            # Один треугольник в SMD, а группы по 2 - не сходится: не трогаем
             with self._fake([2, 2]):
                 self.assertEqual(mdl_mesh.repair_smd(qc, b'', b'', b''), {})
             self.assertEqual(mdl_mesh.smd_triangle_count(smd), 1)

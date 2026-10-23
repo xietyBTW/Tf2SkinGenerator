@@ -22,7 +22,7 @@ class EditedVMTServiceTests(unittest.TestCase):
 
     def test_build_finds_the_edit_of_a_dotted_card(self):
         # Карточка своей модели `Material.001`, а сборка знает материал так,
-        # как его собирает studiomdl: `material_001`.
+        # как его собирает studiomdl: `material_001`
         with tempfile.TemporaryDirectory() as tmp:
             with patch.object(EditedVMTService, "EDITED_VMT_DIR", tmp):
                 saved = EditedVMTService.save_edited_vmt("Material.001", '"VertexLitGeneric" {}')
@@ -45,9 +45,9 @@ class EditedVMTServiceTests(unittest.TestCase):
                 EditedVMTService.save_original_backup(key, "game original")
                 self.assertTrue(EditedVMTService.has_original_backup(key))
                 self.assertEqual(EditedVMTService.read_original_backup(key), "game original")
-                # Бэкап хранится как .orig, а не .vmt — не путается с правкой.
+                # Бэкап хранится как .orig, а не .vmt - не путается с правкой
                 self.assertFalse(EditedVMTService.has_edited_vmt(key))
-                # delete_edited_vmt убирает и правку, и бэкап оригинала.
+                # delete_edited_vmt убирает и правку, и бэкап оригинала
                 EditedVMTService.save_edited_vmt(key, "edited")
                 EditedVMTService.delete_edited_vmt(key)
                 self.assertFalse(EditedVMTService.has_edited_vmt(key))

@@ -1,21 +1,21 @@
 """
-Данные о моделях реквизита насмешек TF2 (taunt props — пропсы, которые
-появляются во время насмешек: танк, йети, скутер, гитара и т.п.).
+Данные о моделях реквизита насмешек TF2 (taunt props - пропсы, которые
+появляются во время насмешек: танк, йети, скутер, гитара и т.п.)
 
 Мод строится через тот же pipeline, что у оружия/снарядов/пикапов:
-  MDL из VPK → Crowbar декомпилирует → QC отдаёт текстуры/skinfamilies.
+  MDL из VPK -> Crowbar декомпилирует -> QC отдаёт текстуры/skinfamilies
 
-mode формируется как f"taunt_{key}" → _resolve_3d_weapon_key/сборка трактуют
+mode формируется как f"taunt_{key}" -> _resolve_3d_weapon_key/сборка трактуют
 его как обычное оружие (weapon_key = key), путь берётся из TAUNT_PROP_MDL_PATHS
-(подмешан в WEAPON_MDL_PATHS).
+(подмешан в WEAPON_MDL_PATHS)
 
 Пути выверены по tf2_misc_dir.vpk (папки .../items/taunts/). Только одиночные
-пропсы; по-классовые анимационные модели насмешек сюда не входят.
+пропсы, по-классовые анимационные модели насмешек сюда не входят
 """
 
 from typing import Dict
 
-# key → {ru, en, mdl_path}. key совпадает с weapon_key (basename без расширения).
+# key -> {ru, en, mdl_path}. key совпадает с weapon_key (basename без расширения)
 TAUNT_PROPS: Dict[str, dict] = {
     "tank": {
         "ru": "Танк", "en": "Tank",
@@ -55,7 +55,7 @@ TAUNT_PROPS: Dict[str, dict] = {
     },
     "matchbox": {
         # Реквизит насмешки ОРУЖИЯ (Gas Blast у Thermal Thruster), своего
-        # предмета и иконки у него нет — без подсказки непонятно, откуда он.
+        # предмета и иконки у него нет - без подсказки непонятно, откуда он
         "ru": "Спичечный коробок (Термическая тяга)", "en": "Matchbox (Thermal Thruster)",
         "mdl_path": "models/player/items/taunts/matchbox/matchbox.mdl",
     },
@@ -92,9 +92,9 @@ TAUNT_PROPS: Dict[str, dict] = {
         "mdl_path": "models/player/items/taunts/balloon_animal_pyro/balloon_animal_pyro.mdl",
     },
     # Эти насмешки имеют по модели на класс, НО все классы ссылаются на одни и те
-    # же материалы (taunt_<name>) — пропс общий, отличается лишь скелет привязки.
+    # же материалы (taunt_<name>) - пропс общий, отличается лишь скелет привязки.
     # Поэтому селектор класса не нужен: берём одну модель-представителя (scout),
-    # правка даёт единый мод для всех классов.
+    # правка даёт единый мод для всех классов
     "taunt_burstchester_scout": {
         "ru": "Burstchester", "en": "Burstchester",
         "mdl_path": "models/workshop/player/items/all_class/taunt_burstchester/taunt_burstchester_scout.mdl",
@@ -106,7 +106,7 @@ TAUNT_PROPS: Dict[str, dict] = {
     "taunt_killer_joke_scout": {
         "ru": "Killer Joke", "en": "Killer Joke",
         "mdl_path": "models/workshop/player/items/all_class/taunt_killer_joke/taunt_killer_joke_scout.mdl",
-        # items_game знает только реквизит-барабаны, и иконка по ключу не находилась.
+        # items_game знает только реквизит-барабаны, и иконка по ключу не находилась
         "icon": "backpack/workshop/player/items/all_class/taunt_killer_joke/taunt_killer_joke",
     },
     "taunt_the_final_score_scout": {
@@ -115,10 +115,10 @@ TAUNT_PROPS: Dict[str, dict] = {
     },
 }
 
-#: Префикс mode для реквизита насмешек (mode = f"{TAUNT_PROP_MODE_PREFIX}{key}").
+#: Префикс mode для реквизита насмешек (mode = f"{TAUNT_PROP_MODE_PREFIX}{key}")
 TAUNT_PROP_MODE_PREFIX = "taunt_"
 
-#: key → путь MDL (для подмешивания в WEAPON_MDL_PATHS).
+#: key -> путь MDL (для подмешивания в WEAPON_MDL_PATHS)
 TAUNT_PROP_MDL_PATHS: Dict[str, str] = {
     key: data["mdl_path"] for key, data in TAUNT_PROPS.items()
 }

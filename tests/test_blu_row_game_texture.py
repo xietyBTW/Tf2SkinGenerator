@@ -1,9 +1,9 @@
 """
-Синяя строка скинов с ответом «из игры».
+Синяя строка скинов с ответом «из игры»
 
 Синяя текстура и так лежит в игре: VMT мода смотрит на неё её путём (как у
 золота), а копия VTF в моде была мёртвым весом. Если родной VMT смотрит на
-текстуру с другим именем (синий цвет задан в самом VMT), всё по-старому.
+текстуру с другим именем (синий цвет задан в самом VMT), всё по-старому
 """
 
 import tempfile
@@ -50,7 +50,7 @@ class BluGameTextureTests(unittest.TestCase):
             self.assertEqual(build(d, "models/x/c_gun_blue"), ("models/x/c_gun_blue", False))
 
     def test_same_blue_in_a_shared_column_is_asked_once(self):
-        # Медиган: синий материал стоит и во втором столбце обеих строк.
+        # Медиган: синий материал стоит и во втором столбце обеих строк
         asked = []
         with tempfile.TemporaryDirectory() as d:
             self.assertEqual(

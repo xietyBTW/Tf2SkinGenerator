@@ -1,10 +1,9 @@
 """
-War Paint на оружии из нескольких материалов.
+War Paint на оружии из нескольких материалов
 
-Раньше узор собирался под главный материал и ложился только туда, куда его
-кладёт игра: остальные материалы своей модели (и все материалы оружия без War
-Paint в игре, кроме первого) оставались некрашеными. Теперь у каждого
-отмеченного материала своя сборка по его деталям и развёртке.
+У каждого отмеченного материала своя сборка по его деталям и развёртке, а не
+один узор под главный материал: иначе остальные материалы своей модели (и все
+материалы оружия без War Paint в игре, кроме первого) остались бы некрашеными
 """
 
 import unittest
@@ -21,12 +20,12 @@ HAND_MADE = {'id': 8, 'item': 15, 'by_parts': False}
 
 
 def _meshes(model, card):
-    """Меш назван как карточка, только регистр другой (как бывает в OBJ)."""
+    """Меш назван как карточка, только регистр другой (как бывает в OBJ)"""
     return card.upper(), card
 
 
 def _session(cards, own=(), game=(), layout=None):
-    """Редактор War Paint на сеансе без __init__: поля сеанса - по месту."""
+    """Редактор War Paint на сеансе без __init__: поля сеанса - по месту"""
     s = PaintkitEditor(AppSession.__new__(AppSession))
     s._host.preview = PreviewSession()
     s._host.preview.textures.material_names = list(cards)
@@ -83,14 +82,14 @@ class UniversalTests(unittest.TestCase):
         self.assertIn('error', _plans(_session(['body', 'glass']), materials=[]))
 
     def test_card_without_its_own_mesh_is_not_offered(self):
-        """Вставка HUD или материал $texturegroup вне модели: меша нет."""
+        """Вставка HUD или материал $texturegroup вне модели: меша нет"""
         s = _session(['body', 'smiley'])
         s._host.parts = SimpleNamespace(_mesh_of=lambda model, card: (
             ('BODY', 'body') if card == 'body' else {'error': 'нет геометрии'}))
         self.assertEqual(_plans(s), [(['body'], 'BODY', None)])
 
     def test_single_mesh_mod_does_not_paint_its_garland_lights(self):
-        """У одноматериальной модели любая карточка находит единственный меш."""
+        """У одноматериальной модели любая карточка находит единственный меш"""
         s = _session(['c_ambassador', 'festive_lights_red'])
         s._host.parts = SimpleNamespace(_mesh_of=lambda model, card: ('C_Ambassador', 'c_ambassador'))
         self.assertEqual(_plans(s), [(['c_ambassador'], 'C_Ambassador', None)])
@@ -118,20 +117,20 @@ class UniversalTests(unittest.TestCase):
                                {'card': 'c_det_lens', 'game': False, 'parts': True}])
 
     def test_game_card_without_mesh_is_not_laid_by_parts(self):
-        """Скин с другой пушки ложится по деталям: карточке игры без меша — нет."""
+        """Скин с другой пушки ложится по деталям: карточке игры без меша - нет"""
         s = _session(['c_det', 'c_det_shell'], own=[LAYERED], game=['c_det', 'c_det_shell'])
         s._host.parts = SimpleNamespace(_mesh_of=lambda model, card: (
             ('C_DET', card) if card == 'c_det' else {'error': 'нет геометрии'}))
         with patch('src.services.mesh_parts_service.load', return_value=object()):
             got = s.paintkit_materials(15)['materials']
         self.assertEqual([m['parts'] for m in got], [True, False])
-        # Чужой скин (не из своих War Paint) — по деталям, гильзы в плане нет.
+        # Чужой скин (не из своих War Paint) - по деталям, гильзы в плане нет
         self.assertEqual(_plans(s, kit=53, materials=['c_det', 'c_det_shell']),
                          [(['c_det'], 'C_DET', None)])
 
 
 class TiledUvTests(unittest.TestCase):
-    """Развёртка в соседней плитке (линза Базарной безделушки: u от 1 до 2)."""
+    """Развёртка в соседней плитке (линза Базарной безделушки: u от 1 до 2)"""
 
     def test_other_tile_lands_on_canvas(self):
         from src.services.paintkit_generic import _rasterize
@@ -167,7 +166,7 @@ class BatchTests(unittest.TestCase):
 
 
 class ApplyTests(unittest.TestCase):
-    """Нанесение: всё одним шагом отмены, а не легло на одну — ни на какую."""
+    """Нанесение: всё одним шагом отмены, а не легло на одну - ни на какую"""
 
     def _apply(self, refuse=()):
         s = _session(['body', 'scope'])

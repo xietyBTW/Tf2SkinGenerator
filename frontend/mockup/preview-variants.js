@@ -7,7 +7,7 @@
 import * as api from './api.js';
 import { ask } from './ask.js';
 import { t } from './i18n.js';
-import { say, sayBusy, viewer, withViewer } from './stage.js';
+import { say, sayError, sayBusy, viewer, withViewer } from './stage.js';
 import { work } from './layout.js';
 import { closeParts, refreshParts } from './parts.js';
 import { toggleDecorFit, isDecorFitOn, leaveDecorFit } from './custom-model.js';
@@ -15,7 +15,7 @@ import { applyView, refreshView } from './preview.js';
 import { reloadSceneIfFp } from './preview-scenes.js';
 
 /**
- * Переключатель состояний модели: ряд на каждую бодигруппу с вариантами.
+ * Переключатель состояний модели: ряд на каждую бодигруппу с вариантами
  *
  * Только показ - в мод уходят все состояния, игра переключает их сама. Ряд
  * прячется, когда переключать нечего (у большинства оружия один вариант).
@@ -29,7 +29,7 @@ export function showBodygroups(groups) {
   for (const g of groups) {
     const label = document.createElement('span');
     label.className = 'label label--inline';
-    // Снаряд в оружии - не состояние, а деталь: виден, пока его правят.
+    // Снаряд в оружии - не состояние, а деталь: виден, пока его правят
     label.textContent = g.projectile
       ? (g.custom ? 'Свой снаряд в оружии' : 'Снаряд в оружии')
       : groups.length > 1 ? `Состояние · ${g.name}` : 'Состояние модели';
@@ -43,7 +43,7 @@ export function showBodygroups(groups) {
         closeParts();
         say('Собираю состояние…');
         const res = await api.setBodygroup(g.name, i);
-        if (res.error) { say(res.error); return; }
+        if (res.error) { sayError(res.error); return; }
         applyView(res);
       });
       bar.appendChild(b);
@@ -51,16 +51,16 @@ export function showBodygroups(groups) {
   }
 }
 
-//: Подписи видов гирлянды. Ключи задаёт Python (festive_decor / items_game).
+//: Подписи видов гирлянды. Ключи задаёт Python (festive_decor / items_game)
 /** Гирлянду есть что подгонять: своя модель (оружия, мода из VPK или её
- *  самой) или уже правлена. */
+ *  самой) или уже правлена */
 export const decorFittable = (st) => Boolean(st.custom_geometry || st.decor_fit
   || (st.decor_bends || []).length || (st.decor_models || []).includes(st.festive));
 
 const FESTIVE_LABELS = { '': 'Обычная', xmas: 'Праздничная', festivizer: 'Фестивайзер' };
 
 /**
- * Праздничная версия оружия: обычная, праздничная, фестивайзер.
+ * Праздничная версия оружия: обычная, праздничная, фестивайзер
  *
  * Только показ: гирлянда висит поверх модели своим слоем вьювера и в мод не
  * идёт - поэтому и на своей модели она остаётся там, где её повесит игра.
@@ -79,7 +79,7 @@ export function showFestive(st) {
 
   // Правки гирлянды живут и при выключенном показе - метка на кнопке
   // говорит, что в мод уйдёт своя гирлянда (как метка правленого стиля).
-  // Вшитая гирлянда одна: выбора версии нет, две разом игра не повесит.
+  // Вшитая гирлянда одна: выбора версии нет, две разом игра не повесит
   const edited = new Set(st.festive_edited || []);
   if (baked) {
     const note = document.createElement('span');
@@ -96,16 +96,16 @@ export function showFestive(st) {
       if (b.classList.contains('is-active')) return;
       bar.querySelectorAll('.tag[data-kind]').forEach(
         (x) => x.classList.toggle('is-active', x === b));
-      // Первое включение - разбор модели гирлянды, около секунды; повторное
-      // из памяти, и подпись тогда не мигнёт (sayBusy отложенная).
+      // Первое включение - разбор модели гирлянды, около секунды, повторное
+      // из памяти, и подпись тогда не мигнёт (sayBusy отложенная)
       if (kind) sayBusy('Загрузка гирлянды…');
       // Подгонку прошлой гирлянды - записать и закрыть: отложенная запись
-      // иначе легла бы уже на новую (или потерялась бы на «Обычная»).
+      // иначе легла бы уже на новую (или потерялась бы на «Обычная»)
       await leaveDecorFit();
       try {
         applyView(await api.setFestive(kind));
       } catch (err) {
-        say(err.message);
+        sayError(err.message);
         refreshView();
       }
     });
@@ -114,7 +114,7 @@ export function showFestive(st) {
   // Подгонка гирлянды под модель - тем же инструментом, что и своя модель.
   // Только при своей модели: на стоковой гирлянда уже стоит на месте. Уже
   // сделанную подгонку оставляем доступной и без неё - иначе, убрав свою
-  // модель, сдвинутую гирлянду было бы не вернуть, и она ушла бы в мод.
+  // модель, сдвинутую гирлянду было бы не вернуть, и она ушла бы в мод
   if (st.festive && scene === 'item' && decorFittable(st)) {
     const fit = document.createElement('button');
     fit.className = 'tag festive__fit' + (isDecorFitOn() ? ' is-active' : '');
@@ -127,7 +127,7 @@ export function showFestive(st) {
     bar.appendChild(fit);
   }
   // На своей модели гирлянда стоит по стоковой, пока её не подогнали: так её
-  // и повесит игра, и огоньки будут висеть мимо.
+  // и повесит игра, и огоньки будут висеть мимо
   if (st.festive && st.custom_geometry && !st.decor_fit && !(st.decor_bends || []).length) {
     const note = document.createElement('span');
     note.className = 'label label--inline festive__note';
@@ -137,7 +137,7 @@ export function showFestive(st) {
 }
 
 /** «Сделать праздничным» / «Снять гирлянду»: есть у оружия с гирляндами,
- *  кроме мода из VPK (его модель собирается своим конвейером). */
+ *  кроме мода из VPK (его модель собирается своим конвейером) */
 function showBakeButton(st, options) {
   const btn = document.getElementById('makefestive');
   btn.hidden = !options.length || !st.can_bake_festive || work.dataset.scene !== 'item';
@@ -160,7 +160,7 @@ document.getElementById('makefestive').addEventListener('click', async (e) => {
   }
   await leaveDecorFit();
   const res = await api.bakeFestive(kind);
-  if (res.error) { say(res.error); return; }
+  if (res.error) { sayError(res.error); return; }
   applyView(res);
   say(kind ? 'Гирлянда войдёт в модель оружия' : 'Гирлянда снята');
 });
@@ -171,18 +171,18 @@ document.getElementById('makefestive').addEventListener('click', async (e) => {
  */
 //: Номер последнего события гирлянды: OBJ качается отдельно, и за это время
 //: гирлянду могли выключить или уйти к другому предмету - старая не должна
-//: встать поверх.
+//: встать поверх
 let decorSeq = 0;
 
-/** Гирлянда прошлого предмета, если ещё качается, не нужна. */
+/** Гирлянда прошлого предмета, если ещё качается, не нужна */
 export function forgetDecor() { decorSeq++; }
 
 export async function showDecor(ev) {
   const w = viewer();
   if (!w || !w.setDecor) return;
   const seq = ++decorSeq;
-  // Гирлянда пересобирается во вьювере - её подгонка там гаснет; страница
-  // обязана погасить свою половину, иначе панель висела бы без гизмо.
+  // Гирлянда пересобирается во вьювере - её подгонка там гаснет, страница
+  // обязана погасить свою половину, иначе панель висела бы без гизмо
   await leaveDecorFit();
   if (!ev.kind) {
     w.clearDecor();
@@ -195,7 +195,7 @@ export async function showDecor(ev) {
         ([name, m]) => [name, { ...m, red: urls(m.red), blu: urls(m.blu) }]));
       w.setDecor(obj, mats, ev.hints || {}, ev.groups || {});
     } catch (err) {
-      say(`Не удалось показать гирлянду: ${err.message}`);
+      sayError(`Не удалось показать гирлянду: ${err.message}`);
       return;
     }
   }
@@ -204,14 +204,14 @@ export async function showDecor(ev) {
   await reloadSceneIfFp();
 }
 
-/** Гирлянду собрать не вышло: кнопка возвращается на «Обычная». */
+/** Гирлянду собрать не вышло: кнопка возвращается на «Обычная» */
 export function festiveFailed() {
-  say('Гирлянду этой версии не удалось загрузить');
+  sayError('Гирлянду этой версии не удалось загрузить');
   refreshView();
 }
 
 /**
- * Кнопки вариантных стилей (skinfamilies).
+ * Кнопки вариантных стилей (skinfamilies)
  *
  * Один стиль означает, что стилей НЕТ: «Skin 0» - это сама модель, и
  * предлагать выбор из одного варианта незачем.
@@ -224,18 +224,18 @@ export function showSkins(info) {
   // вариант: у тех свои тумблеры. Строить ряд по num_skins/roles было нельзя -
   // у командного оружия он повторял RED/BLU, а клик по такому «стилю» уходил
   // с ПОЗИЦИОННЫМ индексом и попадал в другую строку $texturegroup (у
-  // праздничного гранатомёта - в Festive). Картинка не менялась.
+  // праздничного гранатомёта - в Festive). Картинка не менялась
   const styles = (info && info.styles) || [];
-  // Что нарисовано - для сверки с ответом Python (applyView).
+  // Что нарисовано - для сверки с ответом Python (applyView)
   row.dataset.styles = JSON.stringify(styles);
   row.hidden = styles.length === 0;
   if (row.hidden) return;
 
   // Базовый стиль - первой кнопкой. Без него из варианта не выйти: в списке
-  // styles его нет (там только варианты), и полоса становилась ловушкой.
+  // styles его нет (там только варианты), и полоса становилась ловушкой
   for (const entry of [['Базовый', 0], ...styles]) {
     // (подпись, сырой индекс скина в модели) - индекс именно сырой, по нему
-    // выбирают скин и превью, и сборка.
+    // выбирают скин и превью, и сборка
     const [label, index] = Array.isArray(entry) ? entry : [String(entry), 0];
     const b = document.createElement('button');
     b.className = 'tag';
@@ -243,7 +243,7 @@ export function showSkins(info) {
     b.textContent = label;
     b.addEventListener('click', async () => {
       applyView(await api.setSkin(index));
-      // Мазки у стиля свои: полоса частей должна показать его покраску.
+      // Мазки у стиля свои: полоса частей должна показать его покраску
       if (!document.getElementById('partsbar').hidden) await refreshParts();
     });
     row.appendChild(b);
@@ -251,7 +251,7 @@ export function showSkins(info) {
 }
 
 /**
- * Полоса вариантного стиля под альбомом.
+ * Полоса вариантного стиля под альбомом
  *
  * Стиль переопределяет базу ВЫБОРОЧНО: у него нет своих карточек, пока человек
  * не скажет, какой материал в нём меняет. Пустой альбом здесь - не поломка, но

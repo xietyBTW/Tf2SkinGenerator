@@ -1,37 +1,37 @@
 /*
- * Мост к Python.
+ * Мост к Python
  *
  * Единственное место, которое знает о транспорте. Сейчас это dev-сервер по
  * HTTP; когда фронт переедет в окно WebView2, здесь появится ветка
- * `window.pywebview.api[method](params)` - и больше нигде менять не придётся.
+ * `window.pywebview.api[method](params)` - и больше нигде менять не придётся
  *
  * Сам набор методов и их результаты живут в src/app/api.py.
  */
 
 //: Язык интерфейса. Ответам Python он не нужен - их язык берётся из общего
-//: конфига (см. `api._lang` в Python), и раньше страница глушила настройку,
-//: подставляя в каждый вызов 'ru'. Здесь он остался ради вьюверов: они живут
-//: в отдельных документах и в конфиг не ходят.
+//: конфига (см. `api._lang` в Python), поэтому в вызовы его не подставляем.
+//: Нужен он вьюверам: они живут в отдельных документах и в конфиг не ходят
 let uiLang = 'en';
 export const lang = () => uiLang;
 export function setLang(value) { uiLang = value || 'en'; }
 
-//: Куда писать обмен с Python. Ставится журналом; по умолчанию - никуда.
+//: Куда писать обмен с Python. Ставится журналом, по умолчанию - никуда
 let sink = null;
 export function setLogSink(fn) { sink = fn; }
 function log(dir, text, kind) { if (sink) sink(dir, text, kind); }
 
 //: Что НЕ пишем в журнал. Это опросы: страница дёргает их раз в секунду, и в
 //: ленте обмена они вытесняют всё остальное. Отдельно смешно с log_tail -
-//: открытая консоль засоряла бы сама себя.
-const QUIET = new Set(['log_tail', 'update_progress', 'window_control']);
+//: открытая консоль засоряла бы сама себя. icons - сотни килобайт картинок на
+//: каждую прокрутку каталога
+const QUIET = new Set(['log_tail', 'update_progress', 'window_control', 'icons']);
 
-/** Вызывает метод прикладного API. Бросает Error с текстом от Python. */
+/** Вызывает метод прикладного API. Бросает Error с текстом от Python */
 export async function call(method, params = {}) {
   const quiet = QUIET.has(method);
   if (!quiet) log('→', method + '(' + JSON.stringify(params).slice(0, 120) + ')');
 
-  // Хост-мост, когда страница открыта в окне приложения.
+  // Хост-мост, когда страница открыта в окне приложения
   const bridge = window.pywebview && window.pywebview.api;
   if (bridge && typeof bridge[method] === 'function') {
     return bridge[method](params);
@@ -45,7 +45,7 @@ export async function call(method, params = {}) {
   const data = await res.json().catch(() => ({ error: `${res.status} ${res.statusText}` }));
   if (data.error) {
     // Ошибку показываем ВСЕГДА, даже у тихих: молчащий опрос, который на
-    // самом деле падает, - худший вид тишины.
+    // самом деле падает, - худший вид тишины
     log('!', method + ': ' + data.error, 'err');
     throw new Error(data.error);
   }
@@ -55,7 +55,7 @@ export async function call(method, params = {}) {
 
 //: Справочники не меняются за сессию, а спрашивают их на каждый клик по
 //: фильтру. Без кэша смена класса делала три запроса подряд, и список успевал
-//: моргнуть чужим содержимым.
+//: моргнуть чужим содержимым
 const memo = new Map();
 
 function cached(method, params) {
@@ -64,7 +64,7 @@ function cached(method, params) {
     // Кэшируется ОБЕЩАНИЕ, а не ответ: иначе два одновременных запроса ушли бы
     // оба. Но неудачное обещание надо забыть - список игровых материалов
     // падает, пока не указан путь к игре, и закэшированный отказ держался бы
-    // до перезапуска, хотя путь уже поправили в настройках.
+    // до перезапуска, хотя путь уже поправили в настройках
     memo.set(key, call(method, params).catch((err) => {
       memo.delete(key);
       throw err;
@@ -73,16 +73,16 @@ function cached(method, params) {
   return memo.get(key);
 }
 
-/** Забывает закэшированные справочники: сменился язык - сменились имена. */
+/** Забывает закэшированные справочники: сменился язык - сменились имена */
 export function forgetCached() { memo.clear(); }
 
 //: Размер кэша моделей. Отдельно от settings(): считается обходом всей папки
-//: и на большой библиотеке занимает секунды - окно настроек его не ждёт.
+//: и на большой библиотеке занимает секунды - окно настроек его не ждёт
 export const cacheSize = () => call('cache_size', {});
 
 //: Версия и обновление. update_status ходит в сеть, поэтому страница зовёт его
 //: после отрисовки; install_update качает установщик, запускает его и ГАСИТ
-//: приложение - ответ приходит раньше, чем оно закроется.
+//: приложение - ответ приходит раньше, чем оно закроется
 export const updateStatus = (force = false) => call('update_status', { force });
 export const installUpdate = () => call('install_update', {});
 export const updateProgress = () => call('update_progress', {});
@@ -110,10 +110,12 @@ export const setParticleAttr = (system, group, index, attr, value) =>
   call('set_particle_attr', { system, group, index, attr, value });
 
 // Правка структуры эффекта: модули, параметры, системы. Всё возвращает
-// свежие systems и tree - каталог и свойства перерисовываются одним ответом.
+// свежие systems и tree - каталог и свойства перерисовываются одним ответом
 export const particleModules  = (group) => cached('particle_module_catalog', { group });
 export const addParticleModule = (system, group, function_name) =>
   call('add_particle_module', { system, group, function_name });
+export const applyParticleGizmo = (system, edits) =>
+  call('apply_particle_gizmo', { system, edits });
 export const removeParticleModule = (system, group, index) =>
   call('remove_particle_module', { system, group, index });
 export const particleMissingAttrs = (system, group, index) =>
@@ -172,7 +174,7 @@ export const setHatFilter = (tag, hidden) => call('set_hat_filter', { tag, hidde
 export const modeFor      = (category, subtype = null) => call('mode_for', { category, subtype });
 // restore - открыть предмет с сохранённой работой. Из каталога он
 // открывается ИГРОВЫМ: свои работы лежат своим списком (`works`).
-// hat - ключ шапки из каталога: у стилей модели разные, а работа одна.
+// hat - ключ шапки из каталога: у стилей модели разные, а работа одна
 export const loadPreview  = (mode, lang = null, model_key = null,
                              per_class = null, style = null, restore = false,
                              hat = '') =>
@@ -197,7 +199,7 @@ export const toggleMisc   = (on = null) => call('toggle_misc', { on });
 export const forceTeam    = () => call('force_team');
 
 // Инструменты: извлечение оригиналов и объединение модов. Результат приходит
-// событием (tool_done / extract_files), ответ говорит лишь о запуске.
+// событием (tool_done / extract_files), ответ говорит лишь о запуске
 export const extractModel = () => call('extract_model');
 export const exportModelFiles = (files) => call('export_model_files', { files });
 export const extractTexture = (textures = null) => call('extract_texture', { textures });
@@ -206,7 +208,7 @@ export const mergeVpk     = (files, name, confirmed = false) =>
   call('merge_vpk', { files, name, confirmed });
 
 // Карты материала: схему (какие бывают и что настраивается) держит Python -
-// список карт и их параметры на странице не дублируются.
+// список карт и их параметры на странице не дублируются
 export const mapSchema    = () => cached('material_map_schema', {});
 export const textureMaps  = (material) => call('texture_maps', { material });
 export const lightwarpRamp = (params) => call('lightwarp_ramp', { params });
@@ -215,18 +217,18 @@ export const mapPreview = (material, mapId, spec) => call('map_preview', { mater
 export const setTextureMaps = (material, maps) =>
   call('set_texture_maps', { material, maps });
 
-// Пер-текстурные настройки сборки: какой материал собирается не как все.
+// Пер-текстурные настройки сборки: какой материал собирается не как все
 export const textureSettings = (material) => call('texture_settings', { material });
 export const setTextureSettings = (material, settings) =>
   call('set_texture_settings', { material, settings });
 export const textureBadges = () => call('texture_badges');
 // known_shape - отпечаток разбиения, который у страницы уже есть. Совпал -
 // Python не шлёт карты треугольников: они почти весь ответ, а меняются только
-// от резки, тогда как сам запрос идёт после каждого мазка кистью.
+// от резки, тогда как сам запрос идёт после каждого мазка кистью
 export const parts          = (material = '', known_shape = '') =>
   call('parts', { material, known_shape });
 // Картинки части - слоями: `layer` называет, какую правят, заменяют или
-// снимают; без него новая ложится поверх, а снятие убирает все.
+// снимают, без него новая ложится поверх, а снятие убирает все
 export const setPartTexture = (material, part, path = null, options = null,
                                layer = null) =>
   call('set_part_texture', { material, part, path, options, layer });
@@ -240,35 +242,35 @@ export const setPartColors  = (material, colors, strength = null,
                                exact = null) =>
   call('set_part_colors', { material, colors, strength, exact });
 export const clearParts     = (material = '') => call('clear_parts', { material });
-//: Части - своим материалом: target '' - новый, имя - в этот, '-' - в общий.
+//: Части - своим материалом: target '' - новый, имя - в этот, '-' - в общий
 export const setPartMaterial  = (material, parts, target = '') =>
   call('set_part_material', { material, parts, target });
 export const dropPartMaterial = (name, material = '') =>
   call('drop_part_material', { name, material });
 export const setPartEdge    = (material, width, color) =>
   call('set_part_edge', { material, width, color });
-// История правок предмета - одна на текстуры, части и свою модель.
+// История правок предмета - одна на текстуры, части и свою модель
 export const undoEdits      = (delta = -1) => call('undo_edits', { delta });
 
 // Работа над предметом. Автосохранение пишет черновик молча (если это не
-// выключено), а в библиотеку работа попадает только по `keepWork`.
+// выключено), а в библиотеку работа попадает только по `keepWork`
 export const workState    = () => call('work_state');
 export const keepWork     = () => call('keep_work');
 export const restoreWork  = () => call('restore_work');
 export const forgetWork   = () => call('forget_work');
 export const deleteWork   = (key) => call('delete_work', { key });
-// Черновики: их не видно в библиотеке, поэтому убираются отдельно, из настроек.
+// Черновики: их не видно в библиотеке, поэтому убираются отдельно, из настроек
 export const drafts       = () => call('drafts', {});
 export const forgetDrafts = (keys = null) => call('forget_drafts', { keys });
 
 // Библиотека модов: папка на диске, она же список. Открытый мод сохраняется
-// туда, чтобы вернуться к нему потом.
+// туда, чтобы вернуться к нему потом
 export const modLibrary   = () => call('mod_library');
 export const addMod       = (path) => call('add_mod', { path });
 export const modIcon      = (name) => call('mod_icon', { name });
 
-// ── Звуки ─────────────────────────────────────────────────────────────── //
-/** Записи под фильтрами и сами фильтры со счётчиками - одним ответом. */
+// Звуки
+/** Записи под фильтрами и сами фильтры со счётчиками - одним ответом */
 export const sounds        = (filters = {}) => call('sounds', {
   section: filters.section || '', who: filters.who || '',
   group: filters.group || '', variant: filters.variant || '',
@@ -281,22 +283,23 @@ export const saveSound     = (name, wave = '') => call('save_sound', { name, wav
 export const clearSounds   = () => call('clear_sounds');
 export const buildSounds   = (filename = '') => call('build_sounds', { filename });
 
-/** URL игрового звука прямо из VPK. Путь - от корня `sound/`. */
+/** URL игрового звука прямо из VPK. Путь - от корня `sound/` */
 export const soundUrl = (path) => '/sound?wave=' + encodeURIComponent(path);
 export const removeMod    = (name) => call('remove_mod', { name });
 export const loadVpkMod   = (path) => call('load_vpk_mod', { path });
 export const diagnose     = (path) => call('diagnose', { path });
 
-// Настройки приложения: конфиг общий с окном, поэтому правка видна обоим.
+// Настройки приложения: конфиг общий с окном, поэтому правка видна обоим
 export const settings     = () => call('settings');
-//: Автопоиск игры: реестр Steam и его библиотеки, а не обход диска.
+//: Автопоиск игры: реестр Steam и его библиотеки, а не обход диска
 export const findTf2      = () => call('find_tf2');
+export const checkTf2     = (path) => call('check_tf2', { path });
 export const clearModelCache = () => call('clear_model_cache');
-//: Меню «Вставить» в редакторе VMT: набор не меняется за сеанс.
+//: Меню «Вставить» в редакторе VMT: набор не меняется за сеанс
 export const vmtSnippets  = () => cached('vmt_snippets', {});
 export const vmtEffectValues = (key, text) => call('vmt_effect_values', { key, text });
 export const vmtApplyEffect  = (key, values, text, game) => call('vmt_apply_effect', { key, values, text, game });
-// Конструктор узора блеска.
+// Конструктор узора блеска
 export const sheenBuilderSchema = () => cached('sheen_builder_schema', { lang: lang() });
 export const sheenPatterns   = () => call('sheen_patterns_list', {});
 export const sheenPresetThumbs = () => call('sheen_preset_thumbs', {});
@@ -308,21 +311,21 @@ export const sheenPatternSave = (pattern_id, name, spec, length) =>
 export const sheenPatternDelete = (pattern_id) => call('sheen_pattern_delete', { pattern_id });
 export const setSettings  = (values) => call('set_settings', { values });
 //: Мелочь раскладки (ширина панели, громкость): её правят прямо на экране, и
-//: сохраняется она по одной, а не всем окном настроек разом.
+//: сохраняется она по одной, а не всем окном настроек разом
 export const setUiState   = (key, value) => call('set_ui_state', { key, value });
 
 //: Журнал Python. Забирается опросом по номеру последней взятой записи и
-//: только пока консоль открыта (см. log.js - почему не потоком событий).
+//: только пока консоль открыта (см. log.js - почему не потоком событий)
 export const logTail      = (since) => call('log_tail', { since });
 export const clearLog     = () => call('clear_log', {});
 export const logFolder    = () => call('log_folder', {});
 export const exportFolder = () => call('export_folder', {});
 export const pickFolder   = (start) => call('pick_folder', { start });
-//: Кнопки окна: minimize / maximize / close / theme; без действия - состояние.
+//: Кнопки окна: minimize / maximize / close / theme; без действия - состояние
 export const windowControl = (action = '', theme = '') =>
   call('window_control', { action, theme });
 
-// Своя модель: сначала спрашиваем тип (keep=null), потом грузим с ответом.
+// Своя модель: сначала спрашиваем тип (keep=null), потом грузим с ответом
 export const loadCustomModel = (path, keep = null) =>
   call('load_custom_model', { path, keep });
 export const dropCustomModel = () => call('drop_custom_model');
@@ -334,13 +337,13 @@ export const setCustomFit = (fit) => call('set_custom_fit', { fit });
 export const qcText       = () => call('qc_text');
 export const saveQc       = (text) => call('save_qc', { text });
 
-// Редактор VMT.
+// Редактор VMT
 export const vmtParams    = () => cached('vmt_params', {});
 export const openVmt      = (material) => call('open_vmt', { material });
 export const saveVmt      = (material, content, original) =>
   call('save_vmt', { material, content, original });
 export const resetVmt     = (material) => call('reset_vmt', { material });
-// Без шестерёнки: правка уходит во все материалы предмета.
+// Без шестерёнки: правка уходит во все материалы предмета
 export const saveVmtAll   = (material, content, before, original, materials) =>
   call('save_vmt_all', { material, content, before, original, materials });
 export const resetVmtAll  = (materials) => call('reset_vmt_all', { materials });
@@ -348,7 +351,7 @@ export const resetVmtAll  = (materials) => call('reset_vmt_all', { materials });
 // легли (сцены в кадре не оказалось). Обычная смена анимации идёт без
 // него и обходится одними дорожками.
 // Насмешка: персонаж играет тонт с реквизитом. Класс выбирают на странице -
-// одну и ту же насмешку умеют до девяти классов, и модель у каждого своя.
+// одну и ту же насмешку умеют до девяти классов, и модель у каждого своя
 export const loadTaunt    = (tf2_class = '') => call('load_taunt', { tf2_class });
 export const loadWear     = (tf2_class = '', slot = '') => call('load_wear', { tf2_class, slot });
 export const loadFirstPerson = (action = 'IDLE', full = false) =>
@@ -358,7 +361,7 @@ export const setPartDetail = (material, detail) =>
   call('set_part_detail', { material, detail });
 export const togglePartIsland = (material, group, island) =>
   call('toggle_part_island', { material, group, island });
-//: Ножницы: выделенные треугольники меша - в отдельную часть, и обратно.
+//: Ножницы: выделенные треугольники меша - в отдельную часть, и обратно
 export const addPartRegion = (material, triangles) =>
   call('add_part_region', { material, triangles });
 export const removePartRegion = (material, region) =>
@@ -366,7 +369,7 @@ export const removePartRegion = (material, region) =>
 export const loadSkybox   = (sky_name) => call('load_skybox', { sky_name });
 export const setTexture   = (material, path) => call('set_texture', { material, path });
 export const build        = (params) => call('build', { params });
-//: Сборка шапки на девять классов идёт минуты - передумать надо давать.
+//: Сборка шапки на девять классов идёт минуты - передумать надо давать
 export const cancelBuild  = () => call('cancel_build');
 export const vtfEstimate  = (size, format, flags) =>
   call('vtf_estimate', { size, format, flags });
@@ -388,7 +391,7 @@ export const setPaintkitLayout = (kit, assign) =>
 export const normalPreview = (screen, global_options, editing) =>
   call('normal_preview', { screen, global_options, editing });
 
-/** Кладёт файл во временную папку и возвращает его путь на диске. */
+/** Кладёт файл во временную папку и возвращает его путь на диске */
 export async function upload(file) {
   const res = await fetch('/upload?name=' + encodeURIComponent(file.name), {
     method: 'POST', body: file,
@@ -399,10 +402,10 @@ export async function upload(file) {
 }
 
 /**
- * Подписка на события воркеров.
+ * Подписка на события воркеров
  *
  * Воркеры работают в своих потоках, и результат приезжает не ответом на
- * запрос, а потоком: progress → model_ready → materials. В окне приложения
+ * запрос, а потоком: progress -> model_ready -> materials. В окне приложения
  * события приносит SSE - и в окне pywebview тоже. Ветки «pywebview толкает сам»
  * здесь быть не должно: Python ничего не толкает, а window.pywebview
  * появляется после загрузки страницы, и такая ветка молча теряла бы события.
@@ -420,25 +423,27 @@ export function subscribe(onEvent) {
       console.error('битое событие', e.data, err);
     }
   };
-  // Браузер сам переподключается при обрыве - глушим только шум в консоли.
+  // Браузер сам переподключается при обрыве - глушим только шум в консоли
   src.onerror = () => {};
   return () => src.close();
 }
 
-/** URL файла, который сделал воркер (модель, текстура). */
+/** URL файла, который сделал воркер (модель, текстура) */
 // opaque=1 - PNG без альфы: в игровых текстурах она маска бликов, и на плоском
-// показе картинка выглядела бы призраком (см. devserver._drop_alpha).
+// показе картинка выглядела бы призраком (см. devserver._drop_alpha)
 export const fileUrl = (path, opaque = false) =>
   '/file?path=' + encodeURIComponent(path) + (opaque ? '&opaque=1' : '');
 
 /** То же, но без альфа-канала - для плоского показа текстуры.
  *  В игровых VTF альфа обычно маска бликов, и на карточке текстура из-за неё
- *  выглядит призраком. Вьюверу альфа нужна, ему отдаём обычный файл. */
+ *  выглядит призраком. Вьюверу альфа нужна, ему отдаём обычный файл */
 export const opaqueUrl = (path) => fileUrl(path) + '&opaque=1';
 
 /** URL иконки предмета из рюкзака. Ключ - icon из items_game, ключ оружия или
  *  путь к модели: что именно с ним делать, решает Python. Нет иконки - 404,
  *  и карточка каталога просто остаётся без картинки.
  *  `v` - версия правила выбора иконки: ответ кэшируется браузером на сутки,
- *  и без смены URL старая картинка переживала обновление. */
+ *  и без смены URL старая картинка переживала обновление */
 export const iconUrl = (key) => '/icon?v=2&key=' + encodeURIComponent(key);
+/** Иконки пачкой: {ключ: data-URL}, отсутствующих в ответе нет */
+export const icons = (keys) => call('icons', { keys });

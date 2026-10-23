@@ -1,11 +1,11 @@
 /*
  * Сборка в нижней полосе: линия прогресса по её верхнему краю, текст этапа,
- * счётчик, кнопка «Остановить», финал, ошибка и звук.
+ * счётчик, кнопка «Остановить», финал, ошибка и звук
  *
  * Как именно - выбирают в настройках, раздел «Кастомизация». Варианты и
  * умолчания живут здесь, Python только хранит выбор (`build_fx`). Движок один:
  * им играет и настоящая сборка (build.js, events.js), и пример в окне
- * настроек - у каждого свой набор элементов (createFx).
+ * настроек - у каждого свой набор элементов (createFx)
  *
  * Без анимаций интерфейса (настройка или системное «уменьшить движение»)
  * остаётся простая полоса: текст встаёт сразу, финал и ошибка - без
@@ -16,7 +16,7 @@ import * as api from './api.js';
 import { t } from './i18n.js';
 
 /** Варианты по группам: [ключ, подпись группы, [[значение, подпись], …]].
- *  Подписи русские - словарь страницы переводит их сам. */
+ *  Подписи русские - словарь страницы переводит их сам */
 export const FX_GROUPS = [
   ['text', 'Текст этапа', [
     ['decode', 'Перебор букв'], ['type', 'Печать с кареткой'],
@@ -49,13 +49,13 @@ export const FX_GROUPS = [
 ];
 
 /** Как выглядит сборка, пока человек ничего не выбрал. Звук только в конце
- *  и при ошибке: щелчок на каждом этапе быстро надоедает. */
+ *  и при ошибке: щелчок на каждом этапе быстро надоедает */
 export const FX_DEFAULTS = {
   text: 'decode', line: 'head', pct: 'roll', btn: 'stop',
   fx: 'none', end: 'meet', err: 'shake', sound: 'chime',
 };
 
-/** Сохранённый выбор, сверенный со списком: чужое значение - умолчание. */
+/** Сохранённый выбор, сверенный со списком: чужое значение - умолчание */
 export function fxChoice(saved) {
   const out = { ...FX_DEFAULTS };
   for (const [key, , values] of FX_GROUPS) {
@@ -65,19 +65,19 @@ export function fxChoice(saved) {
   return out;
 }
 
-//: Цвета команд - те же, что у черт под знаком на заставке.
+//: Цвета команд - те же, что у черт под знаком на заставке
 const RED = '#b8383b';
 const BLU = '#5885a2';
 const EASE = 'cubic-bezier(.3, 0, .2, 1)';
 //: Буквы перебора: кириллица у русского интерфейса, латиница у английского.
-//: Кодами, а не строкой: строка кириллицы просилась бы в словарь перевода.
+//: Кодами, а не строкой: строка кириллицы просилась бы в словарь перевода
 const CYRILLIC = String.fromCharCode(...Array.from({ length: 32 }, (_, i) => 0x410 + i));
 const LATIN = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
 //: Этап, который длится дольше, - «долгий»: на нём линия показывает, что
 //: сборка жива (сканер, сердцебиение, импульсы, искры). Сколько продлится
-//: этап, заранее не знает никто - смотрим, не пришёл ли следующий.
+//: этап, заранее не знает никто - смотрим, не пришёл ли следующий
 const LONG_MS = 1200;
-//: Пример в настройках: этапы настоящей сборки оружия, второй с конца долгий.
+//: Пример в настройках: этапы настоящей сборки оружия, второй с конца долгий
 const DEMO = [[5, 'Подготовка сборки…', 800], [10, 'Извлечение модели…', 800],
               [25, 'Декомпиляция модели…', 2200], [40, 'Обработка текстуры…', 800],
               [60, 'Компиляция модели…', 2200], [80, 'Упаковка VPK…', 900]];
@@ -95,7 +95,7 @@ function glyph() {
 }
 
 let audio = null;
-/** Короткий тон WebAudio - щелчок или сигнал. Звук - украшение: не вышло, и ладно. */
+/** Короткий тон WebAudio - щелчок или сигнал. Звук - украшение: не вышло, и ладно */
 function tone(freq, dur, vol, type = 'sine') {
   try {
     audio = audio || new (window.AudioContext || window.webkitAudioContext)();
@@ -115,7 +115,7 @@ function tone(freq, dur, vol, type = 'sine') {
 }
 
 /**
- * Движок на одном наборе элементов.
+ * Движок на одном наборе элементов
  *
  * `els`: host - полоса (в ней искры, луч, подсветка); line - контейнер линии
  * по её верхнему краю; state - текст этапа; pct и time - счётчик и время;
@@ -125,14 +125,14 @@ function tone(freq, dur, vol, type = 'sine') {
  */
 export function createFx(els) {
   //: Выбор из настроек. Действует со следующей сборки: смена посреди идущей
-  //: оставила бы на полосе куски прежнего варианта.
+  //: оставила бы на полосе куски прежнего варианта
   let want = { ...FX_DEFAULTS };
   let opt = want;
-  //: Номер сборки: всё, что начала прошлая (таймеры, кадры), гасит новая.
+  //: Номер сборки: всё, что начала прошлая (таймеры, кадры), гасит новая
   let run = 0;
   let shown = 0;
   let target = 0;
-  //: Сборка, чей цикл счёта сейчас крутится: цикл один, цель он берёт свежую.
+  //: Сборка, чей цикл счёта сейчас крутится: цикл один, цель он берёт свежую
   let counting = -1;
   let peak = 0;
   let steps = 0;
@@ -142,7 +142,7 @@ export function createFx(els) {
   let detailTimer = null;
   let pending = '';
   //: Сколько событий сборки пришло. Ответ на «Собрать» может прийти позже
-  //: событий и даже позже конца сборки (см. build.js).
+  //: событий и даже позже конца сборки (см. build.js)
   let heard = 0;
   let timers = [];
   let junk = [];
@@ -156,13 +156,13 @@ export function createFx(els) {
   let clock = null;
   let restTimer = null;
   //: Идёт ли сборка: шаг без старта (страницу подняли посреди сборки)
-  //: заводит её сам.
+  //: заводит её сам
   let active = false;
 
   const every = (fn, ms) => { const id = setInterval(fn, ms); timers.push(id); return id; };
   const own = (el) => { junk.push(el); return el; };
   //: Снятый элемент свои анимации не останавливает: бесконечные крутились бы
-  //: дальше, а финал, ждущий их конца, проснулся бы уже в чужой сборке.
+  //: дальше, а финал, ждущий их конца, проснулся бы уже в чужой сборке
   const drop = (el) => { el.getAnimations({ subtree: true }).forEach((a) => a.cancel()); el.remove(); };
   const edge = (p) => els.line.offsetWidth * p / 100;
 
@@ -184,7 +184,7 @@ export function createFx(els) {
    *  Обычные блоки, и двигаются они шириной: такие встают на целые пиксели.
    *  Слои (transform) и clip-path сглаживали верх и низ на полпикселя, и при
    *  масштабе экрана 125% светлая синяя со своим полупрозрачным краем
-   *  казалась толще и ниже тёмной красной. */
+   *  казалась толще и ниже тёмной красной */
   function halves(width) {
     return [seg(`height:100%;width:${width};background:${RED}`),
             seg(`height:100%;left:auto;right:0;width:${width};background:${BLU}`)];
@@ -198,7 +198,7 @@ export function createFx(els) {
     els.line.replaceChildren(fill, head);
   }
 
-  // ── Текст этапа ─────────────────────────────────────────────────────────
+  // Текст этапа
   function textBox() {
     let box = els.state.querySelector(':scope > .bfx__text');
     if (!box) {
@@ -219,11 +219,11 @@ export function createFx(els) {
     });
   }
   /** Текст этапа выбранным способом. Переводим сразу: словарь страницы
-   *  переводит только целиком добавленный текст, и перебор шёл бы к русскому. */
+   *  переводит только целиком добавленный текст, и перебор шёл бы к русскому */
   function say(raw, tok, color = '') {
     const value = t(String(raw || ''));
     // Строку мог переписать и setStatus (layout.js): тогда текст «уже на
-    // экране» только у нас в памяти.
+    // экране» только у нас в памяти
     if (value === text && !color && els.state.querySelector(':scope > .bfx__text')) return;
     text = value;
     const box = textBox();
@@ -341,7 +341,7 @@ export function createFx(els) {
     }
   }
 
-  // ── Счётчик и время ─────────────────────────────────────────────────────
+  // Счётчик и время
   function count(p) {
     const el = els.pct;
     if (!el) return;
@@ -393,7 +393,7 @@ export function createFx(els) {
       + String(s % 60).padStart(2, '0');
   }
 
-  // ── Линия ───────────────────────────────────────────────────────────────
+  // Линия
   function stopHead() {
     if (!head) return;
     head.getAnimations().forEach((a) => a.cancel());
@@ -466,7 +466,7 @@ export function createFx(els) {
     if (opt.line === 'sparks') sparks(p);
     longTimer = setTimeout(() => { if (tok === run) slow(p); }, LONG_MS);
   }
-  /** Этап затянулся - линия показывает, что сборка жива. */
+  /** Этап затянулся - линия показывает, что сборка жива */
   function slow(p) {
     if (opt.line === 'scanner' && head) {
       const w = edge(p) - 28;
@@ -488,7 +488,7 @@ export function createFx(els) {
     }
   }
 
-  // ── Кнопка «Остановить» ─────────────────────────────────────────────────
+  // Кнопка «Остановить»
   function button(busy, p = 0) {
     const b = els.button;
     if (!b) return;
@@ -514,7 +514,7 @@ export function createFx(els) {
     }
   }
 
-  // ── Звук ────────────────────────────────────────────────────────────────
+  // Звук
   function sound(kind) {
     const s = opt.sound;
     if (kind === 'tick' && (s === 'ticks' || s === 'both')) tone(2200, 0.025, 0.035, 'square');
@@ -525,8 +525,8 @@ export function createFx(els) {
     if (kind === 'fail' && (s === 'chime' || s === 'both')) tone(196, 0.34, 0.08, 'triangle');
   }
 
-  // ── Финал и ошибка ──────────────────────────────────────────────────────
-  /** Всё, что двигалось по ходу сборки, - стоп: финалу и ошибке оно мешает. */
+  // Финал и ошибка
+  /** Всё, что двигалось по ходу сборки, - стоп: финалу и ошибке оно мешает */
   function halt() {
     clearInterval(clock);
     clearTimeout(longTimer);
@@ -536,7 +536,7 @@ export function createFx(els) {
     stopHead();
     els.line.getAnimations().forEach((a) => a.cancel());
     junk.filter((e) => e.dataset.fx === 'beam').forEach(drop);
-    // Пунктир замирает: красный бегущий после ошибки читался бы как «ещё идёт».
+    // Пунктир замирает: красный бегущий после ошибки читался бы как «ещё идёт»
     if (ants) ants.querySelector('line').getAnimations().forEach((a) => a.cancel());
   }
   function fadeFill() {
@@ -561,7 +561,7 @@ export function createFx(els) {
     const box = textBox();
     if (['stamp', 'assemble'].includes(opt.end)) {
       text = t(message);
-      // Штамп и буквы вылетают за строку: обрезку снимаем на время финала.
+      // Штамп и буквы вылетают за строку: обрезку снимаем на время финала
       box.style.overflow = 'visible';
       const s = document.createElement('span');
       s.style.overflow = 'visible';
@@ -583,7 +583,7 @@ export function createFx(els) {
            opacity: 0 }, { transform: 'none', opacity: 1 }],
         { duration: 520, delay: i * 14, easing: 'cubic-bezier(.2, .8, .3, 1)', fill: 'backwards' }));
       // Обрезка возвращается, когда долетела последняя буква: длинное
-      // сообщение снова уходит под многоточие.
+      // сообщение снова уходит под многоточие
       await Promise.all([fadeFill(), ...flying.map((a) => a.finished)]);
       if (tok === run) box.style.overflow = s.style.overflow = '';
       return;
@@ -594,7 +594,7 @@ export function createFx(els) {
       // Красный слева, синий справа - встретились, линия вздрогнула и
       // схлопнулась к середине. Оранжевую цвета выдавливают к центру, а не
       // накрывают: её край выглядывал из-под них и сливался с красной. Всё
-      // размерами, без transform: так края остаются целыми пикселями (halves).
+      // размерами, без transform: так края остаются целыми пикселями (halves)
       const ms = { duration: 480, easing: EASE, fill: 'forwards' };
       fill.style.transition = 'none';
       fill.style.height = '100%';
@@ -694,7 +694,7 @@ export function createFx(els) {
     sound('fail');
   }
 
-  // ── Снаружи ─────────────────────────────────────────────────────────────
+  // Снаружи
   function clear() {
     run += 1;
     opt = want;
@@ -718,7 +718,7 @@ export function createFx(els) {
     tint = null;
     els.host.getAnimations().forEach((a) => a.cancel());
     // Линия - заново: заливка и край прошлой сборки уехали бы к началу
-    // анимацией, а их ждущие финалы проснулись бы на новой.
+    // анимацией, а их ждущие финалы проснулись бы на новой
     els.line.getAnimations({ subtree: true }).forEach((a) => a.cancel());
     els.line.replaceChildren();
     fill = null;
@@ -734,7 +734,7 @@ export function createFx(els) {
   }
 
   /** Начало сборки. Уже идущую не перезапускает: первый этап мог прийти
-   *  раньше, чем ответ на «Собрать». */
+   *  раньше, чем ответ на «Собрать» */
   function start(label = 'Сборка…') {
     if (active) return;
     clear();
@@ -759,7 +759,7 @@ export function createFx(els) {
     button(true, 0);
     say(label, tok);
     // Звуку нужен жест человека: контекст заводим, пока щелчок «Собрать»
-    // ещё свежий, - иначе первый щелчок этапа прозвучал бы с опозданием.
+    // ещё свежий, - иначе первый щелчок этапа прозвучал бы с опозданием
     if (opt.sound !== 'none') tone(1, 0.001, 0.0001);
   }
 
@@ -767,7 +767,7 @@ export function createFx(els) {
     if (!active) start();
     const tok = run;
     heard += 1;
-    // Отложенная подпись подшага относится к прошлому этапу.
+    // Отложенная подпись подшага относится к прошлому этапу
     clearTimeout(detailTimer);
     detailTimer = null;
     p = Math.max(peak, Math.min(100, Number(p) || 0));
@@ -787,7 +787,7 @@ export function createFx(els) {
 
   /** Подшаг этапа (упаковка, замена модели): своя подпись, линия стоит.
    *  Приходят они пачкой - чаще четырёх раз в секунду текст не дёргаем,
-   *  но последняя подпись пачки встаёт всё равно, с опозданием. */
+   *  но последняя подпись пачки встаёт всё равно, с опозданием */
   function detail(label) {
     if (!label) return;
     heard += 1;
@@ -809,7 +809,7 @@ export function createFx(els) {
     active = false;
     clearInterval(clock);
     if (els.prog && els.rest) {
-      // Сводка параметров возвращается, когда итог уже прочитан.
+      // Сводка параметров возвращается, когда итог уже прочитан
       restTimer = setTimeout(() => {
         if (tok !== run) return;
         els.prog.hidden = true;
@@ -821,7 +821,7 @@ export function createFx(els) {
       say(message, tok);
       button(false);
       // Гаснет всё, что рисовало линию. Не ждём: новая сборка прервёт
-      // угасание, и ожидание упало бы ошибкой.
+      // угасание, и ожидание упало бы ошибкой
       for (const el of [fill, tint, ants, ...(teams || [])]) {
         if (el) el.animate({ opacity: 0 }, { duration: 400, fill: 'forwards' });
       }
@@ -864,7 +864,7 @@ export function createFx(els) {
   };
 }
 
-//: Полоса внизу окна - её сборка.
+//: Полоса внизу окна - её сборка
 export const dockFx = createFx({
   host: document.querySelector('.dock'),
   line: document.getElementById('dockline'),

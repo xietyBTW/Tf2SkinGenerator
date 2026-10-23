@@ -1,8 +1,8 @@
-"""Единый разбор VMT.
+"""Единый разбор VMT
 
-Каждый случай здесь — из настоящих файлов игры или из бага, который старые
+Каждый случай здесь - из настоящих файлов игры или из бага, который старые
 регулярки на этом файле давали. До этого модуля разбор жил шестью
-независимыми наборами регулярок, и они расходились между собой.
+независимыми наборами регулярок, и они расходились между собой
 """
 
 import unittest
@@ -35,7 +35,7 @@ class ParseBasicsTests(unittest.TestCase):
             "models/a/b")
 
     def test_commented_out_param_is_ignored(self):
-        """Старые регулярки возвращали именно закомментированное значение."""
+        """Старые регулярки возвращали именно закомментированное значение"""
         doc = vmt_parse.parse(
             "{\n"
             '\t// "$basetexture" "models/WRONG/x"\n'
@@ -53,7 +53,7 @@ class ParseBasicsTests(unittest.TestCase):
         self.assertEqual(doc.get("basetexture"), "models/a//b")
 
     def test_first_value_wins_on_duplicate(self):
-        """Движок читает первое совпадение — повтор ниже его не отменяет."""
+        """Движок читает первое совпадение - повтор ниже его не отменяет"""
         doc = vmt_parse.parse(
             '{\n\t"$basetexture" "first"\n\t"$basetexture" "second"\n}\n')
         self.assertEqual(doc.get("basetexture"), "first")
@@ -94,7 +94,7 @@ class NestedBlockTests(unittest.TestCase):
         self.assertEqual(doc.find("animatedtextureframerate"), "30")
 
     def test_proxy_mention_does_not_override_real_param(self):
-        """В прокси $basetexture упоминается как ИМЯ переменной, а не значение."""
+        """В прокси $basetexture упоминается как ИМЯ переменной, а не значение"""
         self.assertEqual(vmt_parse.parse(self.VMT).get("basetexture"),
                          "models/a/b")
 
@@ -108,7 +108,7 @@ class NestedBlockTests(unittest.TestCase):
     def test_animated_framerate_helper(self):
         self.assertEqual(vmt_parse.animated_framerate(self.VMT), 30.0)
         self.assertIsNone(vmt_parse.animated_framerate('{\n"$a" "1"\n}'))
-        # Нулевой fps бессмысленен — поднимаем до минимума, как раньше
+        # Нулевой fps бессмысленен - поднимаем до минимума
         self.assertEqual(
             vmt_parse.animated_framerate(
                 '{\nproxies\n{\nAnimatedTexture\n{\n'
@@ -151,7 +151,7 @@ class TypedAccessTests(unittest.TestCase):
 
 
 class RealFileTests(unittest.TestCase):
-    """Кусок настоящего VMT шапки со всеми особенностями Valve сразу."""
+    """Кусок настоящего VMT шапки со всеми особенностями Valve сразу"""
 
     VMT = (
         '"VertexLitGeneric"' + CR + "\n"

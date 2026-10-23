@@ -1,12 +1,12 @@
 /*
- * Диалог, War Paint и раскладка узоров по деталям.
+ * Диалог, War Paint и раскладка узоров по деталям
  *
  * Часть стилей страницы: файлы подключены в index.html в порядке каскада
  * (style.css первым), порядок менять нельзя.
  */
 
-/* ── Диалог ────────────────────────────────────────────────────────────
-   Одно окно на выбор из списка, ввод имени и подтверждение. */
+/* Диалог
+   Одно окно на выбор из списка, ввод имени и подтверждение */
 .ask {
   width: min(440px, 92vw);
   padding: 0;
@@ -43,7 +43,7 @@
   transition: color var(--dur), background var(--dur);
 }
 .ask__group { margin: 10px 0 2px; padding-left: 2px; }
-/* Модель для точек: окно шире обычного вопроса — в нём сетка обложек */
+/* Модель для точек: окно шире обычного вопроса - в нём сетка обложек */
 .ask.cpmodel { width: min(820px, 94vw); }
 .cpmodel__tabs, .cpmodel__row { display: flex; flex-wrap: wrap; gap: 4px 14px; }
 .cpmodel__grid { max-height: 56vh; grid-template-columns: repeat(auto-fill, minmax(118px, 1fr)); gap: 14px 12px; }
@@ -53,11 +53,11 @@
 .ask__item.is-active { color: var(--ink); border-bottom-color: var(--accent); }
 .ask__acts { display: flex; align-items: center; justify-content: flex-end; gap: 18px; }
 /* В узком окне кнопки переносятся, а не уезжают за край: у редактора VMT их
-   пять, и крайняя левая пряталась за границей окна. */
+   пять, и крайняя левая пряталась за границей окна */
 .ask__acts { flex-wrap: wrap; row-gap: 10px; }
 
-/* Выбор классов: плитки 3×3 с эмблемой класса из игры. Не отмечен — эмблема
-   серая и приглушена, отмечен — цветная, с акцентной рамкой. */
+/* Выбор классов: плитки 3×3 с эмблемой класса из игры. Не отмечен - эмблема
+   серая и приглушена, отмечен - цветная, с акцентной рамкой */
 .ask.classpick { width: min(480px, 94vw); }
 .classpick__grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
 .classpick__tile {
@@ -87,11 +87,11 @@
 .classpick__bar { display: flex; align-items: center; gap: 16px; }
 .classpick__count { margin-left: auto; font-size: 11px; color: var(--ink-mute); font-variant-numeric: tabular-nums; }
 
-/* War Paint: панель на месте альбома. Модель справа остаётся на виду — на ней
-   идёт живой предпросмотр, поэтому это не модальное окно. */
+/* War Paint: панель на месте альбома. Модель справа остаётся на виду - на ней
+   идёт живой предпросмотр, поэтому это не модальное окно */
 /* Панель встаёт на место содержимого альбома в общем потоке, а не поверх:
    в узкой раскладке половины стоят друг под другом, и наложенная панель
-   наезжала бы на модель. */
+   наезжала бы на модель */
 .half--flat.is-warpaint > :not(.wpanel) { display: none !important; }
 .half--flat.is-warpaint { overflow: hidden; }
 .wpanel {
@@ -135,12 +135,12 @@
 }
 .wpanel__tag { flex: none; font-family: var(--mono); font-size: 9.5px; letter-spacing: .06em; color: var(--ink-mute); }
 .wpanel__name { flex: none; max-width: 60%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-/* Английское название — по нему скин знают в сообществе и ищут. */
+/* Английское название - по нему скин знают в сообществе и ищут */
 .wpanel__en {
   flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   font-size: 11.5px; color: var(--ink-mute);
 }
-/* Раздел «Украшенное оружие» — после War Paint. */
+/* Раздел «Украшенное оружие» - после War Paint */
 .wpanel__section {
   margin: 0; padding: 16px 10px 7px;
   border-bottom: 1px solid var(--hairline);
@@ -165,7 +165,7 @@
 .wpanel__seed { width: 190px; font-variant-numeric: tabular-nums; }
 .wpanel__status { margin: 0; min-height: 1.4em; font-size: 11.5px; color: var(--ink-mute); }
 /* Материалы: плитки-переключатели с миниатюрой, как плитки узоров раскладки.
-   Отмеченная — в цвете (и с предпросмотром War Paint), снятая — приглушена. */
+   Отмеченная - в цвете (и с предпросмотром War Paint), снятая - приглушена */
 .wpanel__mats { display: flex; flex-direction: column; gap: 8px; }
 .wpanel__mats[hidden], .wpanel__matnote[hidden] { display: none; }
 .wpanel__matcount { font: 10.5px/1 var(--mono); color: var(--ink-mute); font-variant-numeric: tabular-nums; }
@@ -189,7 +189,7 @@
   transition: transform var(--dur-panel) cubic-bezier(.2, .7, .2, 1),
               outline-color var(--dur), filter var(--dur-panel);
 }
-/* Флажок в углу: тот же квадрат, что у обычных галочек приложения. */
+/* Флажок в углу: тот же квадрат, что у обычных галочек приложения */
 .wmat__swatch::before {
   content: ""; position: absolute; left: 5px; top: 5px;
   width: 13px; height: 13px; box-sizing: border-box;
@@ -217,17 +217,17 @@
 .wmat[aria-checked="true"] .wmat__swatch { filter: none; outline: 2px solid var(--ink); outline-offset: -2px; }
 .wmat[aria-checked="true"] .wmat__swatch::before { background: var(--ink); border-color: var(--ink); }
 .wmat[aria-checked="true"] .wmat__swatch::after { transform: rotate(42deg) scale(1); }
-/* Рецепт под одну пушку: на этот материал его не разложить. */
+/* Рецепт под одну пушку: на этот материал его не разложить */
 .wmat:disabled { cursor: default; color: var(--ink-mute); }
 .wmat:disabled .wmat__swatch { transform: none; filter: grayscale(1) opacity(.3); }
 .wmat:disabled .wmat__swatch::before { display: none; }
 .wpanel__matnote { margin: 0; font-size: 11.5px; line-height: 1.5; color: var(--ink-mute); }
 #warpaint.is-active { color: var(--ink); }
 
-/* ── War Paint: два экрана панели ────────────────────────────────────────
+/* War Paint: два экрана панели
    Список раскрасок и раскладка по деталям лежат в одной клетке сетки: при
    переходе уходящий экран ещё виден (allow-discrete держит display), и они
-   разъезжаются в стороны, а не встают друг под друга. */
+   разъезжаются в стороны, а не встают друг под друга */
 .wpanel__panes {
   flex: 1 0 auto; min-height: 0;
   display: grid; grid-template: minmax(0, 1fr) / minmax(0, 1fr);
@@ -249,7 +249,7 @@
 .wpanel__parts { flex-wrap: wrap; row-gap: 4px; }
 .wpanel__tune { color: var(--ink); border-bottom: 1px solid var(--accent); }
 
-/* ── Раскладка по деталям ─────────────────────────────────────────────── */
+/* Раскладка по деталям */
 .wlay__head { display: flex; align-items: baseline; gap: 12px; min-width: 0; }
 .wlay__kit {
   flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
@@ -258,7 +258,7 @@
 .wlay__hint { margin: 0; font-size: 12px; line-height: 1.5; color: var(--ink-soft); }
 .wlay__hint b { font-weight: 500; color: var(--ink); }
 
-/* Плитки узоров: кисть (щелчок) и цель перетаскивания. */
+/* Плитки узоров: кисть (щелчок) и цель перетаскивания */
 .wlay__layers {
   display: grid; gap: 10px;
   grid-template-columns: repeat(auto-fill, minmax(84px, 1fr));
@@ -278,7 +278,7 @@
   transition: transform var(--dur-panel) cubic-bezier(.2, .7, .2, 1),
               outline-color var(--dur), filter var(--dur);
 }
-/* Основа «поверх альбедо» — родная текстура оружия, узора у неё нет. */
+/* Основа «поверх альбедо» - родная текстура оружия, узора у неё нет */
 .wlay__swatch--bare {
   background-image: repeating-linear-gradient(135deg, transparent 0 7px,
                     color-mix(in srgb, var(--ink) 12%, transparent) 7px 8px);
@@ -304,7 +304,7 @@
 .wlay__tile[aria-checked="true"] .wlay__swatch { outline: 2px solid var(--ink); outline-offset: -2px; }
 .wlay__tile[aria-checked="true"] .wlay__key { background: var(--ink); color: var(--surface); }
 .wlay__tile.is-empty .wlay__swatch { filter: grayscale(.6) opacity(.55); }
-/* Над плиткой держат перетаскиваемые детали. */
+/* Над плиткой держат перетаскиваемые детали */
 .wlay__tile.is-drop .wlay__swatch {
   transform: scale(1.05);
   outline: 2px solid var(--accent); outline-offset: -2px;
@@ -318,7 +318,7 @@
 .wlay__tools { display: flex; flex-wrap: wrap; gap: 4px 16px; }
 .wlay__tools [hidden] { display: none; }
 
-/* Детали: перетаскиваемые строки. */
+/* Детали: перетаскиваемые строки */
 .wlay__units {
   flex: 1 0 140px; max-height: 46vh; overflow: auto;
   display: flex; flex-direction: column;
@@ -359,7 +359,7 @@
 }
 .wlay__uname { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .wlay__uname small { margin-left: 6px; font-size: 11px; color: var(--ink-mute); }
-/* Деталь, узор которой выбрал человек, а не автомат. */
+/* Деталь, узор которой выбрал человек, а не автомат */
 .wlay__unit.is-manual .wlay__uname::after {
   content: ""; display: inline-block; width: 5px; height: 5px; margin-left: 6px;
   border-radius: 50%; background: var(--accent); vertical-align: middle;
@@ -375,7 +375,7 @@
 .wlay__pct { font: 10.5px/1 var(--mono); color: var(--ink-mute); text-align: right; font-variant-numeric: tabular-nums; }
 .wlay__status { margin: 0; min-height: 1.4em; font-size: 11.5px; color: var(--ink-mute); }
 
-/* Картинка под курсором при перетаскивании: сколько деталей несут. */
+/* Картинка под курсором при перетаскивании: сколько деталей несут */
 .wlay__ghost {
   position: fixed; left: -999px; top: -999px;
   padding: 6px 10px;
@@ -386,19 +386,19 @@
 /* Раздел частиц: командные цвета и стили к эффекту отношения не имеют.
    Панель сборки здесь НЕ прячем правилом: панелей две (#build и #pbuild),
    обе с классом .build, и селектор по классу убрал бы заодно крутилки
-   эффекта. Какая из двух на экране — решает applyRightPanel в app.js. */
+   эффекта. Какая из двух на экране - решает applyRightPanel в app.js */
 [data-section="particles"] .teams,
 [data-section="particles"] .styles,
-/* Карты материала, VMT и «прочее» — про модель оружия, не про эффект. */
+/* Карты материала, VMT и «прочее» - про модель оружия, не про эффект */
 [data-section="particles"] .half--flat .acts { display: none; }
 
-/* Совсем без обложек — на случай, если и метка лишняя. */
+/* Совсем без обложек - на случай, если и метка лишняя */
 .catalog.no-icons .pick__box { display: none; }
 [data-panels="pinned"] .catalog.no-icons .pick { grid-template-columns: minmax(0, 1fr); }
 [data-panels="pinned"] .catalog.no-icons .pick__name,
 [data-panels="pinned"] .catalog.no-icons .pick .mono { grid-column: 1; }
 
-/* Плавающий режим: на весь экран поверх работы. */
+/* Плавающий режим: на весь экран поверх работы */
 [data-panels="float"] .catalog {
   position: fixed;
   inset: 0;

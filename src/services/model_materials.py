@@ -1,14 +1,14 @@
 """
-Текстуры материалов модели для превью частиц.
+Текстуры материалов модели для превью частиц
 
-Меш в окно превью попадает из reference-SMD, а имена его материалов — просто
+Меш в окно превью попадает из reference-SMD, а имена его материалов - просто
 строки вроде `c_sniperrifle`. Путь к VMT собирается из `$cdmaterials` в QC
 (их бывает несколько, с разными слэшами), дальше обычная цепочка Source:
-VMT → `$basetexture` → VTF → PNG. Скины (`$texturegroup`) не разбираем: меш
-ссылается на материал первого скина, он и грузится.
+VMT -> `$basetexture` -> VTF -> PNG. Скины (`$texturegroup`) не разбираем: меш
+ссылается на материал первого скина, он и грузится
 
-Отдаётся data URL, потому что превью — это страница в QWebEngine и файловые
-пути ей недоступны.
+Отдаётся data URL, потому что превью - это страница в QWebEngine и файловые
+пути ей недоступны
 """
 
 import base64
@@ -29,13 +29,13 @@ logger = get_logger(__name__)
 
 _RE_CDMATERIALS = re.compile(r'^\s*\$cdmaterials\s+"?([^"\r\n]*)"?', re.IGNORECASE)
 
-#: Потолок стороны текстуры в превью: 2К-текстура в base64 — это мегабайты,
-#: которые незачем гнать через runJavaScript ради серого силуэта под эффектом.
+#: Потолок стороны текстуры в превью: 2К-текстура в base64 - это мегабайты,
+#: которые незачем гнать через runJavaScript ради серого силуэта под эффектом
 _MAX_SIDE = 1024
 
 
 def cdmaterials_from_qc(qc_text: str) -> List[str]:
-    """Пути $cdmaterials из QC, приведённые к виду `models/weapons/foo/`."""
+    """Пути $cdmaterials из QC, приведённые к виду `models/weapons/foo/`"""
     out: List[str] = []
     for line in qc_text.splitlines():
         m = _RE_CDMATERIALS.match(line)
@@ -54,7 +54,7 @@ def cdmaterials_from_qc(qc_text: str) -> List[str]:
 
 
 def _png_data_url(vtf_raw: bytes) -> Optional[str]:
-    """VTF-байты → data URL PNG (первый кадр, с ограничением стороны)."""
+    """VTF-байты -> data URL PNG (первый кадр, с ограничением стороны)"""
     tmp_dir = tempfile.mkdtemp(prefix="tf2sg_modeltex_")
     png_path = os.path.join(tmp_dir, "tex.png")
     try:
@@ -79,10 +79,10 @@ def _png_data_url(vtf_raw: bytes) -> Optional[str]:
 
 def resolve_model_textures(qc_path: str, mat_names: List[str],
                            tf2_root_dir: str) -> Dict[str, str]:
-    """{имя материала: data URL PNG} для материалов меша.
+    """{имя материала: data URL PNG} для материалов меша
 
     Материалы, которых нет в игровых VPK (мод, отсутствующий скин), просто
-    не попадают в результат — меш покажется серым, но не пропадёт.
+    не попадают в результат - меш покажется серым, но не пропадёт
     """
     if not tf2_root_dir or not mat_names:
         return {}

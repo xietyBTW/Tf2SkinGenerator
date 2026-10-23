@@ -1,6 +1,6 @@
 /*
  * Карточка «Превью» конструктора блеска: запрос кадров у Python и
- * проигрыватель (кадр назад/вперёд, пауза, перемотка).
+ * проигрыватель (кадр назад/вперёд, пауза, перемотка)
  *
  * Правка уходит сразу, не дожидаясь прошлого расчёта: Python бросает
  * устаревший ({cancelled}), а здесь показывается только ответ на последний
@@ -36,10 +36,10 @@ export function createPlayer(pattern, { onDropImage, onSheet, onPlayhead, onTran
   stage.append(canvas, busy, dropHint);
   const xform = createTransform(stage, canvas, pattern, { onCommit: onTransform });
   const note = el('p', 'sheenb__note');
-  // Гамма узора: что из цветов слоёв игра покажет (sheen_palette.py).
+  // Гамма узора: что из цветов слоёв игра покажет (sheen_palette.py)
   const gamutNote = el('p', 'sheenb__note sheenb__gamut');
 
-  // Картинку можно бросить прямо на превью.
+  // Картинку можно бросить прямо на превью
   stage.addEventListener('dragover', (e) => {
     if (![...(e.dataTransfer?.types || [])].includes('Files')) return;
     e.preventDefault();
@@ -53,7 +53,7 @@ export function createPlayer(pattern, { onDropImage, onSheet, onPlayhead, onTran
     if (file) onDropImage(file);
   });
 
-  // Проигрыватель: кадр назад, играть, кадр вперёд и время прохода.
+  // Проигрыватель: кадр назад, играть, кадр вперёд и время прохода
   let sheet = null;          // {img, frames, cols, size, aspect}
   let clock = 0;
   let playing = true;
@@ -83,7 +83,7 @@ export function createPlayer(pattern, { onDropImage, onSheet, onPlayhead, onTran
   transport.append(el('span'), buttons, clockOut);
   preview.content.append(stage, transport, note, gamutNote);
 
-  /** Перемотка в долю прохода `f` (0..1) с паузой. Без кадров - false. */
+  /** Перемотка в долю прохода `f` (0..1) с паузой. Без кадров - false */
   function seek(f) {
     if (!sheet) return false;
     playing = false;
@@ -93,7 +93,7 @@ export function createPlayer(pattern, { onDropImage, onSheet, onPlayhead, onTran
     return true;
   }
 
-  // ── Кадры: запрос ───────────────────────────────────────────────────
+  // Кадры: запрос
   let timer = null;
   let latest = 0;
 
@@ -107,7 +107,7 @@ export function createPlayer(pattern, { onDropImage, onSheet, onPlayhead, onTran
     busy.hidden = false;
     let res;
     try {
-      // Гамму решает весь узор, даже когда в превью один слой «соло».
+      // Гамму решает весь узор, даже когда в превью один слой «соло»
       res = await api.sheenPatternPreview(
         { layers: pattern.previewLayers(), quality: pattern.quality }, pattern.length,
         pattern.spec());
@@ -132,7 +132,7 @@ export function createPlayer(pattern, { onDropImage, onSheet, onPlayhead, onTran
     img.src = api.fileUrl(res.image);
   }
 
-  /** Строка о гамме: какая она и какие слои в игре пропадут. */
+  /** Строка о гамме: какая она и какие слои в игре пропадут */
   function showGamut() {
     const lost = (sheet.lost || []).map((i) => pattern.layerName(i));
     gamutNote.classList.toggle('is-warn', lost.length > 0);
@@ -145,8 +145,8 @@ export function createPlayer(pattern, { onDropImage, onSheet, onPlayhead, onTran
     }
   }
 
-  // Плитка - всегда по ширине своей колонки (раньше 600 px наезжали на
-  // слои в узком окне), высота - по пропорции оружия.
+  // Плитка - всегда по ширине своей колонки (постоянная ширина наезжала бы
+  // на слои в узком окне), высота - по пропорции оружия
   function sizeCanvas() {
     if (!sheet) return;
     const room = stage.clientWidth - 2;
@@ -164,11 +164,11 @@ export function createPlayer(pattern, { onDropImage, onSheet, onPlayhead, onTran
   const resizer = new ResizeObserver(() => sizeCanvas());
   resizer.observe(stage);
 
-  // ── Проигрыватель ───────────────────────────────────────────────────
+  // Проигрыватель
   // Кадр маски - на маленьком холсте, и там же смешивание как в игре
   // (weapon_sheen_pass): непрозрачность - красный канал маски, цвет -
   // маска x оттенок гаммы. В холодной гамме оттенок без красного: красный
-  // канал несёт форму слоя, а цвет - зелёный и синий (чёрный слой темнит).
+  // канал несёт форму слоя, а цвет - зелёный и синий (чёрный слой темнит)
   const tint = document.createElement('canvas');
   let shownFrame = -1;
   function blendLikeGame(tc, cw, ch) {
@@ -214,7 +214,7 @@ export function createPlayer(pattern, { onDropImage, onSheet, onPlayhead, onTran
         const ch = sheet.cell_h;
         const col = frame % sheet.cols;
         const row = Math.floor(frame / sheet.cols);
-        // Тот же кадр и вид - холст уже готов (на паузе это каждый кадр).
+        // Тот же кадр и вид - холст уже готов (на паузе это каждый кадр)
         const want = frame * 2 + (pattern.mask ? 1 : 0);
         if (want !== shownFrame) {
           shownFrame = want;
@@ -241,7 +241,7 @@ export function createPlayer(pattern, { onDropImage, onSheet, onPlayhead, onTran
     refresh,
     seek,
     togglePlay,
-    /** Строка под превью: подсказка или ошибка. */
+    /** Строка под превью: подсказка или ошибка */
     say(text) { note.textContent = text; },
     start() { requestAnimationFrame((now) => { last = now; draw(now); }); },
     dispose() {

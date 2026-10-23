@@ -1,12 +1,12 @@
 /*
- * Конструктор $phongwarptexture - градиента, который красит блик.
+ * Конструктор $phongwarptexture - градиента, который красит блик
  *
  * Градиент считает Python (services/phongwarp.py), здесь поля и рисование.
  * Шары - формула шейдера (source-sdk-2013, common_vertexlitgeneric_dx9.h и
  * skin_ps20b.fxc): блик (L·R)^k; без градиента он умножается на маску
  * $phongfresnelranges (здесь [.25 .5 1] - так у 5922 материалов TF2), с
  * градиентом маска отключается, а блик умножается на градиент в точке
- * (сила блика, френель). Френель - (1 − N·V)².
+ * (сила блика, френель). Френель - (1 − N·V)²
  *
  * Свет ходит по кругу: при свете спереди блик в центре шара и берёт только
  * верх градиента, при свете сбоку и сзади - у края и берёт низ. Так виден
@@ -22,7 +22,7 @@ export const RANGES = [0.25, 0.5, 1];    // $phongfresnelranges шара без 
 
 const ORBIT_MS = 7000;            // полный круг света
 
-/** Свет на угле `a`: вокруг шара по горизонтали, чуть сверху. */
+/** Свет на угле `a`: вокруг шара по горизонтали, чуть сверху */
 function lightAt(a) {
   const v = [Math.sin(a) * 0.95, 0.35, Math.cos(a)];
   const len = Math.hypot(...v);
@@ -36,7 +36,7 @@ export const fresnelRanges = (f, r = RANGES) => (f < 0.5
 /** Шар с бликом при свете `light`. `warp` - градиент [строка френеля][столбец
  * блика] или null; без него блик идёт через `ranges` ($phongfresnelranges) и
  * красится `tint` ([r, g, b] 0..1, $phongtint). Отдаёт точки градиента, что
- * сейчас взяты, [[строка, столбец]]. */
+ * сейчас взяты, [[строка, столбец]] */
 function drawSphere(canvas, warp, light, ranges = RANGES, tint0 = null) {
   const LIGHT = light;
   const used = [];
@@ -54,7 +54,7 @@ function drawSphere(canvas, warp, light, ranges = RANGES, tint0 = null) {
       const n = [x, y, Math.sqrt(1 - rr)];
       const nl = n[0] * LIGHT[0] + n[1] * LIGHT[1] + n[2] * LIGHT[2];
       const lambert = 0.5 * nl + 0.5;
-      // Отражённый свет к зрителю (0, 0, 1): R = 2(N·L)N − L.
+      // Отражённый свет к зрителю (0, 0, 1): R = 2(N·L)N − L
       const rv = Math.max(0, 2 * nl * n[2] - LIGHT[2]);
       const spec = rv ** EXPONENT;
       const fres = (1 - n[2]) ** 2;
@@ -82,7 +82,7 @@ function drawSphere(canvas, warp, light, ranges = RANGES, tint0 = null) {
 }
 
 /** Градиент (64×64) крупно и поверх - точки, что шар берёт сейчас, и
- * стрелка направления (`angle` в градусах; null - у узора его нет). */
+ * стрелка направления (`angle` в градусах; null - у узора его нет) */
 /**
  * Шар для карточки «Блик»: свет ходит, как у Phong-warp, а блик идёт через
  * края блика ($phongfresnelranges) и цвет из настроек. `read()` отдаёт
@@ -140,7 +140,7 @@ function drawTexture(canvas, warp, used, angle) {
   if (angle !== null) drawArrow(ctx, canvas.width, angle);
 }
 
-/** Стрелка через центр квадрата: откуда и куда идут цвета точек. */
+/** Стрелка через центр квадрата: откуда и куда идут цвета точек */
 function drawArrow(ctx, side, angle) {
   const a = (angle * Math.PI) / 180;
   const dx = Math.cos(a);
@@ -201,7 +201,7 @@ export function phongwarpEditor(schema, saved, onChange = () => {}) {
                              schema.max_stops, changed);
   editor.set(values.stops || schema.defaults.stops);
 
-  // Второй ряд: цвета у края модели (низ квадрата). Верх - первый ряд.
+  // Второй ряд: цвета у края модели (низ квадрата). Верх - первый ряд
   const edgeToggle = el('label', 'check');
   const edgeRow = el('input');
   edgeRow.type = 'checkbox';
@@ -216,7 +216,7 @@ export function phongwarpEditor(schema, saved, onChange = () => {}) {
   const customBox = el('div', 'lwarp__custom');
   customBox.append(mainHead, editor.node, edgeToggle, edgeHead, edgeEditor.node);
 
-  // Направление цветов: кнопки на частые углы, число, перетаскивание по квадрату.
+  // Направление цветов: кнопки на частые углы, число, перетаскивание по квадрату
   let angle = Number(values.angle) || 0;
   const angleRow = el('div', 'mappane__row lwarp__angle');
   angleRow.title = T.angle || '';
@@ -278,7 +278,7 @@ export function phongwarpEditor(schema, saved, onChange = () => {}) {
   const shiftCell = cell(L.shift, T.shift, shift, out(shift));
   const edgeCell = cell(L.edge, T.edge, edgeColor, edge);
 
-  // Градиент и два шара: «как было» и «как будет».
+  // Градиент и два шара: «как было» и «как будет»
   const view = el('div', 'lwarp__view');
   const figure = (caption, className, side) => {
     const fig = el('figure', 'lwarp__fig');
@@ -320,7 +320,7 @@ export function phongwarpEditor(schema, saved, onChange = () => {}) {
   });
 
   // Тянуть по квадрату - повернуть стрелку: направление от центра к курсору.
-  // Рядом с 0/45/90/… прилипает, чтобы ровный угол ловился без усилия.
+  // Рядом с 0/45/90/… прилипает, чтобы ровный угол ловился без усилия
   const angleFrom = (e) => {
     const box = texture.getBoundingClientRect();
     const deg = (Math.atan2(e.clientY - box.top - box.height / 2,
@@ -340,12 +340,12 @@ export function phongwarpEditor(schema, saved, onChange = () => {}) {
     texture.addEventListener('pointercancel', stop, { once: true });
   });
 
-  // Свет ходит по кругу, пока блок на экране; закрыли окно - анимация встала.
+  // Свет ходит по кругу, пока блок на экране, закрыли окно - анимация встала
   let warp = null;
   let frame = 0;
   let running = false;
-  // Свет качается: спереди (блик в центре) → сбоку и чуть сзади (блик у
-  // края) → обратно. Полностью сзади шар был бы почти чёрным.
+  // Свет качается: спереди (блик в центре) -> сбоку и чуть сзади (блик у
+  // края) -> обратно. Полностью сзади шар был бы почти чёрным
   const draw = (now) => {
     const light = lightAt(1.9 * Math.sin((now / ORBIT_MS) * Math.PI * 2));
     drawSphere(before, null, light);
@@ -370,9 +370,9 @@ export function phongwarpEditor(schema, saved, onChange = () => {}) {
     mainHead.hidden = edgeHead.hidden = edgeEditor.node.hidden = !edgeRow.checked;
     angleRow.hidden = !hasAngle();
     texture.classList.toggle('is-draggable', hasAngle());
-    // Полосы и сдвиг оттенка - у радуги и плёнки; у градиентов их нет.
+    // Полосы и сдвиг оттенка - у радуги и плёнки, у градиентов их нет
     bandsCell.hidden = shiftCell.hidden = !patterned();
-    // Второй ряд и есть цвета у края - отдельный «Цвет у края» лишний.
+    // Второй ряд и есть цвета у края - отдельный «Цвет у края» лишний
     edgeCell.hidden = isCustom() && edgeRow.checked;
     clearTimeout(timer);
     timer = setTimeout(async () => {
@@ -381,7 +381,7 @@ export function phongwarpEditor(schema, saved, onChange = () => {}) {
       if (mine !== ticket || !res || !res.image) return;
       warp = res.image;
       // Кадр сразу: requestAnimationFrame в свёрнутом окне не идёт, и без
-      // этого шары оставались бы пустыми до возврата в окно.
+      // этого шары оставались бы пустыми до возврата в окно
       draw(performance.now());
       animate();
     }, 40);

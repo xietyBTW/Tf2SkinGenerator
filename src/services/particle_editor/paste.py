@@ -1,4 +1,4 @@
-"""Вставка скопированного набора параметров в систему."""
+"""Вставка скопированного набора параметров в систему"""
 
 from typing import Dict, Optional
 
@@ -10,10 +10,10 @@ def _paste_attrs(pcf, el, attrs: Dict[str, dict], overwrite: bool = True,
                  report: Optional[list] = None,
                  where: str = "", group: Optional[str] = None) -> bool:
     """Merge-вставка атрибутов в элемент: новые добавляются, совпадающие
-    перезаписываются (overwrite=False — существующие не трогаются).
+    перезаписываются (overwrite=False - существующие не трогаются)
 
-    report — сюда складываются проблемы, чтобы вставка не проваливалась
-    молча: битые значения видны пользователю."""
+    report - сюда складываются проблемы, чтобы вставка не проваливалась
+    молча: битые значения видны пользователю"""
     changed = False
     if not isinstance(attrs, dict):
         if report is not None:
@@ -51,24 +51,24 @@ def paste_params(pcf, system_name: str, payload: dict,
                  mode: str = "overwrite",
                  report: Optional[list] = None) -> bool:
     """
-    Вставляет скопированный набор параметров в систему.
+    Вставляет скопированный набор параметров в систему
 
-    payload — формат буфера копирования панели:
+    payload - формат буфера копирования панели:
         {"attrs": {имя: {"t","v"}},
          "modules": {группа: [[functionName, {имя: {"t","v"}}], ...]}}
-    (легаси-формат {группа: {functionName: attrs}} тоже принимается —
-    старые копии в буфере обмена).
+    (легаси-формат {группа: {functionName: attrs}} тоже принимается -
+    старые копии в буфере обмена)
 
     mode:
-        "overwrite" — merge, совпадающие имена перезаписываются молча;
-        "keep"      — merge, существующие параметры цели не трогаются,
+        "overwrite" - merge, совпадающие имена перезаписываются молча;
+        "keep"      - merge, существующие параметры цели не трогаются,
                       добавляются только недостающие;
-        "replace"   — параметры и модули цели удаляются, остаются только
-                      вставляемые (children и имя системы сохраняются).
+        "replace"   - параметры и модули цели удаляются, остаются только
+                      вставляемые (children и имя системы сохраняются)
 
     Модуль ищется по functionName с учётом номера вхождения (у эффектов
-    бывает два одинаковых модуля, напр. Remap Noise to Scalar); нет
-    такого — создаётся новый.
+    бывает два одинаковых модуля, напр. Remap Noise to Scalar), нет
+    такого - создаётся новый
     """
     d = pcf._find_definition(system_name)
     if d is None:
@@ -93,7 +93,7 @@ def paste_params(pcf, system_name: str, payload: dict,
 
 def _clear_for_replace(d) -> bool:
     """Режим "replace": сносим скалярные атрибуты (кроме имени) и все
-    группы модулей; children и прочие element-ссылки не трогаем."""
+    группы модулей; children и прочие element-ссылки не трогаем"""
     changed = False
     for key in list(d.keys()):
         if key in ("name", "id"):
@@ -107,7 +107,7 @@ def _clear_for_replace(d) -> bool:
 
 
 def _module_pairs(group, mods, report: Optional[list]) -> Optional[list]:
-    """Пары [functionName, attrs] группы из буфера; None — группа негодная."""
+    """Пары [functionName, attrs] группы из буфера; None - группа негодная"""
     if group not in MODULE_GROUPS:
         if report is not None:
             report.append(("particles_paste_unknown_group",
@@ -125,7 +125,7 @@ def _module_pairs(group, mods, report: Optional[list]) -> Optional[list]:
 
 def _paste_group(pcf, d, group: str, pairs: list, overwrite: bool,
                  report: Optional[list]) -> bool:
-    """Вставляет модули одной группы; True — система изменилась."""
+    """Вставляет модули одной группы; True - система изменилась"""
     changed = False
     occurrence: Dict[str, int] = {}
     for pair in pairs:
@@ -153,22 +153,22 @@ def _paste_group(pcf, d, group: str, pairs: list, overwrite: bool,
 
 
 def _nth_module(pcf, d, group: str, fn: str, n: int):
-    """n-й модуль fn в группе системы, отвязанный для правки; None — нет."""
+    """n-й модуль fn в группе системы, отвязанный для правки; None - нет"""
     if group not in d:
         return None
     k = 0
     for i, m in enumerate(d[group].iter_elem()):
         if module_fn(m) == fn.lower():
             if k == n:
-                # Общий с другими системами — сперва свой.
+                # Общий с другими системами - сперва свой
                 return pcf._module_for_edit(d, group, i)
             k += 1
     return None
 
 
 def _new_module(pcf, d, group: str, fn: str, report: Optional[list]):
-    """Новый модуль fn в конце группы."""
-    # Модуля с таким именем нет в игре — почти наверняка
+    """Новый модуль fn в конце группы"""
+    # Модуля с таким именем нет в игре - почти наверняка
     # опечатка: игра его проигнорирует
     if report is not None and pcf._attr_catalog and \
             (group, fn.lower()) not in pcf._attr_catalog:

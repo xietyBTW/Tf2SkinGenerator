@@ -1,9 +1,9 @@
 """
-«Сделать праздничным»: гирлянда вшивается в модель оружия (decor_bake).
+«Сделать праздничным»: гирлянда вшивается в модель оружия (decor_bake)
 
-Проверено в игре на обрезе (2026-10-19): вшитая гирлянда видна и мигает.
+Проверено в игре на обрезе: вшитая гирлянда видна и мигает.
 Здесь - то, что легко сломать: кости гирлянды по именам, командный столбец
-скинов и то, что сборка не путает вшитую гирлянду с отдельной моделью.
+скинов и то, что сборка не путает вшитую гирлянду с отдельной моделью
 """
 
 from pathlib import Path
@@ -32,7 +32,7 @@ gun
 end
 """
 
-# У гирлянды кости в другом порядке: номер 0 у неё - weapon_bone_1.
+# У гирлянды кости в другом порядке: номер 0 у неё - weapon_bone_1
 GARLAND_SMD = """version 1
 nodes
   0 "weapon_bone_1" -1
@@ -60,7 +60,7 @@ def test_garland_triangles_keep_their_bones_by_name(tmp_path):
     lines = body.read_text(encoding="utf-8").splitlines()
     assert lines[-1] == "end" and lines.count("end") == 3
     tri = lines[lines.index("lights") + 1:lines.index("lights") + 4]
-    # weapon_bone_1 у оружия - кость 1, weapon_bone - кость 0.
+    # weapon_bone_1 у оружия - кость 1, weapon_bone - кость 0
     assert [row.split()[0] for row in tri] == ["1", "0", "1"]
     assert tri[0].split()[10] == "1" and tri[1].split()[10] == "0"
     assert "gun" in lines                                 # меш оружия на месте
@@ -73,7 +73,7 @@ def test_team_lights_follow_the_weapon_skin_pairs():
         ["gun", "gun_gold", "lights"], ["gun_blu", "gun_gold", "lights_blu"],
         ["gun_gold", "gun_gold", "lights"]]
     assert decor_bake.skin_rows([], garland) == garland      # оружие без скинов
-    # Одна строка у оружия (револьвер): синему всё равно нужна своя.
+    # Одна строка у оружия (револьвер): синему всё равно нужна своя
     assert decor_bake.skin_rows([["gun"]], garland) == [["gun", "lights"],
                                                         ["gun", "lights_blu"]]
     assert decor_bake.skin_rows(weapon, [["lights"]]) == []   # гирлянда без команд

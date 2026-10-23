@@ -1,10 +1,10 @@
 """
-Воркеры превью скайбокса.
+Воркеры превью скайбокса
 
-SkyboxFacesWorker — извлекает 6 стоковых граней выбранного неба из VPK игры
-(VMT → $basetexture → VTF; фолбэк — прямые пути, см. `stock_face_stems`:
+SkyboxFacesWorker - извлекает 6 стоковых граней выбранного неба из VPK игры
+(VMT -> $basetexture -> VTF; фолбэк - прямые пути, см. `stock_face_stems`:
 у стоковых небес VMT ссылается на текстуру, которой в игре нет) и конвертирует
-в PNG.
+в PNG
 """
 
 from typing import List
@@ -22,7 +22,7 @@ logger = get_logger(__name__)
 
 
 class SkyboxSplitWorker(BaseWorker):
-    """Режет панораму на 6 граней в фоне (numpy, для превью — 512px)."""
+    """Режет панораму на 6 граней в фоне (numpy, для превью - 512px)"""
 
     ready = Signal(object)   # {face: png_path}
     failed = Signal(str)
@@ -40,8 +40,8 @@ class SkyboxSplitWorker(BaseWorker):
             import tempfile
 
             from src.services.skybox_service import SkyboxService
-            # ВАЖНО: mkdtemp (папка), не get_temp_file_path — тот создаёт ФАЙЛ,
-            # и os.makedirs внутри нарезки падал бы с FileExistsError.
+            # ВАЖНО: mkdtemp (папка), не get_temp_file_path - тот создаёт ФАЙЛ,
+            # и os.makedirs внутри нарезки падал бы с FileExistsError
             out_dir = tempfile.mkdtemp(prefix="tf2_sky_split_")
             faces = SkyboxService.split_equirect_to_faces(
                 self._equirect_path, self._face_size, out_dir,
@@ -55,7 +55,7 @@ class SkyboxSplitWorker(BaseWorker):
 
 
 class SkyboxFacesWorker(BaseWorker):
-    """Готовит PNG стоковых граней неба для 3D-превью."""
+    """Готовит PNG стоковых граней неба для 3D-превью"""
 
     ready = Signal(object)   # {face: png_path} (недостающие грани опущены)
     failed = Signal(str)
@@ -93,13 +93,13 @@ class SkyboxFacesWorker(BaseWorker):
         return result
 
     def _read_face_vtf(self, reader: GameVpkReader, face: str):
-        """VTF грани: через $basetexture VMT-ки, иначе по прямым именам.
+        """VTF грани: через $basetexture VMT-ки, иначе по прямым именам
 
-        Прямой путь — не запасной вариант, а основной для стоковых небес: их
+        Прямой путь - не запасной вариант, а основной для стоковых небес: их
         VMT-ки ссылаются на `skybox/cloud<грань>`, которой в игре нет, а сами
         текстуры лежат под `<имя>side` одной на все четыре боковые грани. Пока
         имя строилось как `<имя><грань>`, у любого стокового неба находились
-        только верх и низ, а бока в превью оставались пустыми.
+        только верх и низ, а бока в превью оставались пустыми
         """
         vmt = reader.read(f"materials/skybox/{self._sky_name}{face}.vmt")
         if vmt is not None:

@@ -1,9 +1,9 @@
 """
-Каталог анимаций класса: что вообще можно проиграть и как это найти.
+Каталог анимаций класса: что вообще можно проиграть и как это найти
 
 Модель `c_<class>_animations.mdl` держит 50-98 последовательностей на класс, и
 их имена наружу не выводятся: у скаттергана idle зовётся `sg_idle`, у пистолета
-`p_idle`, у Неумолимой силы `db_idle`. Подбирать эти префиксы руками не нужно —
+`p_idle`, у Неумолимой силы `db_idle`. Подбирать эти префиксы руками не нужно -
 у каждой последовательности в QC стоит активность, и она называет ровно то, что
 требуется:
 
@@ -29,17 +29,15 @@
      ответ, дальше игра не ищет.
   4. Таблица ролей `s_viewmodelacttable`: ACT_VM_IDLE у роли melee ->
      ACT_MELEE_VM_IDLE. Строки нет - активность остаётся базовой (так саппер
-     шпиона играет просто ACT_VM_IDLE).
+     шпиона играет просто ACT_VM_IDLE)
 
-Запасных путей нет: чего у оружия нет в игре, того нет и здесь. Прежний
-перебор «слот -> без цифры -> всеклассовый набор» давал Кусай-хлебу на удар
+Запасных путей нет: чего у оружия нет в игре, того нет и здесь. Перебор
+«слот -> без цифры -> всеклассовый набор» дал бы Кусай-хлебу на удар
 замах сковородой (у кулаков удар не HITCENTER, и поиск доходил до
-ACT_MELEE_ALLCLASS_VM_HITCENTER), а дробовику хэви - анимации минигана.
+ACT_MELEE_ALLCLASS_VM_HITCENTER), а дробовику хэви - анимации минигана
 
-Каталог — просто индекс уже декомпилированной папки, он ничего не скачивает и
-не считает поз. Кадр из выбранной последовательности берёт [viewmodel_pose].
-
-Модуль без Qt.
+Каталог - просто индекс уже декомпилированной папки, он ничего не скачивает и
+не считает поз. Кадр из выбранной последовательности берёт [viewmodel_pose]
 """
 
 from __future__ import annotations
@@ -62,22 +60,22 @@ _SMD_RE = re.compile(r'"([^"]+\.smd)"', re.I)
 _FPS_RE = re.compile(r'^\s*fps\s+([\d.]+)', re.M)
 _LOOP_RE = re.compile(r'^\s*loop\s*$', re.M)
 
-#: `{ event AE_WPN_HIDE 0 "" }` — кадр, на котором игра прячет или достаёт то,
+#: `{ event AE_WPN_HIDE 0 "" }` - кадр, на котором игра прячет или достаёт то,
 #: что персонаж держит в руке. Насмешка ими показывает реквизит не с начала:
-#: медик сперва лезет за пазуху и только на 23-м кадре достаёт снимок.
+#: медик сперва лезет за пазуху и только на 23-м кадре достаёт снимок
 _EVENT_RE = re.compile(r'\{\s*event\s+AE_WPN_(HIDE|UNHIDE)\s+(\d+)', re.I)
 
 #: Слот, под которым разбирается собственная модель вида (см. VIEWMODEL_ONLY).
-#: Ролей у такой модели нет: её `idle` помечен просто ACT_VM_IDLE.
+#: Ролей у такой модели нет: её `idle` помечен просто ACT_VM_IDLE
 VIEWMODEL_SLOT = "viewmodel"
 
 
 class Action(Enum):
-    """Действие оружия, как его выбирает пользователь.
+    """Действие оружия, как его выбирает пользователь
 
     Какая активность за ним стоит, зависит от оружия (см. `activity_for`):
     FIRE у стрелкового - PRIMARYATTACK, у ближнего боя - HITCENTER, у кулаков -
-    левый удар HITLEFT, а ALT_FIRE у них - правый HITRIGHT.
+    левый удар HITLEFT, а ALT_FIRE у них - правый HITRIGHT
     """
 
     IDLE = "IDLE"
@@ -100,31 +98,31 @@ class Action(Enum):
 
 @dataclass(frozen=True)
 class WeaponProfile:
-    """Всё, от чего игра выбирает последовательность предмета."""
+    """Всё, от чего игра выбирает последовательность предмета"""
 
-    #: Роль анимаций: `anim_slot` из items_game, иначе слот снаряжения класса.
+    #: Роль анимаций: `anim_slot` из items_game, иначе слот снаряжения класса
     slot: str
-    #: Подмена активностей из items_game (`visuals → animation_replacement`).
+    #: Подмена активностей из items_game (`visuals -> animation_replacement`)
     replacement: Mapping[str, str] = field(default_factory=dict)
     #: Слот снаряжения у ЭТОГО класса. По нему игра выбирает осмотр
-    #: (`GetInspectActivity`), и по нему же оружие считается ближним боем.
+    #: (`GetInspectActivity`), и по нему же оружие считается ближним боем
     loadout_slot: str = ""
-    #: Класс оружия в коде игры: от него зависят удары и собственный перевод.
+    #: Класс оружия в коде игры: от него зависят удары и собственный перевод
     item_class: str = ""
-    #: Чьи руки: мечи у подрывника играют свой набор *_SPECIAL.
+    #: Чьи руки: мечи у подрывника играют свой набор *_SPECIAL
     tf2_class: str = ""
 
 
 @dataclass(frozen=True)
 class AnimSequence:
-    """Одна последовательность из QC модели анимаций."""
+    """Одна последовательность из QC модели анимаций"""
 
     name: str
     smd_path: str
     activity: str = ""
     fps: float = 30.0
     loop: bool = False
-    #: ((кадр, спрятано), …) по возрастанию кадра — события AE_WPN_HIDE/UNHIDE.
+    #: ((кадр, спрятано), …) по возрастанию кадра - события AE_WPN_HIDE/UNHIDE
     hide_events: tuple = ()
 
     @property
@@ -134,7 +132,7 @@ class AnimSequence:
 
 @dataclass(frozen=True)
 class AnimCatalog:
-    """Все последовательности класса, проиндексированные для поиска."""
+    """Все последовательности класса, проиндексированные для поиска"""
 
     sequences: List[AnimSequence]
     by_activity: Dict[str, AnimSequence]
@@ -142,13 +140,13 @@ class AnimCatalog:
 
     def find(self, weapon: WeaponProfile,
              action: Action) -> Optional[AnimSequence]:
-        """Последовательность для действия. None — у оружия его нет в игре."""
+        """Последовательность для действия. None - у оружия его нет в игре"""
         activity = activity_for(weapon, action)
         found = self.by_activity.get(activity) if activity else None
         return found if found is not None and found.exists else None
 
     def actions_for(self, weapon: WeaponProfile) -> Dict[Action, AnimSequence]:
-        """Все действия, которые у оружия есть. Из них интерфейс строит выбор."""
+        """Все действия, которые у оружия есть. Из них интерфейс строит выбор"""
         found = {}
         for action in Action:
             seq = self.find(weapon, action)
@@ -158,7 +156,7 @@ class AnimCatalog:
 
 
 def profile_for(weapon_key: str, tf2_root: str, tf2_class: str) -> WeaponProfile:
-    """Профиль предмета в руках класса — из items_game ([viewmodel_anims])."""
+    """Профиль предмета в руках класса - из items_game ([viewmodel_anims])"""
     info = viewmodel_anims.anim_info(weapon_key, tf2_root)
     return WeaponProfile(
         slot=viewmodel_anims.slot_for(weapon_key, tf2_root, tf2_class),
@@ -171,10 +169,10 @@ def profile_for(weapon_key: str, tf2_root: str, tf2_class: str) -> WeaponProfile
 
 def load(decompiled_dir: str) -> Optional[AnimCatalog]:
     """
-    Разбирает QC модели анимаций из папки декомпиляции.
+    Разбирает QC модели анимаций из папки декомпиляции
 
     Returns:
-        AnimCatalog, либо None — если QC нет или в нём нет последовательностей.
+        AnimCatalog, либо None - если QC нет или в нём нет последовательностей
     """
     qc_path = _find_qc(decompiled_dir)
     if not qc_path:
@@ -210,8 +208,8 @@ def load(decompiled_dir: str) -> Optional[AnimCatalog]:
         return None
 
     # Первая последовательность с активностью выигрывает. У Valve бывает
-    # несколько на одну активность (три idle у Кусай-хлеба) — игра выбирает
-    # из них случайно по весу, превью берёт первую, чтобы кадр не прыгал.
+    # несколько на одну активность (три idle у Кусай-хлеба) - игра выбирает
+    # из них случайно по весу, превью берёт первую, чтобы кадр не прыгал
     by_activity: Dict[str, AnimSequence] = {}
     for seq in sequences:
         if seq.activity:
@@ -228,9 +226,9 @@ def load(decompiled_dir: str) -> Optional[AnimCatalog]:
     )
 
 
-# ── Активность: путь движка ──────────────────────────────────────────────── #
+# Активность: путь движка
 
-#: Базовая активность действия: то, что шлёт `SendWeaponAnim` обычное оружие.
+#: Базовая активность действия: то, что шлёт `SendWeaponAnim` обычное оружие
 _BASE: Dict[Action, str] = {
     Action.IDLE: "ACT_VM_IDLE",
     Action.DRAW: "ACT_VM_DRAW",
@@ -243,23 +241,23 @@ _BASE: Dict[Action, str] = {
 }
 
 #: Удары ближнего боя (`CTFWeaponBaseMelee::DoViewModelAnimation`): обычный -
-#: HITCENTER, крит - SWINGHARD. Вторая кнопка анимации не шлёт вовсе.
+#: HITCENTER, крит - SWINGHARD. Вторая кнопка анимации не шлёт вовсе
 _MELEE_HITS: Dict[Action, Optional[str]] = {
     Action.FIRE: "ACT_VM_HITCENTER",
     Action.ALT_FIRE: None,
     Action.CRIT: "ACT_VM_SWINGHARD",
 }
 
-#: Оружие со своим `DoViewModelAnimation`.
+#: Оружие со своим `DoViewModelAnimation`
 _OWN_HITS: Dict[str, Dict[Action, Optional[str]]] = {
-    # Кулаки: левой, правой, крит (`CTFFists`).
+    # Кулаки: левой, правой, крит (`CTFFists`)
     "tf_weapon_fists": {
         Action.FIRE: "ACT_VM_HITLEFT",
         Action.ALT_FIRE: "ACT_VM_HITRIGHT",
         Action.CRIT: "ACT_VM_SWINGHARD",
     },
     # Оружейник (`CTFRobotArm`): шлёт уже готовый набор ITEM2, третий удар
-    # серии - SWINGHARD.
+    # серии - SWINGHARD
     "tf_weapon_robot_arm": {
         Action.FIRE: "ACT_ITEM2_VM_HITCENTER",
         Action.ALT_FIRE: None,
@@ -269,56 +267,56 @@ _OWN_HITS: Dict[str, Dict[Action, Optional[str]]] = {
 
 _LOWERED = ("IDLE_TO_LOWERED", "IDLE_LOWERED", "LOWERED_TO_IDLE")
 
-#: Горны и парашют переводят базовый набор в ITEM1 сами (`CTFBuffItem`).
+#: Горны и парашют переводят базовый набор в ITEM1 сами (`CTFBuffItem`)
 _BUFF_ITEM = {f"ACT_VM_{x}": f"ACT_ITEM1_VM_{x}" for x in (
     "DRAW", "HOLSTER", "IDLE", "PULLBACK", "PRIMARYATTACK", "SECONDARYATTACK",
     *_LOWERED)}
 
-#: Мечи у подрывника - в набор *_SPECIAL (`CTFDecapitationMeleeWeaponBase`).
+#: Мечи у подрывника - в набор *_SPECIAL (`CTFDecapitationMeleeWeaponBase`)
 _DEMO_SWORD = {f"ACT_VM_{x}": f"ACT_VM_{x}_SPECIAL" for x in (
     "DRAW", "HOLSTER", "IDLE", "PULLBACK", "PRIMARYATTACK", "HITCENTER",
     "SWINGHARD", *_LOWERED)}
 _DEMO_SWORD["ACT_VM_SECONDARYATTACK"] = "ACT_VM_PRIMARYATTACK_SPECIAL"
 
 #: Слоты снаряжения с набором осмотра (`GetInspectActivity`). У остальных
-#: (ПДА, часы) осмотра в игре нет.
+#: (ПДА, часы) осмотра в игре нет
 INSPECT_SLOTS = ("PRIMARY", "SECONDARY", "MELEE", "BUILDING")
 
-#: Роли, у которых есть строки в `s_viewmodelacttable`.
+#: Роли, у которых есть строки в `s_viewmodelacttable`
 _TABLE_ROLES = frozenset({
     "PRIMARY", "SECONDARY", "MELEE", "PDA", "ITEM1", "ITEM2", "ITEM3", "ITEM4",
     "MELEE_ALLCLASS", "SECONDARY2", "PRIMARY2"})
-#: Что таблица переводит у каждой из них.
+#: Что таблица переводит у каждой из них
 _VM_ACTS = frozenset({
     "DRAW", "HOLSTER", "IDLE", "PULLBACK", "PRIMARYATTACK", "SECONDARYATTACK",
     "RELOAD", "DRYFIRE", *_LOWERED})
-#: Удары переводятся только у ближнего боя.
+#: Удары переводятся только у ближнего боя
 _MELEE_ROLES = frozenset({"MELEE", "MELEE_ALLCLASS"})
-#: Перезарядка по патрону (`ACT_RELOAD_START` без `VM_`) есть не у всех ролей.
+#: Перезарядка по патрону (`ACT_RELOAD_START` без `VM_`) есть не у всех ролей
 _RELOAD_ROLES = frozenset({"PRIMARY", "SECONDARY", "SECONDARY2", "ITEM1",
                            "PRIMARY2"})
 
 #: Наш собственный слот, которого ролью в игре нет: часы невидимости -
-#: «вторая рука» шпиона.
+#: «вторая рука» шпиона
 _PSEUDO_ROLES = {"WATCH": "OFFHAND"}
 
 #: Роли без строк в таблице, которые всё же держат оружие: саппер шпиона и
-#: ящик инженера (building), своя модель вида у часов. Их активность - базовая.
+#: ящик инженера (building), своя модель вида у часов. Их активность - базовая
 _BASE_ROLES = frozenset({"BUILDING", VIEWMODEL_SLOT.upper()})
 
 
 def activity_for(weapon: WeaponProfile, action: Action) -> Optional[str]:
     """
-    Активность, которую игра проиграет у этого оружия на это действие.
+    Активность, которую игра проиграет у этого оружия на это действие
 
-    None — действия у оружия нет вовсе (вторая кнопка ближнего боя, осмотр
-    ПДА). Шаги — как в движке, см. описание модуля.
+    None - действия у оружия нет вовсе (вторая кнопка ближнего боя, осмотр
+    ПДА). Шаги - как в движке, см. описание модуля
     """
     role = (weapon.slot or "").strip().upper()
     if role not in _TABLE_ROLES and role not in _PSEUDO_ROLES \
             and role not in _BASE_ROLES:
         # Не оружие в руке: тело, маски, `force_not_used` у часов. Базовая
-        # ACT_VM_IDLE у шпиона нашлась бы - это саппер.
+        # ACT_VM_IDLE у шпиона нашлась бы - это саппер
         return None
     if action.is_inspect:
         loadout = (weapon.loadout_slot or "").upper()
@@ -341,7 +339,7 @@ def activity_for(weapon: WeaponProfile, action: Action) -> Optional[str]:
 
 
 def _own_translation(weapon: WeaponProfile, activity: str) -> str:
-    """Перевод, который класс оружия делает ДО подмены и таблицы ролей."""
+    """Перевод, который класс оружия делает ДО подмены и таблицы ролей"""
     cls = weapon.item_class
     if cls == "tf_weapon_buff_item" or cls.startswith("tf_weapon_parachute"):
         return _BUFF_ITEM.get(activity, activity)
@@ -353,17 +351,17 @@ def _own_translation(weapon: WeaponProfile, activity: str) -> str:
 
 
 def translate(slot: str, activity: str) -> str:
-    """Базовая активность -> активность роли (`s_viewmodelacttable`).
+    """Базовая активность -> активность роли (`s_viewmodelacttable`)
 
     Неизвестная роль или активность без строки в таблице остаются как есть:
-    так делает игра, и так саппер шпиона (роль building) играет ACT_VM_IDLE.
+    так делает игра, и так саппер шпиона (роль building) играет ACT_VM_IDLE
     """
     role = (slot or "").strip().upper()
     if role in _PSEUDO_ROLES:
         return activity.replace("ACT_VM_", f"ACT_{_PSEUDO_ROLES[role]}_VM_", 1)
     if role not in _TABLE_ROLES:
         return activity
-    # Коровья мясорубка: набор ракетомёта, но своя перезарядка `_3`.
+    # Коровья мясорубка: набор ракетомёта, но своя перезарядка `_3`
     target, reload_suffix = ("PRIMARY", "_3") if role == "PRIMARY2" else (role, "")
     if activity.startswith("ACT_VM_"):
         name = activity[len("ACT_VM_"):]

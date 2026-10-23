@@ -1,5 +1,5 @@
 """
-Работа с VPK файлами: распаковка, сборка, конвертация текстур.
+Работа с VPK файлами: распаковка, сборка, конвертация текстур
 """
 
 import os
@@ -14,12 +14,12 @@ from .packaging_service import PackagingService
 from .model_service import ModelService
 from .model_build_service import ModelBuildService
 from .vpk_texture_builder import VpkTextureBuilder
+from .texture_build.vtf_jobs import VtfJobs
 from .vpk_model_pipeline import VpkModelPipeline
 from .material_plan import MaterialPlan, apply_force_team, plan_materials
 from .tf2_paths import TF2Paths
 from .debug_service import DebugService
 from .smd_service import SMDService
-from .decompile_cache import save_to_cache
 from src.data.weapons import SPECIAL_MODES
 from src.data.player_hands import HAND_MODE_KEYS
 from src.data.player_characters import (
@@ -37,18 +37,17 @@ logger = get_logger(__name__)
 
 
 class _Tools(NamedTuple):
-    """Инструменты и пути сборки (стадия 1)."""
+    """Инструменты и пути сборки (стадия 1)"""
     studiomdl_exe: str
     tf2_misc_vpk: str
     tf_dir: str
-    crowbar_exe: str
     paths_to_try: list
 
 
 @dataclass
 class _ModelSource:
     """Разобранная модель после замены геометрии: исходные (игровые) имена
-    материалов из QC до его патча (стадия 3)."""
+    материалов из QC до его патча (стадия 3)"""
     found_mdl_path: str
     replace_model_smd_path: Optional[str]
     original_cdmaterials_path: str
@@ -58,7 +57,7 @@ class _ModelSource:
 
 @dataclass
 class _MaterialOutput:
-    """Куда пишутся материалы главной текстуры: путь обхода sv_pure (стадия 5)."""
+    """Куда пишутся материалы главной текстуры: путь обхода sv_pure (стадия 5)"""
     patched_cdmaterials_path: str
     vtf_output_path: Path
     vmt_path: Path
@@ -67,19 +66,19 @@ class _MaterialOutput:
 
 
 class VPKService:
-    """Главный конвейер сборки VPK файлов. Детали ошибок — в логах."""
+    """Главный конвейер сборки VPK файлов. Детали ошибок - в логах"""
 
     @staticmethod
     def _is_attachment_only(weapon_key: str, tf2_misc_vpk: str) -> bool:
         """Навесное украшение (гирлянда `*_xmas`), а не само оружие: items_game
-        вешает его на базовую пушку через `attached_models`."""
+        вешает его на базовую пушку через `attached_models`"""
         try:
             from src.data.weapon_model_index import (
                 attachment_only_models, tf2_root_from_misc_vpk,
             )
             return weapon_key.lower() in attachment_only_models(
                 tf2_root_from_misc_vpk(tf2_misc_vpk))
-        except Exception as exc:                  # noqa: BLE001 — только уточнение
+        except Exception as exc:                  # noqa: BLE001 - только уточнение
             logger.debug(f"attachment check: {exc}")
             return False
     
@@ -96,7 +95,7 @@ class VPKService:
         cancel_callback: Optional[Callable[[], bool]] = None,
     ) -> Tuple[bool, str, bool]:
         # Здесь нужны лишь те поля, что используются ДО build_vpk (ветка custom,
-        # выбор спец-режима, гейтинг колбэка). Остальное распакует сам build_vpk.
+        # выбор спец-режима, гейтинг колбэка). Остальное распакует сам build_vpk
         r = request
         mode = r.mode
         image_path = r.image_path
@@ -131,7 +130,7 @@ class VPKService:
             logger.info(f"Начало сборки VPK: {filename}")
             emit_progress(5, t.get('build_init', 'Initializing build...'))
 
-            # ── Кастомный мод (пользователь загрузил готовый VPK) ───────── #
+            # Кастомный мод (пользователь загрузил готовый VPK)
             if mode == "custom":
                 from src.services.custom_vpk_service import CustomVPKService
                 if not custom_vpk_source_path:
@@ -163,9 +162,9 @@ class VPKService:
                               else t.get('build_error_status', 'Build error'))
                 return success, message, False
 
-            # ── Скайбокс: свой пайплайн (панорама/грани → materials/skybox) ─ #
+            # Скайбокс: свой пайплайн (панорама/грани -> materials/skybox) ─
             # Ранняя ветка как у custom: _validate_build_params требует
-            # image_path/TF2 и не знает про 6 граней — валидация своя.
+            # image_path/TF2 и не знает про 6 граней - валидация своя
             from src.data.skyboxes import SKYBOX_MODE
             if mode == SKYBOX_MODE:
                 from src.services.skybox_service import SkyboxService
@@ -188,16 +187,16 @@ class VPKService:
             emit_sub(-1, _sub_label_init)
 
             # Прогресс эмитится самим build_vpk на реальных границах стадий
-            # (декомпиляция / текстуры / компиляция / упаковка) — без
-            # потока-имитатора с фиксированными процентами.
+            # (декомпиляция / текстуры / компиляция / упаковка) - без
+            # потока-имитатора с фиксированными процентами
             if is_special_mode:
                 emit_progress(20, t.get('build_processing', 'Processing texture...'))
             else:
                 emit_progress(10, t.get('build_extracting', 'Extracting model...'))
 
             # Параметры сборки целиком в request; build_vpk сам их распакует.
-            # Колбэки — runtime UI-потока, передаём отдельно. model_file_callback
-            # имеет смысл только при включённой замене модели.
+            # Колбэки - runtime UI-потока, передаём отдельно. model_file_callback
+            # имеет смысл только при включённой замене модели
             success, message = VPKService.build_vpk(
                 request,
                 model_file_callback=model_file_callback if replace_model_enabled else None,
@@ -236,8 +235,8 @@ class VPKService:
         """
         Режим «готовая модель»: возвращает текст предупреждения, если материалы
         пользовательского SMD не совпадают с оригиналом, иначе None.
-        Чистая проверка (только сравнение + лог) — решение продолжать/отменить
-        принимает вызывающий код через texture_mismatch_callback.
+        Чистая проверка (только сравнение + лог) - решение продолжать/отменить
+        принимает вызывающий код через texture_mismatch_callback
         """
         if not (model_ready_path and os.path.exists(model_ready_path)
                 and model_ready_path.lower().endswith('.smd')):
@@ -294,8 +293,8 @@ class VPKService:
         Для рук и MIRROR_VMT_WEAPON_KEYS дублирует VMT по ОРИГИНАЛЬНОМУ пути из
         $cdmaterials. Причина: эти модели ссылаются на оригинальный путь
         (materials/models/player/spy/...), а не на пропатченный console\\-путь,
-        иначе мод игнорируется. VTF не дублируются — зеркальный VMT указывает на
-        те же файлы (по console\\-пути внутри мод-VPK).
+        иначе мод игнорируется. VTF не дублируются - зеркальный VMT указывает на
+        те же файлы (по console\\-пути внутри мод-VPK)
         """
         from src.data.player_hands import HAND_MODE_KEYS as _HAND_MODE_KEYS
         from src.data.weapon_quirks import MIRROR_VMT_WEAPON_KEYS as _MIRROR_KEYS
@@ -315,7 +314,7 @@ class VPKService:
 
     @staticmethod
     def _mirror_dir(ctx, original_cdmaterials_path: str) -> Path:
-        """Папка зеркальных VMT в моде: оригинальный путь $cdmaterials."""
+        """Папка зеркальных VMT в моде: оригинальный путь $cdmaterials"""
         rel = original_cdmaterials_path.replace('\\', '/').strip().strip('/')
         return ctx.vpkroot_dir.joinpath("materials", *rel.split('/'))
 
@@ -323,7 +322,7 @@ class VPKService:
     def _purge_dir_contents(directory: Path, label: str) -> None:
         """
         Удаляет всё содержимое директории (файлы и поддиректории), не трогая саму
-        папку. Для очистки временных папок после сборки. Ошибки не фатальны — лог.
+        папку. Для очистки временных папок после сборки. Ошибки не фатальны - лог
         """
         if not directory.exists():
             return
@@ -346,16 +345,15 @@ class VPKService:
         """
         Постобработка успешной сборки: удаляет отредактированный пользователем VMT,
         чистит временные папки редактора, удаляет temp-директорию сборки и собирает
-        итоговое сообщение (с накопленными предупреждениями ctx.warnings).
+        итоговое сообщение (с накопленными предупреждениями ctx.warnings)
         """
-        # Правленый VMT после сборки НЕ удаляется: правка — часть работы, как
-        # своя текстура. Раньше он стирался, и вторая сборка того же предмета
-        # молча выходила с игровым материалом (эффект из редактора VMT —
-        # только на одну сборку). Откат — кнопка «Как в игре» в редакторе.
+        # Правленый VMT после сборки НЕ удаляется: правка - часть работы, как
+        # своя текстура: иначе вторая сборка того же предмета молча вышла бы с
+        # игровым материалом. Откат - кнопка «Как в игре» в редакторе
         if vmt_to_delete:
             logger.info(f"Правленый VMT использован и оставлен: {vmt_to_delete}")
 
-        # Чистим временные папки редактора VMT (мусор от достанных из игры VMT).
+        # Чистим временные папки редактора VMT (мусор от достанных из игры VMT)
         VPKService._purge_dir_contents(DirectoryPaths.TEMP_VMT_EXTRACT_DIR, "temp_vmt_extract")
         VPKService._purge_dir_contents(data_dir() / "tools/backupVMT", "backupVMT")
 
@@ -363,7 +361,7 @@ class VPKService:
 
         success_message = t.get('vpk_success', 'VPK successfully created: {path}').format(path=vpk_path)
         # Показываем накопленные предупреждения (напр. не найденную игровую
-        # текстуру) — иначе пользователь узнает о фиолете только в игре.
+        # текстуру) - иначе пользователь узнает о фиолете только в игре
         if ctx.warnings:
             _hdr = ("\n\nВнимание:" if language == "ru" else "\n\nWarnings:")
             success_message += _hdr + "".join(f"\n- {w}" for w in ctx.warnings)
@@ -372,15 +370,15 @@ class VPKService:
     @staticmethod
     def _resolve_weapon_key(mode: str, hat_mdl_path: Optional[str]) -> Tuple[Optional[str], Optional[str]]:
         """
-        Определяет weapon_key (ключ модели/файлов) по режиму сборки.
+        Определяет weapon_key (ключ модели/файлов) по режиму сборки
 
-        Для оружия — суффикс mode (scout_c_scattergun → c_scattergun); для рук —
-        ключ arm-модели; для тела/масок шпиона — стем MDL; для шапки — стем
-        hat_mdl_path.
+        Для оружия - суффикс mode (scout_c_scattergun -> c_scattergun), для рук -
+        ключ arm-модели, для тела/масок шпиона - стем MDL; для шапки - стем
+        hat_mdl_path
 
         Returns:
             (weapon_key, None) при успехе либо (None, error_message), если для
-            режима рук не задана arm-модель.
+            режима рук не задана arm-модель
         """
         if mode == "hat" and hat_mdl_path:
             weapon_key = Path(hat_mdl_path).stem
@@ -407,22 +405,21 @@ class VPKService:
         keep_temp_on_error: bool, debug_mode: bool,
     ):
         """
-        Стадия 1 модельного конвейера: инструменты и пути.
+        Стадия 1 модельного конвейера: инструменты и пути
 
         Проверяет TF2/Crowbar, резолвит studiomdl/misc-VPK/tf-папку и строит
-        список кандидатов MDL.
+        список кандидатов MDL
 
         Returns:
-            (error_result, None) — ошибка, ctx очищен; error_result — готовый
+            (error_result, None) - ошибка, ctx очищен; error_result - готовый
             ответ build_vpk (False, message);
-            (None, (studiomdl_exe, tf2_misc_vpk, tf_dir, crowbar_exe,
-                    paths_to_try)) — успех.
+            (None, (studiomdl_exe, tf2_misc_vpk, tf_dir, paths_to_try)) - успех
         """
         def _fail(message: str):
             ctx.cleanup(on_error=True, keep_on_error=keep_temp_on_error, debug_mode=debug_mode)
             return (False, message), None
 
-        # Без пути к TF2 продолжать нельзя — нужны VPK файлы игры
+        # Без пути к TF2 продолжать нельзя - нужны VPK файлы игры
         if not tf2_root_dir:
             logger.error("Путь к TF2 не указан")
             return _fail(t['error_tf2_not_specified'])
@@ -443,28 +440,27 @@ class VPKService:
         if _mdl_path_error:
             return _fail(_mdl_path_error)
 
-        crowbar_exe = TF2Paths.get_crowbar_path()
-        return None, _Tools(studiomdl_exe, tf2_misc_vpk, tf_dir, crowbar_exe, paths_to_try)
+        return None, _Tools(studiomdl_exe, tf2_misc_vpk, tf_dir, paths_to_try)
 
     @staticmethod
     def _stage_find_and_decompile(
         ctx, mode: str, weapon_key: str, hat_mdl_path, paths_to_try,
-        tf2_misc_vpk: str, crowbar_exe: str, draw_uv_layout: bool, size,
+        tf2_misc_vpk: str, draw_uv_layout: bool, size,
         export_folder: str, keep_temp_on_error: bool, debug_mode: bool,
         language: str, t: dict, emit_progress, emit_sub, is_cancelled,
         cancelled_result,
     ):
         """
-        Стадия 2 модельного конвейера: MDL в игровом VPK + декомпиляция.
+        Стадия 2 модельного конвейера: MDL в игровом VPK + декомпиляция
 
         Находит MDL по кандидатам, для %s-шапок обновляет weapon_key на
         реальный стем, получает декомпилированный QC (через кэш декомпиляции),
-        рисует UV-шаблон (по запросу), чистит LOD и пополняет кэш.
+        рисует UV-шаблон (по запросу) и чистит LOD в папке сборки
 
         Returns:
-            (error_result, '', weapon_key, '') — ошибка/отмена, ctx очищен
-            (для отмены — cancelled_result);
-            (None, found_mdl_path, weapon_key, qc_path) — успех.
+            (error_result, '', weapon_key, '') - ошибка/отмена, ctx очищен
+            (для отмены - cancelled_result);
+            (None, found_mdl_path, weapon_key, qc_path) - успех
         """
         def _fail(message_result):
             return message_result, '', weapon_key, ''
@@ -477,15 +473,15 @@ class VPKService:
             return _fail((False, _mdl_find_error))
 
         # Для шапок с %s-плейсхолдером: обновляем weapon_key на реальный стем
-        # (all_domination_%s → all_domination_heavy), иначе кэш и имена файлов сломаются
+        # (all_domination_%s -> all_domination_heavy), иначе кэш и имена файлов сломаются
         if mode == "hat" and hat_mdl_path and "%s" in hat_mdl_path:
             weapon_key = Path(found_mdl_path).stem
             logger.info(f"Hat weapon_key обновлён: {weapon_key}")
 
-        # Праздничные пушки — базовая модель ПЛЮС отдельная модель-гирлянда;
+        # Праздничные пушки - базовая модель ПЛЮС отдельная модель-гирлянда;
         # в списке гирлянда выглядит как оружие, но перекрашивается только она.
         # Молчать нельзя: пользователь красит «Праздничный пулемёт» и не видит
-        # изменений на стволе (items_game: "attached_models").
+        # изменений на стволе (items_game: "attached_models")
         if mode != "hat" and VPKService._is_attachment_only(weapon_key, tf2_misc_vpk):
             ctx.warn(
                 f"'{weapon_key}' - это навесное украшение (гирлянда), а не сам "
@@ -497,12 +493,8 @@ class VPKService:
             return _fail(cancelled_result(ctx))
         emit_progress(25, t.get('build_decompiling', 'Decompiling model...'))
 
-        # === Кэш декомпила — проверяем ДО extraction ===
-        # Ключ: weapon_key + vpk_path + mdl_rel_path + mtime(vpk).
-        # mtime VPK меняется при каждом обновлении TF2 → авто-инвалидация.
-        # При cache hit: пропускаем extract_file_set (3-10 сек) + Crowbar (10-30 сек).
-        qc_path, cached_decompile, _decomp_error = VpkModelPipeline._obtain_decompiled_qc(
-            ctx, found_mdl_path, weapon_key, tf2_misc_vpk, crowbar_exe,
+        qc_path, _decomp_error = VpkModelPipeline._obtain_decompiled_qc(
+            ctx, found_mdl_path, weapon_key, tf2_misc_vpk,
             debug_mode, language, t, emit_sub,
         )
         if _decomp_error:
@@ -512,12 +504,8 @@ class VPKService:
         if draw_uv_layout:
             ModelService.generate_uv_layout(ctx, weapon_key, size, export_folder, language)
 
-        # Удаляем LOD файлы до кэширования — чтобы в кэше лежали уже чистые файлы
+        # Только в папке сборки: в кэше лежит полный вывод Crowbar (экспорт отдаёт LOD)
         ModelBuildService.remove_lod_files(ctx.decompile_dir)
-
-        # Сохраняем в кэш после очистки — следующая сборка пропустит extraction + decompile
-        if not cached_decompile:
-            save_to_cache(weapon_key, tf2_misc_vpk, found_mdl_path, ctx.decompile_dir)
 
         return None, found_mdl_path, weapon_key, qc_path
 
@@ -541,24 +529,24 @@ class VPKService:
         Конвейер МОДЕЛЬНОГО мода (оружие/шапка/руки/тело): поиск MDL в игровом
         VPK -> декомпиляция (cache-aware) -> замена модели -> план материалов ->
         рендер всех текстур (параллельно с компиляцией) -> сборка доп. моделей
-        (классы/стили шапок). Спец-режимы (critHIT/спрей/маски) сюда не заходят.
+        (классы/стили шапок). Спец-режимы (critHIT/спрей/маски) сюда не заходят
 
         Returns:
-            (False, error_message)  — ошибка/отмена, ctx уже очищен;
-            (True, vmt_to_delete)   — успех; vmt_to_delete — имя
+            (False, error_message)  - ошибка/отмена, ctx уже очищен;
+            (True, vmt_to_delete)   - успех; vmt_to_delete - имя
                                       отредактированного VMT ('' если нет),
-                                      упаковку VPK выполняет вызывающий.
+                                      упаковку VPK выполняет вызывающий
         """
         def _fail(message: str, on_error: bool = True) -> Tuple[bool, str]:
             ctx.cleanup(on_error=on_error, keep_on_error=r.keep_temp_on_error,
                         debug_mode=r.debug_mode)
             return False, message
 
-        # Папка обхода sv_pure для $cdmaterials (console\ или vgui\replay\thumbnails\).
+        # Папка обхода sv_pure для $cdmaterials (console\ или vgui\replay\thumbnails\)
         from src.shared.constants import bypass_prefix as _resolve_bypass_prefix
         bypass_prefix = _resolve_bypass_prefix(r.bypass_method)
 
-        # ── Стадия 1: инструменты и пути (TF2/Crowbar/studiomdl/кандидаты MDL) ──
+        # Стадия 1: инструменты и пути (TF2/Crowbar/studiomdl/кандидаты MDL)
         err, tools = VPKService._stage_locate_tools(
             ctx, r.mode, weapon_key, r.hat_mdl_path, r.tf2_root_dir, t,
             r.keep_temp_on_error, r.debug_mode,
@@ -567,10 +555,10 @@ class VPKService:
             return err
 
         try:
-            # ── Стадия 2: поиск MDL в игровом VPK + декомпиляция (cache-aware) ──
+            # Стадия 2: поиск MDL в игровом VPK + декомпиляция (cache-aware)
             err, found_mdl_path, weapon_key, qc_path = VPKService._stage_find_and_decompile(
                 ctx, r.mode, weapon_key, r.hat_mdl_path, tools.paths_to_try,
-                tools.tf2_misc_vpk, tools.crowbar_exe, r.draw_uv_layout, r.size,
+                tools.tf2_misc_vpk, r.draw_uv_layout, r.size,
                 r.export_folder, r.keep_temp_on_error, r.debug_mode, r.language, t,
                 emit_progress, emit_sub, is_cancelled, cancelled_result,
             )
@@ -581,7 +569,7 @@ class VPKService:
                 return cancelled_result(ctx)
             emit_progress(40, t.get('build_processing', 'Processing texture...'))
 
-            # ── Стадия 3: замена модели + исходные имена материалов ──
+            # Стадия 3: замена модели + исходные имена материалов
             error, src = VPKService._stage_prepare_model(
                 ctx, r, t, weapon_key, found_mdl_path, qc_path, tools.tf2_misc_vpk,
                 model_file_callback, extra_model_callback, emit_sub,
@@ -589,11 +577,11 @@ class VPKService:
             if error:
                 return _fail(error)
 
-            # ── Стадия 4: план материалов (QC патчится здесь) ──
+            # Стадия 4: план материалов (QC патчится здесь)
             # «Сделать командным»: синтез BLU-строки для оружия БЕЗ нативной
-            # команды. Делаем ДО извлечения tg_structure — тогда весь командный
+            # команды. Делаем ДО извлечения tg_structure - тогда весь командный
             # путь (blu_row, генерация BLU, рекомпиляция) сработает как у
-            # нативно-командного оружия.
+            # нативно-командного оружия
             apply_force_team(r.force_team, r.mode, qc_path, weapon_key, ctx)
             plan = plan_materials(
                 qc_path, r.mode, weapon_key, ctx, src.texture_filename, r.image_path,
@@ -603,7 +591,7 @@ class VPKService:
                 bypass_prefix=bypass_prefix, misc_materials=r.misc_materials or [],
             )
 
-            # ── Стадия 5: куда писать материалы (путь обхода sv_pure) ──
+            # Стадия 5: куда писать материалы (путь обхода sv_pure)
             error, out = VPKService._stage_material_output(
                 ctx, qc_path, plan.texture_filename, r.mode, t)
             if error:
@@ -620,14 +608,14 @@ class VPKService:
             if is_cancelled():
                 return cancelled_result(ctx)
             emit_progress(60, t.get('build_compiling', 'Compiling model...'))
-            # Игровой tf2_textures_dir.vpk — резолвим один раз (RED-оригинал
-            # и извлечение оригинального VMT, гирлянды).
+            # Игровой tf2_textures_dir.vpk - резолвим один раз (RED-оригинал
+            # и извлечение оригинального VMT, гирлянды)
             tf2_textures_vpk = TF2Paths.resolve_textures_vpk(r.tf2_root_dir)
-            # «Сделать праздничным»: гирлянда - в меш оружия до компиляции.
+            # «Сделать праздничным»: гирлянда - в меш оружия до компиляции
             from src.services import decor_bake
             baked = decor_bake.bake_entry(r.decor_builds)
             if baked and r.model_ready_path:
-                # Готовую модель не перекомпилировать - вшить некуда.
+                # Готовую модель не перекомпилировать - вшить некуда
                 baked = None
                 if hasattr(ctx, 'warn'):
                     ctx.warn('Гирлянда не вшита: модель оружия готовая (MDL)')
@@ -639,7 +627,7 @@ class VPKService:
                     flags=r.flags or [], vtf_options=r.vtf_options or {},
                     bypass_prefix=bypass_prefix)
 
-            # ── Стадия 6: компиляция модели в фоне, текстуры параллельно ──
+            # Стадия 6: компиляция модели в фоне, текстуры параллельно
             compile_thread, compile_exc = VpkModelPipeline._start_model_compile(
                 r.model_ready_path, qc_path, weapon_key, ctx,
                 tools.studiomdl_exe, tools.tf_dir, r.debug_mode, r.language, emit_sub,
@@ -652,7 +640,7 @@ class VPKService:
             if compile_exc[0] is not None:
                 raise compile_exc[0]
 
-            # ── Стадия 7: модели в мод (основная, классы и стили шапки, гирлянды) ──
+            # Стадия 7: модели в мод (основная, классы и стили шапки, гирлянды)
             VPKService._stage_collect_models(
                 ctx, r, src, plan, out, tools, weapon_key, qc_path,
                 tf2_textures_vpk, part_variants, part_specs, image_path,
@@ -683,17 +671,17 @@ class VPKService:
         emit_sub,
     ) -> Tuple[Optional[str], Optional[_ModelSource]]:
         """
-        Стадия 3: замена модели (SMD пользователя) и исходные имена из QC —
-        $cdmaterials и главная текстура ДО патча QC (дальше он их изменит).
+        Стадия 3: замена модели (SMD пользователя) и исходные имена из QC -
+        $cdmaterials и главная текстура ДО патча QC (дальше он их изменит)
 
         Returns:
-            (error_message, None) — ошибка, ctx НЕ очищен;
-            (None, _ModelSource) — успех.
+            (error_message, None) - ошибка, ctx НЕ очищен;
+            (None, _ModelSource) - успех
         """
-        # Для рук замена SMD-модели не поддерживается.
+        # Для рук замена SMD-модели не поддерживается
         replace_model_enabled = False if r.mode in HAND_MODE_KEYS else r.replace_model_enabled
 
-        # Пропускаем если model_ready_path задан — пользователь уже указал готовый файл.
+        # Пропускаем если model_ready_path задан - пользователь уже указал готовый файл.
         # Диалог выбора файла показываем здесь, после декомпиляции (чтобы знать куда копировать)
         replace_model_smd_path = VpkModelPipeline._resolve_replace_model_smd(
             replace_model_enabled, r.model_ready_path, r.replace_model_path,
@@ -716,9 +704,9 @@ class VPKService:
         # гирлянд `models/player/items/heavy/xms_colored_lights` один на
         # всех. Мод двух разных праздничных оружий писал бы одну и ту же
         # текстуру, и в игре обе гирлянды показали бы ту, чей VPK победил.
-        # Своя папка на модель — та же, что у сборки гирлянды через
+        # Своя папка на модель - та же, что у сборки гирлянды через
         # переключатель на базовом оружии (decor_build). Исходные пути уже
-        # сняты выше: по ним ищутся оригиналы в игре.
+        # сняты выше: по ним ищутся оригиналы в игре
         if VPKService._is_attachment_only(weapon_key, tf2_misc_vpk):
             from src.services.decor_build import DECOR_MATERIALS_ROOT, _set_cdmaterials
             _set_cdmaterials(qc_path, f"{DECOR_MATERIALS_ROOT}\\{Path(found_mdl_path).stem}")
@@ -760,19 +748,19 @@ class VPKService:
         ctx, qc_path: str, texture_filename: str, mode: str, t: dict,
     ) -> Tuple[Optional[str], Optional[_MaterialOutput]]:
         """
-        Стадия 5: куда писать материалы главной текстуры — папка из
-        $cdmaterials ПОСЛЕ патча QC (с префиксом обхода sv_pure).
+        Стадия 5: куда писать материалы главной текстуры - папка из
+        $cdmaterials ПОСЛЕ патча QC (с префиксом обхода sv_pure)
 
         Returns:
-            (error_message, None) — ошибка, ctx НЕ очищен;
-            (None, _MaterialOutput) — успех, папка создана.
+            (error_message, None) - ошибка, ctx НЕ очищен;
+            (None, _MaterialOutput) - успех, папка создана
         """
-        # Извлекаем путь из $cdmaterials после патчинга (теперь с префиксом console\)
+        # Путь из $cdmaterials после патчинга (с префиксом console\)
         patched_cdmaterials_path = ModelBuildService.extract_cdmaterials_path_from_qc(qc_path)
         if not patched_cdmaterials_path:
             return t['error_cdmaterials_patched_not_extracted'].format(qc_path=qc_path), None
 
-        # Путь теперь в формате: console\models\weapons\v_bonesaw
+        # Путь в формате: console\models\weapons\v_bonesaw
         # Конвертируем в: materials/console/models/weapons/v_bonesaw/ (потому что VPK требует такую структуру)
         materials_rel_path = "materials/" + patched_cdmaterials_path.replace('\\', '/').strip().rstrip('/')
         if not materials_rel_path.endswith('/'):
@@ -804,7 +792,7 @@ class VPKService:
     def _ready_model_declined(r: BuildRequest, qc_path: str, weapon_key: str, ctx,
                               texture_mismatch_callback) -> Optional[str]:
         """Режим «Модель уже готова»: материалы SMD не совпали с игровыми, и
-        человек отказался продолжать. → текст отмены или None."""
+        человек отказался продолжать. -> текст отмены или None"""
         mismatch = VPKService._ready_model_texture_mismatch(
             r.model_ready_path, qc_path, weapon_key, ctx.decompile_dir, r.language)
         if not (mismatch and texture_mismatch_callback
@@ -819,12 +807,12 @@ class VPKService:
     def _stage_part_materials(ctx, r: BuildRequest, qc_path: str, weapon_key: str,
                               replace_model_smd_path) -> Tuple[dict, object]:
         """
-        Части модели — своими материалами: их треугольники в SMD под новым
+        Части модели - своими материалами: их треугольники в SMD под новым
         именем и столбец в $texturegroup (src/services/part_materials.py).
-        После плана материалов — иначе сборка спросила бы, чем красить
-        новый материал; до компиляции — он должен попасть в модель.
+        После плана материалов - иначе сборка спросила бы, чем красить
+        новый материал, до компиляции - он должен попасть в модель
 
-        Returns: (part_variants, part_specs).
+        Returns: (part_variants, part_specs)
         """
         part_variants = {}
         part_specs = r.part_materials
@@ -832,7 +820,7 @@ class VPKService:
             from src.services import part_materials as _pm
             if replace_model_smd_path:
                 # Своя модель: её треугольники уже в reference-SMD разобранной
-                # модели (_apply_model_replacement) — под именами модели.
+                # модели (_apply_model_replacement) - под именами модели
                 _ref_smd = VpkModelPipeline._find_decompiled_reference_smd(
                     qc_path, weapon_key, ctx.decompile_dir)
                 part_specs = (_pm.specs_for_custom_model(
@@ -848,9 +836,9 @@ class VPKService:
         tf2_textures_vpk, part_variants: dict, part_specs, extra_texture_callback,
     ) -> Tuple[object, Optional[str]]:
         """
-        Стадия 6: все текстуры и VMT мода (идёт параллельно с компиляцией).
+        Стадия 6: все текстуры и VMT мода (идёт параллельно с компиляцией)
 
-        Returns: (image_path главной после рендера, vmt_to_delete).
+        Returns: (image_path главной после рендера, vmt_to_delete)
         """
         texture_filename = plan.texture_filename
         flags = r.flags or []
@@ -859,9 +847,9 @@ class VPKService:
         strip_paints = (r.mode == "hat" and not r.hat_apply_game_paints)
 
         # Эффективные настройки на материал: пер-текстурный оверрайд
-        # поверх глобальных (size/format/flags/options); без оверрайда —
+        # поверх глобальных (size/format/flags/options), без оверрайда -
         # глобальные. Замыкание нужно и для главной текстуры, и для
-        # panel-extra текстур дальше по коду.
+        # panel-extra текстур дальше по коду
         from src.data.texture_overrides import effective_settings as _eff_settings
         from src.data.texture_overrides import own_settings as _own_settings
         _global_tex = {'size': r.size, 'format': r.format_type,
@@ -870,15 +858,14 @@ class VPKService:
 
         def _eff(_mat):
             # Имя карточки и материала модели расходятся (Material.001,
-            # пустой ключ главного у одноматериальной модели) — раньше
-            # такие настройки до сборки молча не доходили.
+            # пустой ключ главного у одноматериальной модели)
             own = _own_settings(material_settings, _mat, texture_filename)
             e = _eff_settings(_global_tex, own)
             return e['size'], e['format'], e['flags'], e['options']
 
         # Два контекста на всю запись материалов: куда писать и где искать
-        # оригиналы (slots) + как рендерить VTF (tex_ctx). Раньше эта
-        # дюжина значений передавалась по одному в каждую функцию.
+        # оригиналы (slots) + как рендерить VTF (tex_ctx), а не дюжина
+        # значений по одному в каждую функцию
         slots = MaterialSlots(
             vtf_output_path=out.vtf_output_path,
             vmt_path=out.vmt_path,
@@ -897,10 +884,14 @@ class VPKService:
             stock_normal_ok=not (src.replace_model_smd_path or r.model_ready_path),
             main_from_game=r.main_from_game,
             settings_for=_eff,
+            # Главная, доп. материалы и синие жмутся одновременно, до finish().
+            # ponytail: при ошибке посреди стадии фоновые VTFCmd дорабатывают
+            # без ожидания, как и компиляция модели
+            jobs=VtfJobs(),
         )
 
-        # Главная текстура: RED-резолв → VTF (custom/готовый/рендер) →
-        # оригинальный VMT с перенаправлением $basetexture.
+        # Главная текстура: RED-резолв -> VTF (custom/готовый/рендер) ->
+        # оригинальный VMT с перенаправлением $basetexture
         image_path, animated_fps, is_normal_map, vmt_to_delete = (
             VpkTextureBuilder._build_main_material(
                 plan.image_path, texture_filename, out.vtf_filename, out.vtf_temp_png,
@@ -911,21 +902,21 @@ class VPKService:
         )
 
         # Пер-текстурные файловые карты (detail/selfillum/phong) применяются
-        # ПОЗЖЕ — после создания VMT доп. материалов и BLU (см. ниже),
-        # чтобы карты ложились в VMT именно своего материала.
+        # ПОЗЖЕ - после создания VMT доп. материалов и BLU (см. ниже),
+        # чтобы карты ложились в VMT именно своего материала
 
-        # ── BLU Team Texture (командная раскраска) ───────────────────────────
+        # BLU Team Texture (командная раскраска)
         # Для оружия с одной общей текстурой (часы шпиона) BLU не создаём,
-        # даже если в BLU-слот случайно попала картинка — иначе появится
-        # лишний {texture}_blue.vtf/vmt.
+        # даже если в BLU-слот случайно попала картинка - иначе появится
+        # лишний {texture}_blue.vtf/vmt
         VpkTextureBuilder._maybe_build_blu_team_texture(
             weapon_key, plan.blu_row, plan.blu_is_team, plan.blu_mode, r.blu_image_path,
             out.vtf_filename, texture_filename, slots,
-            tex_ctx.for_material(texture_filename),   # синий главной — её карточка
+            tex_ctx.for_material(texture_filename),   # синий главной - её карточка
             red_row=plan.tg_structure.get('red_row') or [],
         )
 
-        # === Создаем текстуры для дополнительных материалов модели (shell, scope и т.д.) ===
+        # Создаем текстуры для дополнительных материалов модели (shell, scope и т.д.)
         # Это столбцы 1+ из RED строки $texturegroup
         # Словарь для хранения путей к VTF дополнительных материалов (нужно для BLU копий)
         _variant_copies: list = []
@@ -936,65 +927,67 @@ class VPKService:
             strip_paints=strip_paints,
         )
 
-        # === Блэклист/служебные материалы: запись ОРИГИНАЛЬНОГО VMT ===
+        # Блэклист/служебные материалы: запись ОРИГИНАЛЬНОГО VMT
         # Глаза/убер/зомби и т.п. не редактируются (нет карточек), но из-за
-        # console\-cdmaterials модель ищет их VMT по новому пути — без него
+        # console\-cdmaterials модель ищет их VMT по новому пути - без него
         # материал фиолетовый. Копируем оригинальный VMT материала в
-        # console\-путь: его текстурные ссылки АБСОЛЮТНЫЕ (eyeball→shared,
-        # invun/zombie→models/player/...), поэтому отдельный VTF не нужен —
+        # console\-путь: его текстурные ссылки АБСОЛЮТНЫЕ (eyeball->shared,
+        # invun/zombie->models/player/...), поэтому отдельный VTF не нужен -
         # игровые текстуры находятся по абсолютным путям. На случай
-        # относительного $basetexture дополнительно кладём VTF, если он есть.
+        # относительного $basetexture дополнительно кладём VTF, если он есть
         VpkTextureBuilder._write_blacklisted_materials(
             plan.blacklisted_extra, panel_extra_textures, ctx, slots)
 
-        # === Изолированные плечи вьюмодели ===
+        # Изолированные плечи вьюмодели
         # Пишем переименованный материал плеч (vm_<orig>) под главным
-        # console-путём. Источник: пользовательская текстура (ключ —
-        # ОРИГИНАЛЬНОЕ имя материала) либо оригинал тела из игры.
+        # console-путём. Источник: пользовательская текстура (ключ -
+        # ОРИГИНАЛЬНОЕ имя материала) либо оригинал тела из игры
         VpkTextureBuilder._write_shoulder_iso_materials(
             plan.shoulder_iso, ctx, slots, tex_ctx)
 
-        # === Создаем текстуры для BLU команды ===
+        # Создаем текстуры для BLU команды
         # BLU - это отдельная строка (row 1) в $texturegroup
         # Для каждого материала в BLU строке спрашиваем отдельное изображение,
-        # если пользователь отказывается — копируем соответствующую RED текстуру
+        # если пользователь отказывается - копируем соответствующую RED текстуру
         VpkTextureBuilder._build_blu_row_textures(
             plan.blu_row, plan.tg_structure, texture_filename, out.vtf_filename, ctx,
             slots, tex_ctx, extra_texture_callback, weapon_key,
             animated_fps, is_normal_map, extra_materials_vtf_paths,
         )
-        # Синие убер/зомби с «Скопировать главную»: их пара появилась только сейчас.
+        tex_ctx.jobs.finish()
+        tex_ctx.jobs = None   # дальше шаги читают VTF сразу после записи
+        # Синие убер/зомби с «Скопировать главную»: их пара появилась только сейчас
         VpkTextureBuilder._finish_variant_copies(
             _variant_copies, ctx, slots, strip_paints=strip_paints)
 
         # Зеркальные VMT по оригинальному пути (руки / spy-watch и т.п.).
         # Для all-class %s-шапок зеркало НЕ создаём (его заменила пер-классовая
-        # сборка; иначе затёрлась бы текстура у невыбранных классов).
+        # сборка, иначе затёрлась бы текстура у невыбранных классов)
         VPKService._write_hand_mirror_vmts(
             ctx, r.mode, weapon_key, src.original_cdmaterials_path, out.vtf_output_path)
 
         if r.debug_mode:
             DebugService.save_patched_stage(ctx, ctx.decompile_dir)
 
-        # ── Текстуры из 2D панели (c_arrow, sniper_lens и т.п.) ──────── #
-        # Материалы из SMD модели которые НЕ в QC skinfamilies →
-        # extra_texture_callback их не покрывает → добавляем здесь.
-        # Фиксированные доп. текстуры (vgui-вставки и т.п.) — пишем по
-        # их зашитому пути, не по cdmaterials. Возвращает обработанные имена.
+        # Текстуры из 2D панели (c_arrow, sniper_lens и т.п.)
+        # Материалы из SMD модели которые НЕ в QC skinfamilies ->
+        # extra_texture_callback их не покрывает -> добавляем здесь.
+        # Фиксированные доп. текстуры (vgui-вставки и т.п.) - пишем по
+        # их зашитому пути, не по cdmaterials. Возвращает обработанные имена
         VpkTextureBuilder._build_secondary_textures(
             weapon_key, panel_extra_textures, ctx, slots, tex_ctx,
             r.material_maps or {}, texture_filename, image_path, is_normal_map,
             plan.has_skins, plan.skin_build_data, _eff,
             part_variants=part_variants, part_specs=part_specs,
             # Синий у исходного материала части: в его строках у части
-            # своя синяя картинка.
+            # своя синяя картинка
             blu_of=(dict(zip(plan.tg_structure.get('red_row') or [],
                              plan.tg_structure.get('blu_row') or []))
                     if plan.blu_is_team else None),
             strip_paints=strip_paints,
         )
         # Служебные материалы, которые в игре делят текстуру с собранным
-        # (руки хэви — с телом), смотрят на текстуру мода.
+        # (руки хэви - с телом), смотрят на текстуру мода
         VpkTextureBuilder._follow_shared_textures(ctx, slots)
         return image_path, vmt_to_delete
 
@@ -1006,16 +999,16 @@ class VPKService:
         bypass_prefix: str, emit_sub,
     ) -> None:
         """Стадия 7: скомпилированная модель в vpkroot + доп. модели в тот же
-        мод (остальные классы и стили шапки, гирлянды)."""
+        мод (остальные классы и стили шапки, гирлянды)"""
         flags = r.flags or []
         vtf_options = r.vtf_options or {}
 
         # Копируем скомпилированные файлы в vpkroot (VMT файл уже скопирован ранее)
         # Используем путь из $modelname в QC файле (чтобы структура папок была правильной).
-        # Для material-only оружия (Dead Ringer) модель в мод НЕ кладём —
+        # Для material-only оружия (Dead Ringer) модель в мод НЕ кладём -
         # его показывает родная игровая модель (viewmodel), а скин и карты
         # находятся через зеркальный VMT по оригинальному пути, который
-        # ссылается на console-VTF. Папку console при этом ОСТАВЛЯЕМ.
+        # ссылается на console-VTF. Папку console при этом ОСТАВЛЯЕМ
         from src.data.weapon_quirks import MATERIAL_ONLY_WEAPON_KEYS as _MAT_ONLY
         if weapon_key in _MAT_ONLY:
             logger.info(f"[{weapon_key}] Material-only: модель в мод не включается (console сохраняется)")
@@ -1025,14 +1018,14 @@ class VPKService:
         # Мультиклассовая шапка: собираем модель для ОСТАЛЬНЫХ выбранных
         # классов (основная сборка делает только один). Нужно и БЕЗ замены
         # геометрии: у каждой классовой модели свой файл, и путь к
-        # материалам на папку обхода переписывается при компиляции —
+        # материалам на папку обхода переписывается при компиляции -
         # непересобранный класс грузит оригинальную текстуру игры.
         # Источник: явный список выбранных классов (model_player_per_class)
-        # либо legacy %s-шаблон в hat_mdl_path.
+        # либо legacy %s-шаблон в hat_mdl_path
         if r.mode == "hat":
             _extra_targets = None
             if r.hat_class_models and len(r.hat_class_models) > 1:
-                # Все выбранные классы, КРОМЕ primary (он уже собран).
+                # Все выбранные классы, КРОМЕ primary (он уже собран)
                 _extra_targets = [
                     m for m in r.hat_class_models.values() if m != r.hat_mdl_path
                 ]
@@ -1041,25 +1034,25 @@ class VPKService:
                 VpkModelPipeline._build_extra_class_hat_models(
                     ctx, r.hat_mdl_path, src.found_mdl_path, src.replace_model_smd_path,
                     r.replace_keep_materials, tools.tf2_misc_vpk, tools.studiomdl_exe,
-                    tools.crowbar_exe, tools.tf_dir, r.language, emit_sub,
+                    tools.tf_dir, r.language, emit_sub,
                     target_mdl_paths=_extra_targets,
                     bypass_prefix=bypass_prefix,
                     # Части выбирали на модели этого класса: остальным их
                     # переносят по участкам текстуры.
                     # Родная цель частей (`existing`) столбца не даёт, но
-                    # треугольники переименовала — классы узнают о ней тоже
-                    # (specs_for_other_model её не переносит и скажет).
+                    # треугольники переименовала - классы узнают о ней тоже
+                    # (specs_for_other_model её не переносит и скажет)
                     part_specs=part_specs if (part_variants or any(
                         s.get('existing') for s in part_specs or ())) else None,
                     part_source_qc=qc_path,
                     part_names=part_variants,
                 )
 
-        # Этап 3: доп. ИЗМЕНЁННЫЕ стили-модели шапки — каждый своей
+        # Этап 3: доп. ИЗМЕНЁННЫЕ стили-модели шапки - каждый своей
         # моделью и своей текстурой в тот же мод (активный стиль уже
-        # собран основным пайплайном выше).
+        # собран основным пайплайном выше)
         if r.mode == "hat" and r.hat_style_builds:
-            # Текстура активного стиля уже записана основным пайплайном —
+            # Текстура активного стиля уже записана основным пайплайном -
             # передаём её, чтобы поймать стили, делящие один материал
             _written = {
                 f"{out.patched_cdmaterials_path}/{plan.texture_filename}".lower():
@@ -1067,13 +1060,13 @@ class VPKService:
             }
             VpkModelPipeline._build_extra_style_models(
                 ctx, r.hat_style_builds, tools.tf2_misc_vpk, tools.studiomdl_exe,
-                tools.crowbar_exe, tools.tf_dir, r.language, emit_sub,
+                tools.tf_dir, r.language, emit_sub,
                 r.size, r.format_type, flags, vtf_options, out.vmt_path,
                 bypass_prefix=bypass_prefix,
                 written_textures=_written,
             )
 
-        # Гирлянды поверх оружия — своими моделями в тот же мод.
+        # Гирлянды поверх оружия - своими моделями в тот же мод
         if r.decor_builds:
             from src.services.decor_build import build_decor_models
             build_decor_models(
@@ -1090,13 +1083,13 @@ class VPKService:
         """
         Подстраховка: удаляем любые {texture}_blue.*, если их успел
         создать другой путь, а настоящей команды у предмета нет
-        (одиночная текстура ИЛИ вариант-онли без c_xxx_blue в группе).
+        (одиночная текстура ИЛИ вариант-онли без c_xxx_blue в группе)
         """
         from src.data.weapon_quirks import NO_BLU_WEAPON_KEYS
         if not (weapon_key in NO_BLU_WEAPON_KEYS or not blu_is_team):
             return
         # С зеркальными копиями VMT (руки, часы): иначе копия по
-        # оригинальному пути осталась бы ссылкой на удалённый VTF.
+        # оригинальному пути осталась бы ссылкой на удалённый VTF
         _dirs = [vtf_output_path]
         if original_cdmaterials_path:
             _mirror = VPKService._mirror_dir(ctx, original_cdmaterials_path)
@@ -1111,16 +1104,16 @@ class VPKService:
 
     @staticmethod
     def _is_decor_only(r: BuildRequest) -> bool:
-        """В сборке только гирлянды: ни своей текстуры оружия, ни модели.
+        """В сборке только гирлянды: ни своей текстуры оружия, ни модели
 
         Любая правка самого оружия (карты, стили, «сделать командным»)
         ведёт в обычную сборку: там она либо соберётся, либо о ней скажут,
-        а молча выпасть из мода ради гирлянды она не должна.
+        а молча выпасть из мода ради гирлянды она не должна
         """
         from src.domain.preview.texture_state import is_decor
         from src.services.decor_bake import bake_entry
         weapon_maps = [m for m in (r.material_maps or {}) if not is_decor(m)]
-        # Вшитая гирлянда - часть модели оружия: оно в мод идёт обязательно.
+        # Вшитая гирлянда - часть модели оружия: оно в мод идёт обязательно
         return bool(r.decor_builds) and not bake_entry(r.decor_builds) and not (
             r.image_path or r.custom_vtf_path or r.panel_extra_textures
             or r.panel_blu_textures or r.replace_model_enabled
@@ -1131,7 +1124,7 @@ class VPKService:
     @staticmethod
     def _build_decor_only_vpk(ctx, r: BuildRequest, weapon_key: str, t: dict,
                               emit_progress, emit_sub) -> Tuple[bool, str]:
-        """Мод из одних гирлянд: модель оружия остаётся игровой."""
+        """Мод из одних гирлянд: модель оружия остаётся игровой"""
         from src.services.decor_build import build_decor_models
         from src.shared.constants import bypass_prefix as _resolve_bypass_prefix
 
@@ -1140,7 +1133,7 @@ class VPKService:
             r.keep_temp_on_error, r.debug_mode)
         if err is not None:
             return err
-        studiomdl_exe, tf2_misc_vpk, tf_dir, _crowbar, _paths = tools
+        studiomdl_exe, tf2_misc_vpk, tf_dir, _paths = tools
         emit_progress(40, t.get('build_compiling', 'Compiling model...'))
         built = build_decor_models(
             ctx, r.decor_builds, misc_vpk=tf2_misc_vpk,
@@ -1153,21 +1146,21 @@ class VPKService:
         if not built:
             ctx.cleanup(on_error=True, keep_on_error=r.keep_temp_on_error,
                         debug_mode=r.debug_mode)
-            return False, ("Lights could not be built — see the log"
+            return False, ("Lights could not be built - see the log"
                            if r.language == 'en' else
-                           "Гирлянду собрать не удалось — подробности в журнале")
+                           "Гирлянду собрать не удалось - подробности в журнале")
         return True, ''
 
     @staticmethod
     def _strip_game_tint(vpkroot) -> None:
         """
-        Снимает покраску игры с материалов мода, чья текстура — своя.
+        Снимает покраску игры с материалов мода, чья текстура - своя
 
         Одним проходом по готовому vpkroot, а не в каждом месте записи VMT:
         главный, BLU, доп. и «вторичные» материалы пишутся разными путями, и
         пропустить хоть один значило бы оставить, например, BLU красным.
-        Своя текстура — та, чей VTF лежит в моде: служебные материалы пишутся
-        оригиналом и ссылаются на игровой путь, их покраску не трогаем.
+        Своя текстура - та, чей VTF лежит в моде: служебные материалы пишутся
+        оригиналом и ссылаются на игровой путь, их покраску не трогаем
         """
         from src.services import vmt_parse, vmt_tint
         from src.services.vmt_service import VMTService
@@ -1190,7 +1183,7 @@ class VPKService:
     def build_vpk(
         request: Optional[BuildRequest] = None,
         *,
-        model_file_callback=None,  # Колбэк для запроса файла из UI потока (потому что Qt не любит мультипоточность)
+        model_file_callback=None,  # Колбэк для запроса файла у страницы
         extra_texture_callback=None,  # Колбэк для запроса одной доп. текстуры: callback(material_name, weapon_key) -> Optional[str]
         extra_model_callback=None,  # Колбэк для запроса доп. модели: callback(smd_name, weapon_key) -> Optional[str]
         texture_mismatch_callback=None,  # Колбэк для предупреждения о несовпадении текстур: callback(msg) -> bool
@@ -1201,20 +1194,20 @@ class VPKService:
     ) -> Tuple[bool, str]:
         """
         Главная функция: делает из картинки VPK файл.
-        Возвращает (success, message); при ошибке message содержит описание.
-        Здесь весь конвейер: модель → текстуры → компиляция → упаковка.
+        Возвращает (success, message), при ошибке message содержит описание.
+        Здесь весь конвейер: модель -> текстуры -> компиляция -> упаковка
 
         Параметры сборки берутся из ``request`` (BuildRequest). Для обратной
-        совместимости (и тестов) допускается старый вызов через kwargs —
-        тогда BuildRequest собирается из них. Колбэки — это runtime-функции
-        UI-потока, они всегда передаются отдельно.
+        совместимости (и тестов) допускается старый вызов через kwargs -
+        тогда BuildRequest собирается из них. Колбэки - это runtime-функции
+        UI-потока, они всегда передаются отдельно
         """
         if request is None:
             request = BuildRequest(**legacy_kwargs)
 
         # Распаковываем только то, что нужно оркестратору (валидация, спец-режимы,
-        # упаковка). Модельный конвейер распаковывает запрос сам —
-        # см. _build_model_mode_vpk.
+        # упаковка). Модельный конвейер распаковывает запрос сам -
+        # см. _build_model_mode_vpk
         r = request
         image_path = r.image_path
         mode = r.mode
@@ -1246,13 +1239,13 @@ class VPKService:
             return bool(cancel_callback and cancel_callback())
 
         def cancelled_result(ctx) -> Tuple[bool, str]:
-            """Очистка ctx и стандартный ответ при отмене пользователем."""
+            """Очистка ctx и стандартный ответ при отмене пользователем"""
             if ctx is not None:
                 ctx.cleanup(on_error=False, keep_on_error=False, debug_mode=debug_mode)
             logger.info("Сборка отменена пользователем")
             return False, t.get('build_cancelled', 'Build cancelled by user')
 
-        # Правлена одна гирлянда: оружие в мод не идёт, собирать его незачем.
+        # Правлена одна гирлянда: оружие в мод не идёт, собирать его незачем
         decor_only = VPKService._is_decor_only(r)
 
         ctx = None
@@ -1265,8 +1258,8 @@ class VPKService:
             if validation_error:
                 return False, validation_error
 
-            # weapon_key — ключ модели/файлов: для рук это arm-модель, для тела/
-            # масок шпиона — стем MDL, для шапки — стем hat_mdl_path, иначе суффикс mode.
+            # weapon_key - ключ модели/файлов: для рук это arm-модель, для тела/
+            # масок шпиона - стем MDL, для шапки - стем hat_mdl_path, иначе суффикс mode
             weapon_key, _wk_error = VPKService._resolve_weapon_key(mode, hat_mdl_path)
             if _wk_error:
                 return False, _wk_error
@@ -1276,11 +1269,11 @@ class VPKService:
             
             ctx = BuildContext.create(mode, weapon_key, debug_mode=debug_mode)
             
-            # ── Маски маскировки шпиона ──────────────────────────────────────── #
+            # Маски маскировки шпиона
             # Не нужен MDL, QC-патчинг или компиляция.
             # Просто кладём mask_*.vtf/vmt по оригинальному пути игры:
             #   materials/models/player/spy/mask_*.vtf
-            # Это прямой override, как у SPECIAL_MODES.
+            # Это прямой override, как у SPECIAL_MODES
             if mode == SPY_MASK_MODE_KEY:
                 from src.services.spy_mask_build import build_spy_masks_vpk
                 result = build_spy_masks_vpk(
@@ -1347,8 +1340,8 @@ class VPKService:
                 return cancelled_result(ctx)
             emit_progress(80, t.get('build_packing', 'Creating VPK file...'))
             emit_sub(-1, "Packing VPK..." if language == "en" else "Упаковка VPK...")
-            # Содержимое vpkroot: краткая сводка всегда, полный список — только в
-            # debug-режиме (сотни строк на сборку засоряли tf2sg.log).
+            # Содержимое vpkroot: краткая сводка всегда, полный список - только в
+            # debug-режиме (сотни строк на сборку засоряли tf2sg.log)
             if ctx.vpkroot_dir.exists():
                 vpkroot_files = []
                 for _root, _dirs, _files in os.walk(ctx.vpkroot_dir):

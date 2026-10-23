@@ -52,12 +52,12 @@ export function createTimeline(pattern, { onSelect, onChanged, onSeek }) {
       bar.append(lh, rh);
       track.append(bar);
       row.append(track);
-      // Тянуть: середина - сдвиг, края - начало и конец.
+      // Тянуть: середина - сдвиг, края - начало и конец
       const drag = (mode) => (e) => {
         e.preventDefault();
         e.stopPropagation();
         // Выбор - без перерисовки: она отцепила бы полосу, которую тянут
-        // (ширина 0, слой улетал к краю). Список обновится в конце жеста.
+        // (ширина 0, слой улетал к краю). Список обновится в конце жеста
         pattern.selected = i;
         const box = track.getBoundingClientRect();
         if (!box.width) return;
@@ -92,7 +92,7 @@ export function createTimeline(pattern, { onSelect, onChanged, onSeek }) {
     lanes.replaceChildren(...rows, playhead);
   }
 
-  // Перемотка: щелчок или протяжка по шкале ставит время и паузу.
+  // Перемотка: щелчок или протяжка по шкале ставит время и паузу
   ruler.addEventListener('pointerdown', (e) => {
     const track = ruler.querySelector('.sheenb__rulertrack');
     if (!track) return;
@@ -111,7 +111,7 @@ export function createTimeline(pattern, { onSelect, onChanged, onSeek }) {
     window.addEventListener('pointerup', up);
   });
 
-  /** Бегунок прохода: `pos` 0..1, меньше нуля - спрятать. */
+  /** Бегунок прохода: `pos` 0..1, меньше нуля - спрятать */
   function showPlayhead(pos) {
     playhead.hidden = pos < 0;
     if (pos >= 0) playhead.style.left = `calc(var(--tl-name) + (100% - var(--tl-name)) * ${pos})`;

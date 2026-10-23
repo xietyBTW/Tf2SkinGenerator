@@ -1,6 +1,6 @@
 """
 Доп. текстуры и файлы по фиксированному игровому пути (HUD Звона
-смерти: циферблат, .res-скрипты) - вне QC и модели.
+смерти: циферблат, .res-скрипты) - вне QC и модели
 """
 
 import hashlib
@@ -29,14 +29,14 @@ def build_fixed_extra_textures(
 ) -> set:
     """
     Записывает доп. текстуры предмета, заданные ФИКСИРОВАННЫМ путём
-    (вне QC/модели) — см. WEAPON_EXTRA_TEXTURES. Пример: HUD-вставки Dead Ringer.
+    (вне QC/модели) - см. WEAPON_EXTRA_TEXTURES. Пример: HUD-вставки Dead Ringer
 
     VTF и VMT кладутся по РЕАЛЬНОМУ игровому пути (без console-схемы): так VMT
     лежит в той же папке, что и VTF, и нет дублей vgui. Игровой VMT берётся
-    по тому же пути (туда смотрит HUD), $basetexture - на наш VTF.
+    по тому же пути (туда смотрит HUD), $basetexture - на наш VTF
 
-    Возвращает множество обработанных имён — чтобы общий цикл panel_extra_textures
-    не записал их повторно по cdmaterials-пути.
+    Возвращает множество обработанных имён - чтобы общий цикл panel_extra_textures
+    не записал их повторно по cdmaterials-пути
     """
     handled: set = set()
     if not panel_extra_textures:
@@ -45,9 +45,9 @@ def build_fixed_extra_textures(
 
     # Кэш уже сконвертированных VTF по хэшу содержимого исходной картинки.
     # Если в fg и bg (или любые два слота) загружена ОДНА И ТА ЖЕ картинка
-    # (по содержимому, даже из разных файлов) — конвертируем один раз,
-    # для остальных просто копируем готовый VTF. Конвертация GIF→VTF дорогая
-    # (извлечение кадров), так что это заметно ускоряет сборку.
+    # (по содержимому, даже из разных файлов) - конвертируем один раз,
+    # для остальных просто копируем готовый VTF. Конвертация GIF->VTF дорогая
+    # (извлечение кадров), так что это заметно ускоряет сборку
     vtf_cache: dict = {}   # {img_hash: (built_vtf_path, fps)}
 
     for ex in WEAPON_EXTRA_TEXTURES.get(weapon_key, []):
@@ -69,11 +69,11 @@ def build_fixed_extra_textures(
             fps = _render_fixed_vtf(img, target_dir, stem, size, format_type,
                                     vtf_flags, merged, vtf_cache)
 
-            # 2) VMT рядом с VTF ($basetexture → реальный путь)
+            # 2) VMT рядом с VTF ($basetexture -> реальный путь)
             _write_fixed_extra_vmt(ex, base_path, ctx, misc_vpk, textures_vpk)
 
             # Игровой VMT fg/bg уже содержит AnimatedTexture-прокси, но если
-            # его не нашли (минимальный шаблон) — добавляем прокси для анимации.
+            # его не нашли (минимальный шаблон) - добавляем прокси для анимации
             if fps:
                 vmt_target = _under_root(ctx.vpkroot_dir, ex["vmt"].replace("\\", "/"))
                 if vmt_target.exists():
@@ -82,12 +82,12 @@ def build_fixed_extra_textures(
             handled.add(name)
             logger.info(f"Фикс. доп. текстура: {vtf_rel}; vmt={ex.get('vmt')}")
         except Exception as exc:
-            logger.warning(f"Фикс. доп. текстура '{name}' — ошибка: {exc}", exc_info=True)
+            logger.warning(f"Фикс. доп. текстура '{name}' - ошибка: {exc}", exc_info=True)
     return handled
 
 
 def _under_root(root, rel: str):
-    """Путь rel ('a/b/c') внутри root; пустые части пропускаются."""
+    """Путь rel ('a/b/c') внутри root; пустые части пропускаются"""
     target = root
     for part in rel.split("/"):
         if part:
@@ -97,17 +97,17 @@ def _under_root(root, rel: str):
 
 def _render_fixed_vtf(img, target_dir, stem, size, format_type, vtf_flags, merged,
                       vtf_cache: dict) -> Optional[float]:
-    """{stem}.vtf из картинки (или готового VTF). Возвращает fps анимации."""
+    """{stem}.vtf из картинки (или готового VTF). Возвращает fps анимации"""
     dest_vtf = target_dir / f"{stem}.vtf"
     img_hash = _file_content_hash(img)
     cached = vtf_cache.get(img_hash) if img_hash else None
     if str(img).lower().endswith('.vtf'):
-        # Пользователь загрузил готовый VTF — копируем как есть
+        # Пользователь загрузил готовый VTF - копируем как есть
         copy_file_safe(img, dest_vtf)
         logger.info(f"Фикс. доп. текстура: готовый VTF скопирован → {stem}.vtf")
         return None
     if cached:
-        # Та же картинка уже сконвертирована — переиспользуем готовый VTF
+        # Та же картинка уже сконвертирована - переиспользуем готовый VTF
         src_vtf, fps = cached
         copy_file_safe(src_vtf, dest_vtf)
         logger.info(
@@ -116,8 +116,8 @@ def _render_fixed_vtf(img, target_dir, stem, size, format_type, vtf_flags, merge
         )
         return fps
     if TextureService.is_animated_image(img):
-        # Анимированный GIF → многокадровый VTF (циферблат Dead Ringer
-        # анимируется через AnimatedTexture-прокси в его игровом VMT).
+        # Анимированный GIF -> многокадровый VTF (циферблат Dead Ringer
+        # анимируется через AnimatedTexture-прокси в его игровом VMT)
         fps = TextureService.create_animated_vtf(
             img, str(dest_vtf), size, format_type, vtf_flags, merged
         )
@@ -138,10 +138,10 @@ def _write_fixed_extra_vmt(ex: dict, base_texture_path: str, ctx,
                            misc_vpk: Optional[str], textures_vpk: Optional[str]) -> None:
     """
     Кладёт VMT фиксированной доп. текстуры В ТУ ЖЕ папку, что и её VTF
-    (реальный игровой путь, без console-схемы).
+    (реальный игровой путь, без console-схемы)
 
-    Берёт игровой VMT (если найден в VPK) и патчит $basetexture →
-    base_texture_path; если игрового нет — создаёт минимальный UnlitGeneric.
+    Берёт игровой VMT (если найден в VPK) и патчит $basetexture ->
+    base_texture_path; если игрового нет - создаёт минимальный UnlitGeneric
     """
     vmt_rel = ex.get("vmt")
     if not vmt_rel:
@@ -187,11 +187,11 @@ def _write_fixed_extra_vmt(ex: dict, base_texture_path: str, ctx,
 def write_fixed_extra_files(weapon_key: str, ctx) -> None:
     """
     Пишет доп. статические файлы мода (HUD-скрипты .res, метаданные info.vdf
-    и т.п.) по их зашитому пути в корень VPK — см. WEAPON_EXTRA_FILES.
+    и т.п.) по их зашитому пути в корень VPK - см. WEAPON_EXTRA_FILES
 
     Содержимое фиксированное (из конфига). Пишется независимо от того,
     загрузил ли пользователь HUD-текстуры: эти файлы активируют мод
-    (напр. кастомный циферблат Dead Ringer).
+    (напр. кастомный циферблат Dead Ringer)
     """
     from src.data.weapon_quirks import WEAPON_EXTRA_FILES
     files = WEAPON_EXTRA_FILES.get(weapon_key, [])
@@ -217,7 +217,7 @@ def _file_content_hash(path: str) -> Optional[str]:
     """
     Быстрый хэш содержимого файла (для дедупликации одинаковых картинок).
     Возвращает hex-строку MD5 или None при ошибке чтения.
-    Сравнение по содержимому ловит идентичные картинки даже из разных файлов.
+    Сравнение по содержимому ловит идентичные картинки даже из разных файлов
     """
     try:
         with open(path, "rb") as f:

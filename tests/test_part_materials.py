@@ -1,4 +1,4 @@
-"""Часть модели как отдельный материал: SMD, $texturegroup и VMT."""
+"""Часть модели как отдельный материал: SMD, $texturegroup и VMT"""
 
 import os
 import tempfile
@@ -24,13 +24,13 @@ class NamesTests(unittest.TestCase):
     def test_next_name_skips_taken(self):
         self.assertEqual(pm.next_name("C_Gun", []), "c_gun_part1")
         self.assertEqual(pm.next_name("c_gun", ["C_GUN_PART1"]), "c_gun_part2")
-        # Под именем лежит правка VMT прежнего материала — новому она чужая.
+        # Под именем лежит правка VMT прежнего материала - новому она чужая
         self.assertEqual(pm.next_name("c_gun", [], lambda n: n == "c_gun_part1"),
                          "c_gun_part2")
 
     def test_names_of_a_custom_model_lose_dots(self):
         # studiomdl обрезает имя на первой точке: `material.001_part1` стал бы
-        # `material` — имя части строится так же, как его чистит подмена.
+        # `material` - имя части строится так же, как его чистит подмена
         self.assertEqual(pm.model_name("Material.001"), "material_001")
         self.assertEqual(pm.next_name("Material.001", []), "material_001_part1")
         self.assertEqual(pm.next_name("Material.001", ["material_001_part1"]),
@@ -41,7 +41,7 @@ class NamesTests(unittest.TestCase):
         self.assertEqual(pm.variant_name("hat_red_part1", "hat_red", "hat_blue", 1),
                          "hat_red_part1_blue")
         self.assertEqual(pm.variant_name("c_x_part1", "c_x", "c_x_gold", 8), "c_x_part1_gold")
-        # Вариант — префикс исходного: хвоста нет, имя по номеру строки.
+        # Вариант - префикс исходного: хвоста нет, имя по номеру строки
         self.assertEqual(pm.variant_name("c_xy_part1", "c_xy", "c_x", 2), "c_xy_part1_s2")
 
 
@@ -59,14 +59,14 @@ class RenameTests(unittest.TestCase):
 
     def test_two_parts_of_one_material_in_one_pass(self):
         # Вторая часть считает номера по исходному материалу, как и превью:
-        # переименованная первой треугольник номера не теряет.
+        # переименованная первой треугольник номера не теряет
         text = smd(tri("gun"), tri("gun"), tri("gun"))
         out, count, renamed = pm.rename_triangles(text, "gun", {0: "gun_part1", 2: "gun_part2"})
         self.assertEqual(count, 3)
         self.assertEqual(names_in(out), ["gun_part1", "gun", "gun_part2", "end"])
 
     def test_broken_triangle_does_not_shift_numbers(self):
-        # Превью пропускает треугольник с битой вершиной — номер его не занимает.
+        # Превью пропускает треугольник с битой вершиной - номер его не занимает
         text = smd(tri("gun", bad=True), tri("gun", 0.5))
         out, count, renamed = pm.rename_triangles(text, "gun", {0: "gun_part1"})
         self.assertEqual((count, renamed["gun_part1"]), (1, 1))
@@ -155,9 +155,9 @@ class ApplyToModelTests(unittest.TestCase):
                 self.assertEqual(names_in(f.read()), ["c_x_part1", "c_x", "c_x_part2", "end"])
 
     def test_custom_model_specs_follow_the_built_names(self):
-        # Своя модель: треугольники уже в reference-SMD разобранной модели —
-        # с «сохранить материалы» под очищенными своими именами, без него —
-        # под материалом оригинала.
+        # Своя модель: треугольники уже в reference-SMD разобранной модели -
+        # с «сохранить материалы» под очищенными своими именами, без него -
+        # под материалом оригинала
         with tempfile.TemporaryDirectory() as d:
             ref = os.path.join(d, "c_x_reference.smd")
             with open(ref, "w") as f:
@@ -169,7 +169,7 @@ class ApplyToModelTests(unittest.TestCase):
                              ("material_001", ["c_x_reference.smd"]))
             mapped = pm.specs_for_custom_model([spec], ref, keep_materials=False)
             self.assertEqual(mapped[0]["base"], "c_x")
-            # И перенос по ним — ровно второй треугольник.
+            # И перенос по ним - ровно второй треугольник
             qc = os.path.join(d, "m.qc")
             with open(qc, "w") as f:
                 f.write('$modelname "x.mdl"\n')
@@ -179,7 +179,7 @@ class ApplyToModelTests(unittest.TestCase):
 
     def test_other_model_is_left_alone_and_reported(self):
         # Модель не та, на которой выбирали части: не хватает файла или
-        # треугольников другое число — по чужим номерам переносить нельзя.
+        # треугольников другое число - по чужим номерам переносить нельзя
         for files, total in (([("ref.smd", smd(tri("c_x"), tri("c_x")))], 3),
                              ([("ref.smd", smd(tri("c_x")))], 0)):
             with tempfile.TemporaryDirectory() as d:
@@ -223,7 +223,7 @@ class OverlayVmtTests(unittest.TestCase):
         self.assertEqual(pm.overlay_vmt(self.BLU, self.RED, self.RED), self.BLU)
 
     def test_chosen_basetexture_goes_to_every_skin(self):
-        # Белая основа под свечение — выбор человека, а не путь для подмены.
+        # Белая основа под свечение - выбор человека, а не путь для подмены
         edited = self.RED.replace("models/hat_red", "models/effects/white")
         self.assertTrue(pm.basetexture_changed(self.RED, edited))
         out = vmt_parse.parse(pm.overlay_vmt(self.BLU, self.RED, edited))
@@ -231,7 +231,7 @@ class OverlayVmtTests(unittest.TestCase):
         self.assertFalse(pm.basetexture_changed(self.RED, self.RED.replace("$phongboost", "$x")))
 
 
-#: Два несвязанных квадрата одного материала — две части; слева и справа на развёртке.
+#: Два несвязанных квадрата одного материала - две части, слева и справа на развёртке
 SQUARES = """# Sources: ref.smd
 v 0 0 0
 v 1 0 0
@@ -258,8 +258,8 @@ f 5/5 7/7 8/8
 
 
 class EditorTests(unittest.TestCase):
-    """Материал части — своя карточка: копия исходного при создании, дальше
-    порознь; мазки частей видны в склейке каждого материала."""
+    """Материал части - своя карточка: копия исходного при создании, дальше
+    порознь, мазки частей видны в склейке каждого материала"""
 
     def setUp(self):
         import threading
@@ -334,35 +334,35 @@ class EditorTests(unittest.TestCase):
         self.t.set_texture(self.single, red)
         name = self.editor.set_part_material('', [self.parts[0]], '')['created']
         self.assertEqual(self.t.resolve_card(name), red)
-        # Картинка на исходном после создания материала части не касается.
+        # Картинка на исходном после создания материала части не касается
         self.t.set_texture(self.single, self.png("blue", (0, 0, 255)))
         self.assertEqual(self.t.resolve_card(name), red)
 
     def test_strokes_land_only_on_their_own_material(self):
         # Мазок красит склейку того материала, чьи это треугольники: развёртки
         # материалов могут накрывать одно место текстуры (зеркальные половины,
-        # своя модель снаряда со своей развёрткой), и краска потекла бы.
+        # своя модель снаряда со своей развёрткой), и краска потекла бы
         name = self.editor.set_part_material('', [self.parts[0]], '')['created']
         self.editor.set_part_colors('', {self.parts[0]: '#00ff00', self.parts[1]: '#ff00ff'})
         main, mine = self.t.resolve_card(self.single), self.t.resolve_card(name)
         self.assertNotEqual(main, mine)
         self.assertTrue(self.has(mine, (0, 255, 0)) and not self.has(mine, (255, 0, 255)))
         self.assertTrue(self.has(main, (255, 0, 255)) and not self.has(main, (0, 255, 0)))
-        # Часть вернулась в общий — её мазок снова в склейке исходного.
+        # Часть вернулась в общий - её мазок снова в склейке исходного
         self.editor.set_part_material('', [self.parts[0]], '-')
         self.assertTrue(self.has(self.t.resolve_card(self.single), (0, 255, 0)))
         name = self.editor.set_part_material('', [self.parts[0]], '')['created']
-        # Своя картинка исходного ложится под мазки только у исходного.
+        # Своя картинка исходного ложится под мазки только у исходного
         self.editor.set_base(self.single, self.png("blue", (0, 0, 255)))
         self.assertTrue(self.has(self.t.resolve_card(self.single), (0, 0, 255)))
         self.assertFalse(self.has(self.t.resolve_card(name), (0, 0, 255)))
-        # Мазки сняли — материал части вернулся к своей основе, игровой.
+        # Мазки сняли - материал части вернулся к своей основе, игровой
         self.editor.clear_parts('')
         self.assertEqual(self.t.resolve_card(name), self.game)
 
     def test_carrier_gun_does_not_hide_the_festive_item(self):
         # Праздничное оружие: в OBJ гирлянда и пушка-носитель под ней. Карточка
-        # у гирлянды служебная, и разбор искал материал с именем «__single__».
+        # у гирлянды служебная, и разбор искал материал с именем «__single__»
         with open(self.host._obj_path, "w", encoding="utf-8") as f:
             f.write(SQUARES.replace("usemtl c_x\nf 1/1 2/2 3/3\nf 1/1 3/3 4/4\n",
                                     "usemtl c_gun\nf 1/1 2/2 3/3\nf 1/1 3/3 4/4\nusemtl lights\n"))
@@ -387,13 +387,13 @@ def uvtri(mat, *uvs):
     return mat + "\n" + "".join(f"  0 0 0 0 0 0 1 {u} {v} 1 0 1\n" for u, v in uvs)
 
 
-# Квадрат текстуры из двух половин: левая (u < 0.5) и правая.
+# Квадрат текстуры из двух половин: левая (u < 0.5) и правая
 LEFT = (((0, 0), (0.5, 0), (0, 1)), ((0.5, 0), (0.5, 1), (0, 1)))
 RIGHT = (((0.5, 0), (1, 0), (0.5, 1)), ((1, 0), (1, 1), (0.5, 1)))
 
 
 class OtherModelTests(unittest.TestCase):
-    """Части с модели одного класса шапки — на модель другого класса."""
+    """Части с модели одного класса шапки - на модель другого класса"""
 
     SPEC = {"name": "hat_part1", "base": "hat", "tris": [0, 1], "total": 4,
             "sources": ["a_ref.smd"]}
@@ -415,7 +415,7 @@ class OtherModelTests(unittest.TestCase):
     def test_parts_follow_the_texture_area_on_another_mesh(self):
         # На модели скаута левая половина текстуры уже стала частью. У солдата
         # текстура та же, а сетка своя: левая половина из трёх треугольников,
-        # и порядок другой.
+        # и порядок другой
         with tempfile.TemporaryDirectory() as d:
             src, qc = self.models(
                 d,
@@ -435,7 +435,7 @@ class OtherModelTests(unittest.TestCase):
 
     def test_overlapping_uv_cannot_tell_the_part(self):
         # Зеркальные половины на одном участке текстуры, и часть только одна
-        # из них: по текстуре не понять, какая.
+        # из них: по текстуре не понять, какая
         with tempfile.TemporaryDirectory() as d:
             src, qc = self.models(d, [uvtri("hat_part1", *LEFT[0]), uvtri("hat", *LEFT[0])],
                                   [uvtri("hat", *LEFT[0])])
@@ -444,8 +444,8 @@ class OtherModelTests(unittest.TestCase):
 
     def test_edge_between_part_and_rest_is_not_an_overlap(self):
         # Квадрат текстуры: на исходной модели разрезан по диагонали (0,0)-(1,1),
-        # и часть — треугольник под ней. У другой модели квадрат разрезан по
-        # другой диагонали: центры её треугольников лежат ровно на ребре части.
+        # и часть - треугольник под ней. У другой модели квадрат разрезан по
+        # другой диагонали: центры её треугольников лежат ровно на ребре части
         with tempfile.TemporaryDirectory() as d:
             src, qc = self.models(
                 d,
@@ -457,7 +457,7 @@ class OtherModelTests(unittest.TestCase):
 
     def test_degenerate_uv_is_not_guessed(self):
         # Развёртки нет (все UV в нуле): ближайшим оказался бы любой
-        # треугольник, и вся модель ушла бы в часть.
+        # треугольник, и вся модель ушла бы в часть
         zero = ((0, 0), (0, 0), (0, 0))
         with tempfile.TemporaryDirectory() as d:
             src, qc = self.models(d, [uvtri("hat_part1", *zero), uvtri("hat", *zero)],
@@ -475,7 +475,7 @@ class OtherModelTests(unittest.TestCase):
 
     def test_lod_meshes_are_not_part_of_the_model(self):
         # LOD сборка вырезает (patch_qc_file): их треугольники только сбивали
-        # бы перенос.
+        # бы перенос
         with tempfile.TemporaryDirectory() as d:
             src, qc = self.models(d, [uvtri("hat_part1", *LEFT[0]), uvtri("hat", *RIGHT[0])],
                                   [uvtri("hat", *LEFT[0]), uvtri("hat", *RIGHT[0])])
@@ -504,8 +504,8 @@ class SourcesTests(unittest.TestCase):
             self.assertEqual(pm.sources_of_obj(os.path.join(d, "none.obj")), [])
 
     def test_carrier_of_festive_weapon_is_not_a_source(self):
-        # Пушка-носитель праздничного оружия — чужая модель из своей папки: в
-        # сборку предмета она не входит, и номера его треугольников не сдвигает.
+        # Пушка-носитель праздничного оружия - чужая модель из своей папки: в
+        # сборку предмета она не входит, и номера его треугольников не сдвигает
         from src.services.smd_to_obj_service import SmdToObjService
         with tempfile.TemporaryDirectory() as d:
             item, carrier = os.path.join(d, "item"), os.path.join(d, "carrier")
@@ -529,7 +529,7 @@ if __name__ == "__main__":
 
 
 class DomainTests(unittest.TestCase):
-    """Карточка части в альбоме и её текстура (PreviewSession)."""
+    """Карточка части в альбоме и её текстура (PreviewSession)"""
 
     def setUp(self):
         from src.domain.preview.session import PreviewSession
@@ -563,7 +563,7 @@ class DomainTests(unittest.TestCase):
 
     def test_main_texture_does_not_reach_the_part(self):
         # Отдельный материал: картинка на исходной карточке его не касается,
-        # без своей он показывает игровую текстуру исходного.
+        # без своей он показывает игровую текстуру исходного
         game, main = self._game(), self.png("main.png")
         self.ps.textures.set_texture(self.single, main)
         shown = self.ps.visible_textures()
@@ -581,8 +581,8 @@ class DomainTests(unittest.TestCase):
         self.assertEqual((scene["c_x"], scene["c_x_part1"]), (main, game))
 
     def test_variant_shows_game_gold_on_the_part(self):
-        # Австралий: строка золота ведёт часть в игровой VMT золота — своя
-        # картинка части стоит только в строках её команды.
+        # Австралий: строка золота ведёт часть в игровой VMT золота - своя
+        # картинка части стоит только в строках её команды
         t = self.ps.textures
         self._game()
         t.set_texture("c_x_part1", self.png("own.png"))
@@ -595,12 +595,12 @@ class DomainTests(unittest.TestCase):
         from src.shared.constants import Team
         t = self.ps.textures
         own = self.png("own.png")
-        # Нейтральный исходный: картинка части — обеим командам.
+        # Нейтральный исходный: картинка части - обеим командам
         t.set_texture("c_x_part1", own)
         self.assertEqual({team: t.textures.get(team, {}).get("c_x_part1")
                           for team in (Team.RED, Team.BLU)},
                          {Team.RED: own, Team.BLU: own})
-        # Командный исходный (или «сделать командным»): у части команды порознь.
+        # Командный исходный (или «сделать командным»): у части команды порознь
         t.textures = {Team.RED: {}, Team.BLU: {}}
         t.force_team = True
         t.set_texture("c_x_part1", own)
@@ -612,7 +612,7 @@ class DomainTests(unittest.TestCase):
 
     def test_blue_image_of_a_part_is_not_the_weapon_blue(self):
         # Своей синей у главной нет: сборка спросит про неё, а не возьмёт
-        # синюю картинку части за синий скин всего оружия.
+        # синюю картинку части за синий скин всего оружия
         from src.shared.constants import Team
         t = self.ps.textures
         t.force_team = True
@@ -634,7 +634,7 @@ class DomainTests(unittest.TestCase):
         self.assertEqual((other.part_materials, other.textures.part_cards), ({}, {}))
 
     def test_new_geometry_drops_part_cards(self):
-        # Своя модель: материала части больше нет — его картинка в сборку не идёт.
+        # Своя модель: материала части больше нет - его картинка в сборку не идёт
         self.ps.textures.set_texture("c_x_part1", self.png("own.png"))
         self.ps.texture_maps["c_x_part1"] = {"normal": "n.png"}
         self.ps.forget_parts_layout()

@@ -1,12 +1,13 @@
 """
-Правило поиска иконки рюкзака: ключ каталога → путь внутри VPK.
+Правило поиска иконки рюкзака: ключ каталога -> путь внутри VPK
 
 Ключи в каталоге разные (путь из items_game, ключ оружия, путь к модели
 шапки), а иконка одна и та же. Ошибка здесь не падает, а тихо показывает
-чужую картинку, поэтому правило проверяется отдельно от VPK.
+чужую картинку, поэтому правило проверяется отдельно от VPK
 """
 
 import unittest
+import unittest.mock
 
 from src.services import backpack_icons
 
@@ -29,7 +30,7 @@ class IconLookupTests(unittest.TestCase):
                          'materials/backpack/weapons/c_models/c_scattergun.vtf')
 
     def test_stock_weapon_falls_back_to_world_model_icon(self):
-        """У стоковых иконка объявлена под мировой моделью: c_minigun → w_minigun."""
+        """У стоковых иконка объявлена под мировой моделью: c_minigun -> w_minigun"""
         self.assertEqual(self.find('c_minigun'),
                          'materials/backpack/weapons/w_models/w_minigun.vtf')
 
@@ -39,9 +40,37 @@ class IconLookupTests(unittest.TestCase):
             'materials/backpack/player/items/soldier/soldier_officer.vtf')
 
     def test_declared_path_is_used_as_is(self):
-        """image_inventory из items_game точен — индекс для него не нужен."""
+        """image_inventory из items_game точен - индекс для него не нужен"""
         self.assertEqual(self.find('backpack/workshop/weapons/x/y'),
                          'materials/backpack/workshop/weapons/x/y.vtf')
+
+    def test_declared_path_does_not_build_index(self):
+        """Шапкам индекс не нужен - и строиться ради них он не должен"""
+        backpack_icons._index = None
+        with unittest.mock.patch.object(backpack_icons, '_build_index') as build:
+            self.find('backpack/player/items/x/y')
+        build.assert_not_called()
+
+    def test_material_png_is_shrunk(self):
+        """Произвольная текстура в 2048 px не уходит в карточку целиком"""
+        import tempfile
+        from pathlib import Path
+        from PIL import Image
+
+        def fake_png(_data, out):
+            Image.new('RGBA', (1024, 512)).save(out)
+            return out
+
+        pak = {'materials/models/x/hands.vtf': unittest.mock.Mock()}
+        with tempfile.TemporaryDirectory() as tmp, \
+                unittest.mock.patch.object(backpack_icons, '_CACHE_DIR', Path(tmp)), \
+                unittest.mock.patch('src.services.vpk_cache.open_vpk_cached',
+                                    return_value=pak), \
+                unittest.mock.patch('src.services.vtf_preview_service.vtf_bytes_to_png',
+                                    side_effect=fake_png):
+            png = backpack_icons.material_png('models/x/hands', 'textures.vpk')
+            import io
+            self.assertEqual(Image.open(io.BytesIO(png)).size, (256, 128))
 
     def test_backslashes_and_case(self):
         self.assertEqual(
@@ -58,7 +87,7 @@ if __name__ == '__main__':
 
 
 class WeaponIconFromItemsGameTests(unittest.TestCase):
-    """Иконка по items_game, когда её имя не совпадает с именем модели."""
+    """Иконка по items_game, когда её имя не совпадает с именем модели"""
 
     ITEMS_GAME = '''"items_game"
 {

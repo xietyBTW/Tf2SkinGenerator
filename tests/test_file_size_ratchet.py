@@ -1,17 +1,17 @@
 """
-Храповик размера файлов: god-файлы не должны расти обратно.
+Храповик размера файлов: god-файлы не должны расти обратно
 
-После нарезки 2026-09 сеанс (`src/app/session.py`) за месяц снова дорос с
-3767 до 5449 строк: новый код по привычке клали разделом в большой класс.
-Тест закрепляет то, что уже разрезано (план - docs/dev/god-files-plan.md):
+Новый код по привычке кладут разделом в большой класс, и разрезанный файл
+снова дорастает. Тест закрепляет то, что уже разрезано (план -
+docs/dev/god-files-plan.md):
 
 - файл логики длиннее LIMIT строк - ошибка, если его нет в BASELINE;
 - файл из BASELINE может вырасти не больше чем на SLACK (мелкая правка),
   дальше - новая область уходит в свой модуль, а не в этот файл;
 - файл из BASELINE, который заметно похудел, тоже роняет тест: опустите
-  его число, иначе запас незаметно съест следующая правка.
+  его число, иначе запас незаметно съест следующая правка
 
-Таблицы данных и словари (DATA) не проверяются: их размер ничего не ломает.
+Таблицы данных и словари (DATA) не проверяются: их размер ничего не ломает
 """
 
 import unittest
@@ -22,18 +22,18 @@ LIMIT = 900
 SLACK = 0.05
 SHRUNK = 0.15
 
-#: Данные и чужой код, а не логика.
+#: Данные и чужой код, а не логика
 DATA = {
     "src/data/particle_sources_table.py",
     "src/data/translations.py",
     "frontend/mockup/strings.js",
     "frontend/mockup/three.module.js",
+    "src/static/js/three.module.js",
 }
 
-#: Сколько строк сейчас у файлов длиннее LIMIT (2026-10-15, после разбора). Число можно
-#: только уменьшать.
+#: Сколько строк сейчас у файлов длиннее LIMIT. Число можно только уменьшать
 BASELINE = {
-    "src/app/session.py": 2744,
+    "src/app/session.py": 2188,
     "src/app/parts_editor.py": 1864,
     "src/app/particles_editor.py": 1433,
     "src/services/vpk_service.py": 1360,
@@ -45,16 +45,21 @@ BASELINE = {
     "src/services/preview_vpk_mod_worker.py": 952,
     "src/services/vpk_model_pipeline.py": 940,
     "src/services/vmt_effects.py": 921,
+    "src/static/viewer3d.html": 3274,
+    "src/static/js/particles/engine.js": 2455,
+    "src/static/particles3d.html": 1747,
 }
 
 
 def _files():
-    """Файлы логики проекта: Python в src/ и frontend/, скрипты и стили страницы."""
+    """Файлы логики проекта: Python в src/ и frontend/, скрипты и стили страницы,
+    3D-превью и частицы (src/static)"""
     for pattern in ("src/**/*.py", "frontend/*.py", "frontend/mockup/*.js",
-                    "frontend/mockup/*.css"):
+                    "frontend/mockup/*.css", "src/static/*.html", "src/static/js/**/*.js"):
         for path in ROOT.glob(pattern):
             rel = path.relative_to(ROOT).as_posix()
-            if rel not in DATA and "__pycache__" not in rel:
+            if (rel not in DATA and "__pycache__" not in rel
+                    and not rel.startswith("src/static/js/addons/")):
                 yield rel, path
 
 

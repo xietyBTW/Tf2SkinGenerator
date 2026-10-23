@@ -1,9 +1,9 @@
 """
-Особые материалы редактора VMT (src/services/vmt_effects.py).
+Особые материалы редактора VMT (src/services/vmt_effects.py)
 
 Главное, что ломалось бы молча: повторная настройка плодила бы прокси,
 невидимость шпиона перестала бы прятать оружие, а текст не проходил бы
-проверку синтаксиса и не сохранялся.
+проверку синтаксиса и не сохранялся
 """
 
 from __future__ import annotations
@@ -14,7 +14,7 @@ import unittest
 from src.services import vmt_effects as fx
 from src.services.vmt_service import VMTService
 
-#: Кусок стокового VMT оружия (обрез): невидимость и перекраска уже в прокси.
+#: Кусок стокового VMT оружия (обрез): невидимость и перекраска уже в прокси
 STOCK = '''"VertexLitGeneric"
 {
 	"$basetexture"	"models/weapons/c_models/c_scattergun/c_scattergun"
@@ -37,7 +37,7 @@ STOCK = '''"VertexLitGeneric"
 
 
 def proxies(text: str) -> list:
-    """Имена прокси по порядку."""
+    """Имена прокси по порядку"""
     block = text[text.lower().index('"proxies"'):]
     return re.findall(r'^\t\t"(\w+)"\s*$', block, re.MULTILINE)
 
@@ -51,7 +51,7 @@ class GlassTests(unittest.TestCase):
     def test_keeps_the_material_and_orders_proxies(self):
         out = self.glass()
         self.assertIn('c_scattergun"', out)                  # текстура осталась
-        # Обнулить → невидимость шпиона → прибавить стекло → обрезать до 1.
+        # Обнулить -> невидимость шпиона -> прибавить стекло -> обрезать до 1
         self.assertEqual(proxies(out), ['Equals', 'invis', 'Equals', 'Add', 'Clamp'])
         self.assertTrue(VMTService.validate_vmt_syntax(out)[0])
 
@@ -72,7 +72,7 @@ class GlassTests(unittest.TestCase):
 
 
 class GlassEdgeCases(unittest.TestCase):
-    """Нашло ревью: разбор съезжал на скобках в комментариях."""
+    """Нашло ревью: разбор съезжал на скобках в комментариях"""
 
     glass = GlassTests.glass
 
@@ -103,7 +103,7 @@ class GhostTests(unittest.TestCase):
         out = res['text']
         self.assertTrue(res['replace'])
         # Рецепт мода, который видно в игре: без самосвета с френелем оружие
-        # выходило полностью прозрачным (сборка человека).
+        # выходило полностью прозрачным (сборка человека)
         for line in ('"$additive" "1"', '"$color2" "[0 0 0]"', '"$selfillum" "1"',
                      '"$selfillumfresnel" "1"', '"$cloakpassenabled" "1"'):
             self.assertIn(line, out)
@@ -115,7 +115,7 @@ class GhostTests(unittest.TestCase):
                           'source': 'color', 'cubemap': 'gold', 'bright': 2.0})
 
     def test_texture_source_finds_the_own_texture_again(self):
-        """Своя текстура из игрового оригинала, когда в тексте уже белая основа."""
+        """Своя текстура из игрового оригинала, когда в тексте уже белая основа"""
         white = fx.apply(fx.GHOST, {'source': 'color'}, STOCK)['text']
         out = fx.apply(fx.GHOST, {'source': 'texture'}, white, STOCK)['text']
         self.assertIn('"$basetexture" "models/weapons/c_models/c_scattergun/c_scattergun"', out)
@@ -128,15 +128,15 @@ class GhostTests(unittest.TestCase):
 
 
 class RainbowTests(unittest.TestCase):
-    """Цвет по кругу: три Sine на каналы, со сдвигом на треть периода."""
+    """Цвет по кругу: три Sine на каналы, со сдвигом на треть периода"""
 
     def sines(self, text, var):
         return re.findall(r'"resultVar" "' + re.escape(var) + r'\[(\d)\]"', text)
 
     def test_glass_rainbow_and_back_to_one_color(self):
         out = fx.apply(fx.GLASS, {'color_mode': 'rainbow', 'speed': 2}, STOCK)['text']
-        # Каналы — в свою переменную, в параметр плаща — целиком: запись по
-        # каналам прямо в $cloakcolortint в игре гасила стекло.
+        # Каналы - в свою переменную, в параметр плаща - целиком: запись по
+        # каналам прямо в $cloakcolortint в игре гасила стекло
         self.assertEqual(self.sines(out, '$cloakcolortint'), [])
         self.assertEqual(self.sines(out, '$tf2sg_rgb'), ['0', '1', '2'])
         self.assertIn('"srcVar1" "$tf2sg_rgb"', out)
@@ -144,7 +144,7 @@ class RainbowTests(unittest.TestCase):
         self.assertTrue(VMTService.validate_vmt_syntax(out)[0])
         vals = fx.values(fx.GLASS, out)
         self.assertEqual((vals['color_mode'], vals['speed']), ('rainbow', 2.0))
-        # Перенастройка на один цвет убирает радугу целиком.
+        # Перенастройка на один цвет убирает радугу целиком
         solid = fx.apply(fx.GLASS, {'color_mode': 'solid', 'color': '#ff0000'}, out)['text']
         self.assertEqual(self.sines(solid, '$tf2sg_rgb'), [])
         self.assertNotIn('"srcVar1" "$tf2sg_rgb"', solid)
@@ -154,14 +154,14 @@ class RainbowTests(unittest.TestCase):
         out = fx.apply(fx.GHOST, {'color_mode': 'rainbow', 'speed': 4, 'bright': 1.5},
                        STOCK)['text']
         self.assertEqual(self.sines(out, '$selfillumtint'), ['0', '1', '2'])
-        self.assertIn('"resultVar" "$envmaptint"', out)      # отражение — копия
+        self.assertIn('"resultVar" "$envmaptint"', out)      # отражение - копия
         self.assertTrue(VMTService.validate_vmt_syntax(out)[0])
         vals = fx.values(fx.GHOST, out)
         self.assertEqual((vals['color_mode'], vals['speed'], vals['bright']),
                          ('rainbow', 4.0, 1.5))
 
 
-#: Стоковое оружие с блеском киллстрика и свечением крита (как c_shogun_kunai).
+#: Стоковое оружие с блеском киллстрика и свечением крита (как c_shogun_kunai)
 SHEEN_STOCK = '''"VertexLitGeneric"
 {
 	"$basetexture" "models/w/kunai"
@@ -207,7 +207,7 @@ GAME = {'AnimatedWeaponSheen': 0, 'ModelGlowColor': [1, 1, 1], 'YellowLevel': [1
 
 def run_proxies(text: str, game: dict, curtime: float = 0.0) -> dict:
     """Прогон блока Proxies по семантике mathproxy.cpp / functionproxy.cpp
-    (source-sdk-2013): переменные из VMT, игровые прокси пишут `game`."""
+    (source-sdk-2013): переменные из VMT, игровые прокси пишут `game`"""
     vars_ = {}
     for key, val in re.findall(r'^\t"(\$\w+)"\s+"([^"]*)"', text, re.MULTILINE):
         nums = [float(n) for n in re.findall(r'-?\d*\.?\d+', val)]
@@ -269,7 +269,7 @@ class SheenTests(unittest.TestCase):
     def test_own_colour_wins_over_game_and_is_linear(self):
         out = self.sheen(color='#808080')['text']
         self.assertTrue(VMTService.validate_vmt_syntax(out)[0])
-        # Игра ставит цвет набора, наш Equals ниже его перебивает.
+        # Игра ставит цвет набора, наш Equals ниже его перебивает
         got = run_proxies(out, GAME)
         self.assertEqual([round(c, 3) for c in got['$sheenmaptint']], [0.216, 0.216, 0.216])
         self.assertEqual(proxies(out)[-1], 'Equals')
@@ -288,10 +288,10 @@ class SheenTests(unittest.TestCase):
         self.assertEqual(fx.values(fx.SHEEN, out)['when'], 'game')
 
     def test_old_australium_look_folds_into_brightness(self):
-        """«Ярче, как у австралия» ($sheenindex 1) - это x1.8 к яркости.
+        """«Ярче, как у австралия» ($sheenindex 1) - это x1.8 к яркости
 
         Поле «Вид» убрано: оно повторяло ползунок «Яркость». Старая настройка
-        открывается яркостью, а перенастройка снимает и ключ, и прокси.
+        открывается яркостью, а перенастройка снимает и ключ, и прокси
         """
         old = self.sheen(bright=1.5)['text'].replace(
             '"$tf2sg_sheenbright" "1.5"', '"$tf2sg_sheenbright" "1.5"\n\t"$tf2sg_sheenidx" "1"')
@@ -305,7 +305,7 @@ class SheenTests(unittest.TestCase):
         self.assertIn('"$sheenmapmaskdirection" "2"', out)
         self.assertEqual(fx.values(fx.SHEEN, out)['pause'], 2)
         frame = lambda t: run_proxies(out, GAME, t)['$sheenmapmaskframe']
-        # 25 кадров/с: полоса идёт 59 кадров (2.4 с), потом 2 с кадр 0.
+        # 25 кадров/с: полоса идёт 59 кадров (2.4 с), потом 2 с кадр 0
         self.assertEqual(frame(1.0), 25)
         self.assertEqual(frame(2.3), 57)
         self.assertEqual(frame(3.0), 0)
@@ -344,16 +344,16 @@ class CritGlowTests(unittest.TestCase):
     def test_recolours_each_team_and_keeps_normal(self):
         out = self.crit()['text']
         self.assertTrue(VMTService.validate_vmt_syntax(out)[0])
-        # Сразу за ModelGlowColor: родной Equals в $color2 несёт уже наш цвет.
+        # Сразу за ModelGlowColor: родной Equals в $color2 несёт уже наш цвет
         names = proxies(out)
         self.assertEqual(names[names.index('ModelGlowColor') + 1], 'Clamp')
         self.assertEqual([round(c, 3) for c in self.glow(out, [80, 8, 5])], [80, 0, 80])
         self.assertEqual([round(c, 3) for c in self.glow(out, [5, 20, 80])], [0, 80, 80])
         self.assertEqual([round(c, 3) for c in self.glow(out, [1, 1, 1])], [1, 1, 1])
-        # Свечение баффов (знамя, Crit-a-Cola) остаётся родным.
+        # Свечение баффов (знамя, Crit-a-Cola) остаётся родным
         self.assertEqual([round(c, 3) for c in self.glow(out, [226, 150, 62])], [226, 150, 62])
         self.assertEqual([round(c, 3) for c in self.glow(out, [29, 202, 135])], [29, 202, 135])
-        # Заряд щита демомана: половина пути к своему цвету.
+        # Заряд щита демомана: половина пути к своему цвету
         half = self.glow(out, [40, 4, 2.5])
         self.assertAlmostEqual(half[0], 40 * 0.5 + 80 * 0.5, delta=0.5)
 
@@ -365,7 +365,7 @@ class CritGlowTests(unittest.TestCase):
                          {'red': '#ff00ff', 'blue': '#00ffff', 'bright': 2.0})
 
     def test_one_line_proxies(self):
-        # Комментарий между именем и «{», тело в одну строку.
+        # Комментарий между именем и «{», тело в одну строку
         flat = SHEEN_STOCK.replace(
             '"ModelGlowColor"\n\t\t{\n\t\t\t"resultVar" "$glowcolor"\n\t\t}',
             '"ModelGlowColor" // crit\n\t\t{ "resultVar" "$glowcolor" }')
@@ -379,7 +379,7 @@ class CritGlowTests(unittest.TestCase):
 
 
 class BuildKeepsChosenBaseTests(unittest.TestCase):
-    """Сборка не переписывает $basetexture, выбранный в правке сознательно."""
+    """Сборка не переписывает $basetexture, выбранный в правке сознательно"""
 
     def _chosen(self, edited_base):
         import os

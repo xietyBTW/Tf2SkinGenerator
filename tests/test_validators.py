@@ -40,7 +40,7 @@ class SanitizePathTests(unittest.TestCase):
                 sanitize_path("C:/evil.txt", tmp)
 
     def test_blocks_sibling_prefix_dir(self):
-        """'C:/base_evil' не должен проходить проверку для базы 'C:/base'."""
+        """'C:/base_evil' не должен проходить проверку для базы 'C:/base'"""
         with tempfile.TemporaryDirectory() as tmp:
             base = Path(tmp) / "base"
             base.mkdir()
@@ -134,14 +134,14 @@ class ValidateBuildParamsTests(unittest.TestCase):
 
 
 class SuggestVpkNameTests(unittest.TestCase):
-    """Имя мода предлагается по предмету, а не одно на всех."""
+    """Имя мода предлагается по предмету, а не одно на всех"""
 
     def test_named_by_the_item(self):
         # Ключ оружия несёт префикс модели: он говорит, где модель видна
-        # (в руках), и в имени мода лишний.
+        # (в руках), и в имени мода лишний
         self.assertEqual(suggest_vpk_name('c_axtinguisher'),
                          'axtinguisher_mod.vpk')
-        # У косметики режим один на весь раздел, зовётся предмет моделью.
+        # У косметики режим один на весь раздел, зовётся предмет моделью
         self.assertEqual(
             suggest_vpk_name('hat', 'models/player/items/pyro/hood.mdl'),
             'hood_mod.vpk')
@@ -149,20 +149,20 @@ class SuggestVpkNameTests(unittest.TestCase):
                          'sky_harvest_01_mod.vpk')
 
     def test_no_guess_before_an_item_is_picked(self):
-        """Режим раздела предмета не называет — подсказки нет.
+        """Режим раздела предмета не называет - подсказки нет
 
         Иначе поле получало бы «normal_mod.vpk» при каждом щелчке по фильтру
-        каталога, затирая уже набранное имя.
+        каталога, затирая уже набранное имя
         """
         for mode in ('', 'normal', 'hat', 'body', 'custom'):
             self.assertEqual(suggest_vpk_name(mode), '', mode)
 
     def test_suggestion_passes_its_own_check(self):
-        """Предложенное имя обязано проходить validate_vpk_filename.
+        """Предложенное имя обязано проходить validate_vpk_filename
 
-        Длина и запрещённые символы — правила этой же проверки: русское имя
+        Длина и запрещённые символы - правила этой же проверки: русское имя
         файла мода и путь длиннее лимита не должны давать имя, которое
-        сборка тут же отвергнет.
+        сборка тут же отвергнет
         """
         for mode, key in (('normal', 'x' * 80),
                           ('custom', 'Мой мод.vpk'),

@@ -1,10 +1,10 @@
 """
 Сохранение работы над предметом: что считается правкой и как она переживает
-перезапуск.
+перезапуск
 
 Главное правило, ради которого всё и делалось: производное (имена материалов,
-игровые оригиналы, кадры команд) в работу НЕ попадает — оно приезжает заново с
-моделью, а сохранённое замёрзло бы путями во временные папки.
+игровые оригиналы, кадры команд) в работу НЕ попадает - оно приезжает заново с
+моделью, а сохранённое замёрзло бы путями во временные папки
 """
 
 import json
@@ -19,16 +19,16 @@ from src.shared.constants import Team
 
 
 class UserEditsTests(unittest.TestCase):
-    """Граница «моё / производное» в домене."""
+    """Граница «моё / производное» в домене"""
 
     def _session(self) -> PreviewSession:
         s = PreviewSession()
-        # Правки человека.
+        # Правки человека
         s.textures.set_texture('scattergun', 'C:/my/skin.png')
         s.texture_maps['scattergun'] = {'rimlight': {'enabled': True}}
         s.texture_overrides['scattergun'] = {'size': [1024, 1024]}
         s.custom_qc_text = '$modelname "a.mdl"'
-        # Производное: приедет с моделью заново.
+        # Производное: приедет с моделью заново
         s.textures.material_names = ['scattergun', 'scattergun_extra']
         s.textures.vpk_red_tex_map = {'scattergun': 'C:/temp/game.png'}
         s.textures.red_frames = ['C:/temp/frame0.png']
@@ -57,7 +57,7 @@ class UserEditsTests(unittest.TestCase):
         self.assertEqual(back.custom_qc_text, '$modelname "a.mdl"')
 
     def test_style_keys_survive_json(self):
-        """Ключи стилей — числа, а в JSON станут строками."""
+        """Ключи стилей - числа, а в JSON станут строками"""
         s = PreviewSession()
         s.textures.skin_info = {'num_skins': 2}
         s.textures.active_skin = 1
@@ -75,13 +75,13 @@ class UserEditsTests(unittest.TestCase):
         s = self._session()
         s.forget_user_edits()
         self.assertFalse(s.has_user_edits())
-        # Производное осталось: модель на экране никуда не делась.
+        # Производное осталось: модель на экране никуда не делась
         self.assertEqual(s.textures.material_names,
                          ['scattergun', 'scattergun_extra'])
 
 
 class WorkStoreTests(unittest.TestCase):
-    """Хранилище: владение файлами, пропажи, версия формата."""
+    """Хранилище: владение файлами, пропажи, версия формата"""
 
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
@@ -100,14 +100,14 @@ class WorkStoreTests(unittest.TestCase):
         return str(path)
 
     def test_key_is_filesystem_safe(self):
-        """Ключом бывает путь к MDL — в имя папки его класть нельзя как есть."""
+        """Ключом бывает путь к MDL - в имя папки его класть нельзя как есть"""
         key = work_store.key_for('hat', 'models/player/items/scout/hat.mdl')
         self.assertNotIn('/', key)
         self.assertNotIn('\\\\', key)
 
     def test_long_keys_do_not_collide(self):
         """У мастерской пути длинные и различаются В КОНЦЕ: обрезка сводила
-        два предмета в одну папку, и работа над вторым ложилась поверх первой."""
+        два предмета в одну папку, и работа над вторым ложилась поверх первой"""
         base = ('models/workshop/player/items/demoman/'
                 'hwn2019_the_horrible_horns_of_the_haunted/'
                 'hwn2019_the_horrible_horns_of_the_haunted')
@@ -115,13 +115,13 @@ class WorkStoreTests(unittest.TestCase):
         second = work_store.key_for('hat', base + '_soldier.mdl')
         self.assertNotEqual(first, second)
         self.assertLessEqual(len(first), 120)
-        # Короткий ключ остаётся прежним: старые работы никуда не переезжают.
+        # Короткий ключ остаётся прежним: старые работы никуда не переезжают
         self.assertEqual(work_store.key_for('scout_c_scattergun', 'c_scattergun'),
                          'scout_c_scattergun__c_scattergun')
 
     def test_referenced_files_are_copied_next_to_the_work(self):
         """Текстура пришла через браузер и лежит во временной папке системы:
-        оставить ссылку на неё — значит потерять работу при первой чистке."""
+        оставить ссылку на неё - значит потерять работу при первой чистке"""
         source = self._texture()
         work_store.save(self.key, {'textures': {'red': {'mat': source}}})
         saved = work_store.load(self.key)['textures']['red']['mat']
@@ -132,7 +132,7 @@ class WorkStoreTests(unittest.TestCase):
 
     def test_part_images_are_copied_too(self):
         """Картинка части лежит там же, где любая другая присланная страницей:
-        без копии «покрасил ствол» терялось бы вместе с исходником."""
+        без копии «покрасил ствол» терялось бы вместе с исходником"""
         source = self._texture()
         work_store.save(self.key, {'part_textures': {'mat': {'1': source}}})
         saved = work_store.load(self.key)['part_textures']['mat']['1']
@@ -148,8 +148,8 @@ class WorkStoreTests(unittest.TestCase):
         self.assertEqual(len(files), 1)
 
     def test_same_name_same_size_but_different_files_do_not_merge(self):
-        """Два `texture.png` одного размера — обычное дело (одна программа,
-        одни размеры). По размеру работа показывала вместо второй первую."""
+        """Два `texture.png` одного размера - обычное дело (одна программа,
+        одни размеры). По размеру работа показывала вместо второй первую"""
         first = Path(self._tmp.name) / 'a' / 'texture.png'
         second = Path(self._tmp.name) / 'b' / 'texture.png'
         for path, data in ((first, b'AAAA'), (second, b'BBBB')):
@@ -165,7 +165,7 @@ class WorkStoreTests(unittest.TestCase):
 
     def test_orphaned_copies_are_swept_after_the_write(self):
         """Склейка частей приходит каждый раз новым именем, и её копия
-        оставалась в работе навсегда: 24 МБ там, где нужен один файл."""
+        оставалась в работе навсегда: 24 МБ там, где нужен один файл"""
         first, second = self._texture('parts_1.png'), self._texture('parts_2.png')
         Path(second).write_bytes(b'png-2')          # другой размер, другое имя
         files = Path(self._tmp.name) / 'work' / self.key / 'files'
@@ -177,9 +177,9 @@ class WorkStoreTests(unittest.TestCase):
         self.assertEqual([f.name for f in files.iterdir()], ['parts_2.png'])
 
     def test_style_snapshots_live_in_the_work_with_their_own_copies(self):
-        """Снимок соседнего стиля шапки — часть той же работы: его картинка
-        копируется к себе, читается обратно и переживает уборку; исчезнувший
-        файл отбрасывается, как у самих правок."""
+        """Снимок соседнего стиля шапки - часть той же работы: его картинка
+        копируется к себе, читается обратно и переживает уборку, исчезнувший
+        файл отбрасывается, как у самих правок"""
         active = self._texture('style0.png')
         other = self._texture('style1.png')
         files = Path(self._tmp.name) / 'work' / self.key / 'files'
@@ -195,22 +195,22 @@ class WorkStoreTests(unittest.TestCase):
         self.assertTrue(back[1]['image_path'].startswith(str(files)))
         self.assertTrue(Path(back[1]['edits']['textures']['red']['mat']).is_file())
 
-        # Стиль остался один — копия соседа уходит вместе со снимком.
+        # Стиль остался один - копия соседа уходит вместе со снимком
         work_store.save(self.key, {'textures': {'red': {'mat': active}}})
         self.assertEqual([f.name for f in files.iterdir()], ['style0.png'])
         self.assertEqual(work_store.styles_of(self.key), {})
 
     def test_a_work_can_hold_only_style_snapshots(self):
-        """Правлен только соседний стиль, показанный — игровой: работа всё
-        равно есть, иначе снимок терялся бы вместе с ней."""
+        """Правлен только соседний стиль, показанный - игровой: работа всё
+        равно есть, иначе снимок терялся бы вместе с ней"""
         other = self._texture('style1.png')
         styles = {1: {'models': {}, 'edits': {'textures': {'red': {'mat': other}}}}}
         self.assertIsNotNone(work_store.save(self.key, {}, styles))
         self.assertEqual(list(work_store.styles_of(self.key)), [1])
 
     def test_sweep_never_touches_a_failed_write(self):
-        """Правки не легли на диск — значит на диске осталась прошлая работа,
-        и удалять её файлы нельзя."""
+        """Правки не легли на диск - значит на диске осталась прошлая работа,
+        и удалять её файлы нельзя"""
         source = self._texture()
         work_store.save(self.key, {'textures': {'red': {'mat': source}}})
         files = Path(self._tmp.name) / 'work' / self.key / 'files'
@@ -221,19 +221,19 @@ class WorkStoreTests(unittest.TestCase):
 
     def test_item_identity_survives_and_is_not_lost_by_a_blind_save(self):
         """По имени папки шапку не найти: слаг от `…/hat.mdl` не ведёт ни к
-        имени в каталоге, ни к иконке, ни к самой модели."""
+        имени в каталоге, ни к иконке, ни к самой модели"""
         item = {'mode': 'hat', 'key': 'models/player/items/scout/hat.mdl',
                 'per_class': {'scout': 'models/player/items/scout/hat.mdl'}}
         work_store.save(self.key, {'force_team': True}, item=item)
         self.assertEqual(work_store.item_of(self.key), item)
 
-        # Вызов, который про опознание не думал, не должен его стирать.
+        # Вызов, который про опознание не думал, не должен его стирать
         work_store.save(self.key, {'force_team': False})
         self.assertEqual(work_store.item_of(self.key)['key'], item['key'])
         self.assertEqual(work_store.list_drafts()[0]['item'], item)
 
     def test_work_without_identity_is_not_an_error(self):
-        """Работы, записанные до опознания, обязаны читаться как раньше."""
+        """Работы, записанные до опознания, обязаны читаться как раньше"""
         work_store.save(self.key, {'force_team': True})
         self.assertEqual(work_store.item_of(self.key), {})
         self.assertEqual(work_store.item_of('никогда-не-было'), {})
@@ -262,7 +262,7 @@ class WorkStoreTests(unittest.TestCase):
 
     def test_another_format_version_is_ignored(self):
         """Правила «моё/производное» могли разойтись: молча применённый чужой
-        формат хуже отсутствия работы."""
+        формат хуже отсутствия работы"""
         work_store.save(self.key, {'force_team': True})
         path = Path(self._tmp.name) / 'work' / self.key / 'edits.json'
         payload = json.loads(path.read_text(encoding='utf-8'))
@@ -282,7 +282,7 @@ class WorkStoreTests(unittest.TestCase):
 
 
 class KeeperRulesTests(unittest.TestCase):
-    """Правила «когда сохранять» — общие у окна и страницы."""
+    """Правила «когда сохранять» - общие у окна и страницы"""
 
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
@@ -299,12 +299,12 @@ class KeeperRulesTests(unittest.TestCase):
     def test_unidentified_item_has_no_key(self):
         self.assertEqual(work_keeper.key_for('', ''), '')
         self.assertEqual(work_keeper.key_for('scout_c_scattergun', ''), '')
-        # chr(0) — sentinel панели «модель ещё не грузили».
+        # chr(0) - sentinel панели «модель ещё не грузили»
         self.assertEqual(work_keeper.key_for('scout_c_scattergun', chr(0)), '')
         self.assertTrue(work_keeper.key_for('scout_c_scattergun', 'c_scattergun'))
 
     def test_mod_and_weapon_do_not_share_a_key(self):
-        """Мод показан поверх оружия, но работа над ним — своя."""
+        """Мод показан поверх оружия, но работа над ним - своя"""
         weapon = work_keeper.key_for('scout_c_scattergun', 'c_scattergun')
         mod = work_keeper.key_for('custom', 'c_scattergun', 'mods/skin.vpk')
         self.assertNotEqual(weapon, mod)
@@ -324,7 +324,7 @@ class KeeperRulesTests(unittest.TestCase):
         self.assertTrue(target.textures.textures[Team.RED]['mat'])
 
     def test_switched_off_neither_saves_nor_restores(self):
-        """«Я выключил, а оно всё равно подставляет вчерашнее» — не то."""
+        """«Я выключил, а оно всё равно подставляет вчерашнее» - не то"""
         session = PreviewSession()
         session.textures.set_texture('mat', __file__)
         key = work_keeper.key_for('scout_c_scattergun', 'c_scattergun')

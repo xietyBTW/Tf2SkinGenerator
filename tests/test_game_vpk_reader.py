@@ -1,4 +1,4 @@
-"""Тесты кэширующего читателя игровых VPK (поиск VMT/VTF)."""
+"""Тесты кэширующего читателя игровых VPK (поиск VMT/VTF)"""
 
 import unittest
 
@@ -23,7 +23,7 @@ class GameVpkReaderTests(unittest.TestCase):
         self.assertTrue(res[0].endswith("c_w.vmt"))
 
     def test_find_vmt_workshop_swap(self):
-        # VMT лежит по workshop-пути, а cdmaterials указывает на обычный player/items.
+        # VMT лежит по workshop-пути, а cdmaterials указывает на обычный player/items
         r = _reader({
             "materials/models/workshop_partner/player/items/hat/c_hat.vmt": b'"x"{}',
         })
@@ -54,10 +54,10 @@ class GameVpkReaderTests(unittest.TestCase):
         self.assertEqual(r.find_vtf_for_basetexture("models\\x\\c_w"), b"VTF")
 
     def test_source_extension_in_the_vmt_is_ignored(self):
-        """У праздничного Правосудия и Уберпилы Valve оставила `.psd`.
+        """У праздничного Правосудия и Уберпилы Valve оставила `.psd`
 
         Движок читает такой путь без расширения, и без этого у них не было
-        текстуры вовсе — ни в превью, ни в сборке.
+        текстуры вовсе - ни в превью, ни в сборке
         """
         r = _reader({"materials/models/weapons/c_items/c_ubersaw_xms.vtf": b"VTF"})
         self.assertEqual(
@@ -75,8 +75,8 @@ class GameVpkReaderTests(unittest.TestCase):
         self.assertIsNone(_reader({}).find_vtf_for_basetexture(""))
 
     def test_close_clears_ref_but_keeps_handle_open(self):
-        # Хэндлами владеет общий потоко-локальный кэш (vpk_cache) — close() лишь
-        # сбрасывает локальную ссылку, сам pak НЕ закрывает.
+        # Хэндлами владеет общий потоко-локальный кэш (vpk_cache) - close() лишь
+        # сбрасывает локальную ссылку, сам pak НЕ закрывает
         r = _reader({"a": b"b"})
         pak = r._paks[0]
         r.close()

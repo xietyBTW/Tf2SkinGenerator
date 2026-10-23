@@ -1,4 +1,4 @@
-"""Тесты общего хелпера превью VTF (дедупликация VPK→VTF→PNG)."""
+"""Тесты общего хелпера превью VTF (дедупликация VPK->VTF->PNG)"""
 
 import unittest
 
@@ -8,7 +8,7 @@ from tests.fake_vpk import FakePak as _FakePak
 
 class VtfPreviewServiceTests(unittest.TestCase):
     def test_open_vpks_skips_missing(self):
-        # Несуществующие пути не роняют и не попадают в результат.
+        # Несуществующие пути не роняют и не попадают в результат
         self.assertEqual(vps.open_vpks([None, "", "/no/such/file.vpk"]), [])
 
     def test_read_from_vpks_first_hit(self):
@@ -29,7 +29,7 @@ class VtfPreviewServiceTests(unittest.TestCase):
         self.assertEqual(vps.vtf_bytes_to_frame_pngs(None, "/tmp", "x"), [])
         self.assertEqual(vps.vtf_bytes_to_frame_pngs(b"", "/tmp", "x"), [])
 
-    # ── animatedtextureframerate (общий парсер, заменил 3 копии в воркерах) ──
+    # animatedtextureframerate (общий парсер, заменил 3 копии в воркерах)
     def test_parse_animated_framerate_found(self):
         self.assertEqual(
             vps.parse_animated_framerate('"animatedtextureframerate" "30"'), 30.0)
@@ -41,7 +41,7 @@ class VtfPreviewServiceTests(unittest.TestCase):
         self.assertIsNone(vps.parse_animated_framerate('"$basetexture" "x"'))
 
     def test_parse_animated_framerate_clamped_min(self):
-        # 0 → не меньше 0.1 (защита от деления/паузы)
+        # 0 -> не меньше 0.1 (защита от деления/паузы)
         self.assertEqual(vps.parse_animated_framerate('"animatedtextureframerate" "0"'), 0.1)
 
     def test_read_vmt_framerate_first_readable_wins(self):
@@ -49,7 +49,7 @@ class VtfPreviewServiceTests(unittest.TestCase):
             "a.vmt": b'"VertexLitGeneric"\n{\n"animatedtextureframerate" "24"\n}',
             "b.vmt": b'"VertexLitGeneric"\n{\n"animatedtextureframerate" "10"\n}',
         })
-        # Первый ЧИТАЕМЫЙ путь определяет результат (missing пропускается).
+        # Первый ЧИТАЕМЫЙ путь определяет результат (missing пропускается)
         self.assertEqual(vps.read_vmt_framerate(pak, ["missing.vmt", "a.vmt", "b.vmt"]), 24.0)
 
     def test_read_vmt_framerate_default_when_no_key(self):

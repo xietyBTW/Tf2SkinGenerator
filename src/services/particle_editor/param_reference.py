@@ -1,4 +1,4 @@
-"""Справочник параметров для генерации пресетов (в том числе ИИ)."""
+"""Справочник параметров для генерации пресетов (в том числе ИИ)"""
 
 from typing import Any, Dict, List, Optional
 
@@ -9,7 +9,7 @@ from src.services.particle_editor.pcf_format import MODULE_GROUPS
 #: пользователя. На английском: модели точнее следуют инструкциям на нём,
 #: а пользователь всё равно пишет свои требования отдельным сообщением.
 #: Пояснения справочника: файл открывает и человек, поэтому на языке
-#: интерфейса. Задание для ИИ (_AI_INSTRUCTIONS) — всегда английское.
+#: интерфейса. Задание для ИИ (_AI_INSTRUCTIONS) - всегда английское
 _REFERENCE_TEXT = {
     "ru": {
         "about": "Справочник параметров частиц TF2. Соберите набор в "
@@ -18,14 +18,14 @@ _REFERENCE_TEXT = {
                  "→ Вставить параметры).",
         "notes": [
             "Имена параметров и модулей писать точно как здесь.",
-            "example — значение из реального эффекта игры, а не "
+            "example - значение из реального эффекта игры, а не "
             "умолчание движка: это ориентир по смыслу и порядку величин.",
-            "range — [минимум, максимум] этого параметра по всем "
+            "range - [минимум, максимум] этого параметра по всем "
             "эффектам игры: значения вне него почти наверняка ошибка "
             "порядка величины.",
             "Отсутствующий параметр не ошибка: движок берёт своё "
             "умолчание. Указывайте только то, что нужно менять.",
-            "previewed=false — модуль работает в игре, но 3D-превью "
+            "previewed=false - модуль работает в игре, но 3D-превью "
             "редактора его не симулирует.",
         ],
         "value_types": {
@@ -37,10 +37,10 @@ _REFERENCE_TEXT = {
             "color": "[r, g, b, a], каждое 0-255",
         },
         "clipboard": "Значение JSON, которое кладётся в буфер "
-                     "обмена. attrs — параметры самой системы, "
-                     "modules — модули по группам: список пар "
+                     "обмена. attrs - параметры самой системы, "
+                     "modules - модули по группам: список пар "
                      "[имя модуля, {параметры}]. full=true "
-                     "означает полный набор — при вставке "
+                     "означает полный набор - при вставке "
                      "редактор спросит, заменять ли существующие.",
     },
     "en": {
@@ -112,11 +112,11 @@ _AI_INSTRUCTIONS = [
     "and warn the user when you use one.",
     "- \"full\" decides how the paste behaves and must match what the "
     "user wants:",
-    "    \"full\": false — an ADDITION. Parameters you list are merged "
+    "    \"full\": false - an ADDITION. Parameters you list are merged "
     "into the system: matching ones are overwritten, everything else "
     "the system already has stays untouched. Use this to adjust or "
     "extend an existing effect.",
-    "    \"full\": true — a COMPLETE effect. On paste the editor asks "
+    "    \"full\": true - a COMPLETE effect. On paste the editor asks "
     "the user whether to keep the existing parameters or replace the "
     "system entirely, so send a self-sufficient set: emitter, position "
     "and lifetime initializers, renderer, material, and anything else "
@@ -127,7 +127,7 @@ _AI_INSTRUCTIONS = [
     "weapon about 30 units long, 1 unit is roughly 1.9 cm. Z is up.",
     "- Times are in seconds. Colors are [r, g, b, a], each 0-255.",
     "- 'material' is the particle texture. Pick one from "
-    "available_materials.paths in this file — those are the materials "
+    "available_materials.paths in this file - those are the materials "
     "that actually ship with the game, so the effect works without the "
     "user supplying any texture. Copy the path exactly, including "
     "backslashes (escape them in JSON: \"effects\\\\crit.vmt\"). Never "
@@ -138,16 +138,16 @@ _AI_INSTRUCTIONS = [
     "sheet, e.g. animated butterflies/vortex): to make the frames play, "
     "the render_animated_sprites renderer needs either "
     "\"animation_fit_lifetime\": true (plays the whole sheet once over "
-    "each particle's lifetime — the safe default), OR a high "
+    "each particle's lifetime - the safe default), OR a high "
     "\"animation rate\" with \"use animation rate as fps\": true where "
     "the rate is frames per second (~24-30). 'animation rate': 1 means "
-    "one frame per second — a 32-frame sheet then looks frozen. When the "
+    "one frame per second - a 32-frame sheet then looks frozen. When the "
     "user asks for an animated texture, always set one of these.",
     "- To make a sprite face the direction it moves ON SCREEN (a "
     "butterfly, spider or ghost flying head-first), add a SECOND "
     "renderer 'render_screen_velocity_rotate' with 'forward_angle' "
     "(degrees, usually 90 or -90 depending on which way the texture's "
-    "head points) alongside render_animated_sprites — this is what the "
+    "head points) alongside render_animated_sprites - this is what the "
     "game's own effects use. Do NOT use the 'Rotation Orient to 2D "
     "Direction' operator for this: it orients in the WORLD horizontal "
     "plane (compass heading, top-down view), so camera-facing sprites "
@@ -160,7 +160,7 @@ _AI_INSTRUCTIONS = [
     "(\"full\": true), or an addition to an effect the user already "
     "has (\"full\": false)? If the user did not say, ask.",
     "Then, if the description leaves any of the following unclear, ask "
-    "about them too — in one short message, at most four questions, "
+    "about them too - in one short message, at most four questions, "
     "and wait for the answer:",
     "1. Spawn area: a single point, a sphere or a box, and how large.",
     "2. Context and scale: on a weapon, on the player, or an explosion "
@@ -176,10 +176,10 @@ _AI_INSTRUCTIONS = [
 
 
 def param_reference_entry(tv: dict) -> dict:
-    """Описание одного параметра для справочника: тип, пример и разброс.
+    """Описание одного параметра для справочника: тип, пример и разброс
 
     Разброс по эффектам игры отвечает на вопрос, который не решается
-    одним примером: 0.1 — это норма или экзотика.
+    одним примером: 0.1 - это норма или экзотика
     """
     entry = {"type": tv["t"], "example": tv["v"]}
     if tv.get("lo") is not None and tv.get("lo") != tv.get("hi"):
@@ -193,15 +193,15 @@ def param_reference(cls, tf2_root_dir: str = "",
                     materials: Optional[List[str]] = None,
                     lang: str = "en") -> dict:
     """
-    Справочник параметров для генерации пресетов внешними средствами.
+    Справочник параметров для генерации пресетов внешними средствами
 
     Отдаёт всё, что нужно, чтобы собрать корректный набор параметров
     и вставить его в редактор через буфер обмена: формат буфера, типы
     значений, модули по группам с их параметрами и примерами значений
-    из эффектов игры, плюс отметка, какие модули отыгрывает превью.
+    из эффектов игры, плюс отметка, какие модули отыгрывает превью
     """
     cls.build_attr_catalog(tf2_root_dir)
-    # У части модулей в файлах игры старое написание имени — движок
+    # У части модулей в файлах игры старое написание имени - движок
     # превью знает их через таблицу алиасов, учитываем и здесь
     aliases = {str(k).lower(): str(v).lower()
                for k, v in ((supported or {}).get("aliases") or {}).items()}

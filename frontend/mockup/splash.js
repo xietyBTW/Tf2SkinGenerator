@@ -1,11 +1,11 @@
 /*
- * Заставка запуска.
+ * Заставка запуска
  *
  * Разметка и вход живут в index.html и style.css: они обязаны отрисоваться
  * раньше первого модуля. Здесь шаги загрузки и уход: знак улетает на своё
- * место в шапке, фон тает, а под ним уже собранное окно.
+ * место в шапке, фон тает, а под ним уже собранное окно
  *
- * После смены языка страница поднимается заново (settings.js → restart), и
+ * После смены языка страница поднимается заново (settings.js -> restart), и
  * второй раз смотреть вход незачем: заставка там - просто занавес цвета фона,
  * который поднимается, когда окно готово (data-splash="quick").
  */
@@ -14,13 +14,13 @@ const splash = document.getElementById('splash');
 const root = document.documentElement;
 let leaving = null;
 
-/** Пройденная доля загрузки, 0..1: линия под знаком. */
+/** Пройденная доля загрузки, 0..1: линия под знаком */
 export function splashStep(part) {
   document.getElementById('splash-fill')?.style.setProperty('--p', part);
 }
 
-/** Убирает заставку; промис - когда её больше нет на экране. Повторный вызов
- *  (страховка сработала раньше загрузки) ждёт того же ухода. */
+/** Убирает заставку, промис - когда её больше нет на экране. Повторный вызов
+ *  (страховка сработала раньше загрузки) ждёт того же ухода */
 export function hideSplash() {
   leaving ??= leave();
   return leaving;
@@ -39,33 +39,33 @@ async function leave() {
       return;
     }
     await introDone();
-    // Пока доигрывал вход, заставку могла снять страховка (index.html).
+    // Пока доигрывал вход, заставку могла снять страховка (index.html)
     if (!splash.isConnected) return;
     await flyHome();
   } catch {
     // Уход - украшение: оборванная анимация не ошибка страницы, и человеку
-    // её показывать нечего - окно откроется в любом случае (finally).
+    // её показывать нечего - окно откроется в любом случае (finally)
   } finally {
-    // Что бы ни случилось с анимацией, окно не должно остаться за заставкой.
+    // Что бы ни случилось с анимацией, окно не должно остаться за заставкой
     splash.remove();
     root.classList.remove('is-splash');
   }
 }
 
-/** Вход доигрывает до конца: быстрый старт не обрывает буквы на середине. */
+/** Вход доигрывает до конца: быстрый старт не обрывает буквы на середине */
 function introDone() {
   const word = document.getElementById('splash-word');
   return Promise.allSettled(word.getAnimations({ subtree: true }).map((a) => a.finished));
 }
 
-/** Рамка самого текста, без хвостов блока (у знака в шапке он шире). */
+/** Рамка самого текста, без хвостов блока (у знака в шапке он шире) */
 function textBox(el) {
   const range = document.createRange();
   range.selectNodeContents(el);
   return range.getBoundingClientRect();
 }
 
-/** Знак летит в шапку и садится ровно на её знак; фон тем временем тает. */
+/** Знак летит в шапку и садится ровно на её знак, фон тем временем тает */
 async function flyHome() {
   const word = document.getElementById('splash-word');
   const home = document.querySelector('.chrome__mark');
@@ -85,7 +85,7 @@ async function flyHome() {
   splash.querySelectorAll('.splash__swash, .splash__bar').forEach((el) => {
     el.animate([{ opacity: 1 }, { opacity: 0 }], { duration: 200, fill: 'forwards' });
   });
-  // Фон тает, когда знак уже у шапки: по пути он прошёл бы поверх заголовка.
+  // Фон тает, когда знак уже у шапки: по пути он прошёл бы поверх заголовка
   const fade = splash.animate([
     { backgroundColor: getComputedStyle(splash).backgroundColor },
     { backgroundColor: 'transparent' },
@@ -93,12 +93,12 @@ async function flyHome() {
   await Promise.all([flight.finished, fade.finished]);
   // Знак шапки встаёт под летящим, и тот тает: крупный текст, уменьшенный
   // трансформом, растрируется не так, как родной мелкий, и может разойтись с
-  // ним на пиксель. Резкая подмена показала бы этот скачок.
+  // ним на пиксель. Резкая подмена показала бы этот скачок
   root.classList.remove('is-splash');
   await word.animate([{ opacity: 1 }, { opacity: 0 }],
                      { duration: 160, fill: 'forwards' }).finished;
 }
 
 // Страховка: если загрузка так и не закончилась, окно не должно навсегда
-// остаться за заставкой - ошибку под ней иначе не увидеть.
+// остаться за заставкой - ошибку под ней иначе не увидеть
 setTimeout(hideSplash, 15000);

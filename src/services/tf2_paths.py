@@ -9,18 +9,18 @@ from pathlib import Path
 from typing import List, Optional, Tuple
 from src.shared.paths import install_dir
 
-#: Номер TF2 в Steam: по нему в библиотеке лежит appmanifest_440.acf.
+#: Номер TF2 в Steam: по нему в библиотеке лежит appmanifest_440.acf
 TF2_APP_ID = "440"
 
-#: Имя папки игры по умолчанию — то, что Steam пишет в `installdir`.
+#: Имя папки игры по умолчанию - то, что Steam пишет в `installdir`
 TF2_DEFAULT_DIR = "Team Fortress 2"
 
 
 def _steam_from_registry() -> List[str]:
-    """Папки Steam из реестра — так же, как их находит сам Steam.
+    """Папки Steam из реестра - так же, как их находит сам Steam
 
     Ключей три, потому что записывают их разные вещи: HKCU ставит клиент при
-    каждом запуске, HKLM — установщик (32-битная ветка на 64-битной системе).
+    каждом запуске, HKLM - установщик (32-битная ветка на 64-битной системе)
     """
     out: List[str] = []
     try:
@@ -44,10 +44,10 @@ def _steam_from_registry() -> List[str]:
 
 
 def _steam_guesses() -> List[str]:
-    """Запасные места на случай, когда реестра нет (портативный Steam).
+    """Запасные места на случай, когда реестра нет (портативный Steam)
 
     Дешёвая проверка: пара `exists` на каждый существующий диск, а не обход
-    файловой системы.
+    файловой системы
     """
     out: List[str] = []
     for letter in string.ascii_uppercase:
@@ -61,18 +61,18 @@ def _steam_guesses() -> List[str]:
 
 
 def _steam_libraries() -> List[str]:
-    """Библиотеки Steam: папка клиента плюс всё из libraryfolders.vdf.
+    """Библиотеки Steam: папка клиента плюс всё из libraryfolders.vdf
 
-    Игру ставят на любой диск, и путь к ней в реестре не лежит — только
-    список библиотек рядом с клиентом.
+    Игру ставят на любой диск, и путь к ней в реестре не лежит - только
+    список библиотек рядом с клиентом
     """
     out: List[str] = []
     seen: set = set()
 
     def add(path: str) -> None:
-        # Реестр отдаёт путь как записал клиент ('d:\steam'), догадки — как
+        # Реестр отдаёт путь как записал клиент ('d:\steam'), догадки - как
         # собрали мы ('D:\Steam'). Для файловой системы это одно и то же, и
-        # читать один и тот же libraryfolders.vdf дважды незачем.
+        # читать один и тот же libraryfolders.vdf дважды незачем
         key = os.path.normcase(path)
         if path and key not in seen:
             seen.add(key)
@@ -87,10 +87,10 @@ def _steam_libraries() -> List[str]:
         except OSError:
             continue
         # Формат менялся: до 2021 путь стоял значением номера
-        # («"1"  "D:\Games"»), сейчас — ключом "path" внутри блока. Оба
+        # («"1"  "D:\Games"»), сейчас - ключом "path" внутри блока. Оба
         # варианта встречаются на живых машинах, поэтому берём и тот, и этот.
         # У старой формы значение обязано выглядеть путём: те же «"440"
-        # "12345"» из блока apps иначе приезжают библиотеками.
+        # "12345"» из блока apps иначе приезжают библиотеками
         for pattern in (r'"path"\s*"([^"]+)"',
                         r'"\d+"\s*"([A-Za-z]:[^"]*)"'):
             for match in re.finditer(pattern, text):
@@ -99,11 +99,11 @@ def _steam_libraries() -> List[str]:
 
 
 def _tf2_dir_in(library: str) -> str:
-    """Куда в этой библиотеке Steam положил бы TF2.
+    """Куда в этой библиотеке Steam положил бы TF2
 
     Имя папки берём из appmanifest_440.acf: обычно это «Team Fortress 2», но
     у переехавшей или перенесённой вручную установки оно другое, и жёстко
-    вписанное имя такую копию не находит.
+    вписанное имя такую копию не находит
     """
     apps = os.path.join(library, "steamapps")
     name = TF2_DEFAULT_DIR
@@ -121,7 +121,7 @@ def _tf2_dir_in(library: str) -> str:
 class TF2Paths:
     """Класс для разрешения путей TF2"""
     
-    #: Бандл рядом с .exe — только чтение (см. src/shared/paths.py).
+    #: Бандл рядом с .exe - только чтение (см. src/shared/paths.py)
     CROWBAR_PATH = str(install_dir() / "tools/crowbar/CrowbarCommandLineDecomp.exe")
     
     @staticmethod
@@ -162,9 +162,9 @@ class TF2Paths:
     
     @staticmethod
     def is_valid(tf2_root_dir: str) -> bool:
-        """True, если путь TF2 указан и resolve() найдёт все нужные файлы.
+        """True, если путь TF2 указан и resolve() найдёт все нужные файлы
 
-        Используется для подсказки-баннера в UI.
+        Используется для подсказки-баннера в UI
         """
         try:
             TF2Paths.resolve(tf2_root_dir)
@@ -174,18 +174,18 @@ class TF2Paths:
 
     @staticmethod
     def skybox_vpks(tf2_root_dir: str) -> List[str]:
-        """VPK, в которых лежат небеса: и tf/, и hl2/.
+        """VPK, в которых лежат небеса: и tf/, и hl2/
 
-        TF2 монтирует контент Half-Life 2, и его небеса — законная часть игры:
+        TF2 монтирует контент Half-Life 2, и его небеса - законная часть игры:
         карты (в том числе сообществa) ставят в worldspawn `sky_day01_01`,
         `sky_borealis01` и прочие, а в `tf2_*.vpk` их нет вовсе. Пока смотрели
-        только в tf/, из 47 небес установленной игры приложение видело 22.
+        только в tf/, из 47 небес установленной игры приложение видело 22
 
-        Порядок важен: tf/ первым — если небо есть в обоих (переопределение
-        Valve), в игре главнее контент самой TF2.
+        Порядок важен: tf/ первым - если небо есть в обоих (переопределение
+        Valve), в игре главнее контент самой TF2
 
-        Возвращает только существующие файлы; ни одного — пустой список, а
-        решение, что делать, остаётся за вызывающим.
+        Возвращает только существующие файлы, ни одного - пустой список, а
+        решение, что делать, остаётся за вызывающим
         """
         pairs = (("tf", "tf2_misc_dir.vpk"), ("tf", "tf2_textures_dir.vpk"),
                  ("hl2", "hl2_misc_dir.vpk"), ("hl2", "hl2_textures_dir.vpk"))
@@ -200,7 +200,7 @@ class TF2Paths:
 
     @staticmethod
     def autodetect() -> List[str]:
-        r"""Установленные копии TF2 — то, что можно предложить человеку.
+        r"""Установленные копии TF2 - то, что можно предложить человеку
 
         Ищем НЕ обходом диска (это минуты и десятки тысяч папок), а тем же
         путём, каким игру находит сам Steam:
@@ -211,14 +211,14 @@ class TF2Paths:
           3. ``appmanifest_440.acf`` -> имя папки игры (``installdir``): у
              нестандартной установки она может называться иначе;
           4. запасные места на случай, если реестра нет (портативный Steam):
-             ``<диск>:\Steam`` и ``<диск>:\SteamLibrary``.
+             ``<диск>:\Steam`` и ``<диск>:\SteamLibrary``
 
-        Каждый кандидат проверяется `is_valid` — то есть по наличию
+        Каждый кандидат проверяется `is_valid` - то есть по наличию
         ``bin/studiomdl.exe`` и ``tf/tf2_misc_dir.vpk``, ровно того, без чего
         приложение всё равно не работает. Поэтому «нашлось» здесь значит
-        «годится», а не «похоже на игру».
+        «годится», а не «похоже на игру»
 
-        Порядок ответа — от самого вероятного; обычно в списке одна папка.
+        Порядок ответа - от самого вероятного, обычно в списке одна папка
         """
         seen: set = set()
         out: List[str] = []
@@ -230,8 +230,8 @@ class TF2Paths:
             seen.add(key)
             if TF2Paths.is_valid(root):
                 # Реестр отдаёт путь так, как его записал Steam («d:\steam»).
-                # Человеку этот путь показывают и он же уходит в настройки —
-                # берём написание, как на диске.
+                # Человеку этот путь показывают и он же уходит в настройки -
+                # берём написание, как на диске
                 out.append(str(Path(root).resolve()))
         return out
 
@@ -259,10 +259,10 @@ class TF2Paths:
     @staticmethod
     def resolve_hl2_vpks(tf2_root_dir: str) -> list:
         """
-        Пути к hl2_misc_dir.vpk / hl2_textures_dir.vpk (существующие).
+        Пути к hl2_misc_dir.vpk / hl2_textures_dir.vpk (существующие)
 
-        TF2 монтирует контент HL2 — часть particle-материалов (например
-        particle/particle_glow_*) лежит именно там, а не в tf2_misc.
+        TF2 монтирует контент HL2 - часть particle-материалов (например
+        particle/particle_glow_*) лежит именно там, а не в tf2_misc
         """
         out = []
         for name in ("hl2_misc_dir.vpk", "hl2_textures_dir.vpk"):
@@ -296,11 +296,11 @@ class TF2Paths:
 
 
 
-# ── Кандидаты MDL-путей для шапок (единая логика для сборки/превью/извлечения) ──
+# Кандидаты MDL-путей для шапок (единая логика для сборки/превью/извлечения)
 
 #: Токены классов в путях к моделям. У подрывника файлы называются `_demo`,
-#: но старые моды встречаются и с `_demoman` — держим оба, кандидаты всё равно
-#: перебираются по порядку.
+#: но старые моды встречаются и с `_demoman` - держим оба, кандидаты всё равно
+#: перебираются по порядку
 _TF2_CLASSES = (
     "heavy", "scout", "soldier", "pyro",
     "demo", "demoman", "engineer", "medic", "sniper", "spy",
@@ -312,19 +312,19 @@ def build_hat_mdl_candidates(mdl_rel: str) -> list:
     Список путей-кандидатов к MDL шапки внутри VPK (порядок сохранён, без дублей):
 
       1. Раскрывает %s-плейсхолдер во все 9 классов TF2
-         (all_domination_%s.mdl → all_domination_heavy.mdl и т.д.).
+         (all_domination_%s.mdl -> all_domination_heavy.mdl и т.д.).
       2. Добавляет варианты расположения:
          models/player/items ↔ models/workshop/player/items ↔
          models/workshop_partner/player/items.
-      3. Для путей с суффиксом класса (..._heavy.mdl) добавляет остальные классы.
+      3. Для путей с суффиксом класса (..._heavy.mdl) добавляет остальные классы
 
-    Все пути приводятся к нижнему регистру (в VPK ключи — lowercase).
-    Используется в сборке, 3D-превью и извлечении — раньше дублировалось трижды.
+    Все пути приводятся к нижнему регистру (в VPK ключи - lowercase).
+    Используется в сборке, 3D-превью и извлечении
     """
     import re
     norm = mdl_rel.replace("\\", "/").lower()
 
-    # 1. %s → классы
+    # 1. %s -> классы
     if "%s" in norm:
         base = []
         for cls in _TF2_CLASSES:
@@ -356,7 +356,7 @@ def build_hat_mdl_candidates(mdl_rel: str) -> list:
                         paths.append(v)
                 break
 
-    # 3. Суффиксы класса (_heavy → остальные классы)
+    # 3. Суффиксы класса (_heavy -> остальные классы)
     cls_pat = re.compile(
         r'_(heavy|scout|soldier|pyro|demoman|engineer|medic|sniper|spy)\.mdl$'
     )
@@ -364,7 +364,7 @@ def build_hat_mdl_candidates(mdl_rel: str) -> list:
     for c in list(paths):
         if cls_pat.search(c):
             for cls in _TF2_CLASSES:
-                # группа всегда оканчивается на .mdl — подставляем явно
+                # группа всегда оканчивается на .mdl - подставляем явно
                 variant = cls_pat.sub(f'_{cls}.mdl', c)
                 if variant not in paths and variant not in extra:
                     extra.append(variant)

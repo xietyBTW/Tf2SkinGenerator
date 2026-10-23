@@ -148,8 +148,8 @@ class MergeVPKService:
             if not vpk_file.exists():
                 return False, t.get('vpk_file_not_found', 'VPK file not found: {path}').format(path=vpk_file)
         
-        # Временная папка — в системном %TEMP%, как у сборки (BuildContext):
-        # пути внутри модов длинные, а vpk.exe не открывает длиннее 260 символов.
+        # Временная папка - в системном %TEMP%, как у сборки (BuildContext):
+        # пути внутри модов длинные, а vpk.exe не открывает длиннее 260 символов
         import tempfile
         temp_dir = Path(tempfile.mkdtemp(prefix="tf2sg_merge_"))
         merged_root = temp_dir / "vpkroot"
@@ -256,7 +256,7 @@ class MergeVPKService:
         Объединяет содержимое source_dir в target_dir
         
         Если папки с одинаковыми именами существуют, они объединяются рекурсивно.
-        Если файлы с одинаковыми именами существуют, они не перезаписываются (оставляем оба).
+        Если файлы с одинаковыми именами существуют, они не перезаписываются (оставляем оба)
         
         Args:
             source_dir: Исходная директория
@@ -306,7 +306,7 @@ class MergeVPKService:
     ) -> Optional[str]:
         """
         Создаёт VPK файл из директории vpkroot.
-        Делегирует в PackagingService.pack_directory — единственное место вызова vpk.exe.
+        Делегирует в PackagingService.pack_directory - единственное место вызова vpk.exe
         """
         if should_cancel and should_cancel():
             return None

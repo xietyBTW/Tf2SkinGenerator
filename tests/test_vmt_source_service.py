@@ -1,8 +1,8 @@
 """
-Источник VMT для правки: ключ предмета и политика сохранения.
+Источник VMT для правки: ключ предмета и политика сохранения
 
-Извлечение из игровых VPK здесь не гоняется (нужна установленная игра) —
-проверяется то, что решает сама служба.
+Извлечение из игровых VPK здесь не гоняется (нужна установленная игра) -
+проверяется то, что решает сама служба
 """
 
 import unittest
@@ -13,7 +13,7 @@ _VALID = '"VertexLitGeneric"\n{\n\t"$basetexture" "models/x"\n}\n'
 
 
 class ResolveTargetTests(unittest.TestCase):
-    """Ключ правки у каждого вида предмета свой — по нему её потом ищут."""
+    """Ключ правки у каждого вида предмета свой - по нему её потом ищут"""
 
     def test_weapon_key_comes_from_the_mode(self):
         self.assertEqual(vmt.resolve_target('scout_c_scattergun'),
@@ -34,7 +34,7 @@ class ResolveTargetTests(unittest.TestCase):
 
     def test_class_body_points_at_its_model(self):
         """Тело класса правится по своей модели: ключ `mdl_key` из данных
-        убрали, и редактор VMT у всех тел молча стал недоступен."""
+        убрали, и редактор VMT у всех тел молча стал недоступен"""
         from src.data.player_characters import PLAYER_BODY_MODE_KEYS, PLAYER_CHARACTERS
         for mode in PLAYER_BODY_MODE_KEYS:
             self.assertEqual(vmt.resolve_target(mode)[0],
@@ -45,10 +45,10 @@ class ResolveTargetTests(unittest.TestCase):
 
 
 class SaveEditTests(unittest.TestCase):
-    """Что происходит при сохранении правки."""
+    """Что происходит при сохранении правки"""
 
     def test_broken_syntax_is_refused(self):
-        """Сломанный VMT в игре даёт невидимый материал — не сохраняем."""
+        """Сломанный VMT в игре даёт невидимый материал - не сохраняем"""
         ok, error, _content = vmt.save_edit('', _VALID + '\n{ "oops"')
         self.assertFalse(ok)
         self.assertTrue(error)
@@ -61,7 +61,7 @@ class SaveEditTests(unittest.TestCase):
         self.assertEqual(twice.count(vmt.WATERMARK), 1)
 
     def test_original_is_backed_up_only_the_first_time(self):
-        """Иначе «вернуть как в игре» после второй правки вернуло бы первую."""
+        """Иначе «вернуть как в игре» после второй правки вернуло бы первую"""
         from src.services.edited_vmt_service import EditedVMTService
 
         key = 'test_vmt_source_service_key'

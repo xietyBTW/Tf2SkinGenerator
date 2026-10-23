@@ -1,4 +1,4 @@
-"""Тесты чистой модели режима превью (взаимоисключение + переходы)."""
+"""Тесты чистой модели режима превью (взаимоисключение + переходы)"""
 
 import unittest
 
@@ -15,7 +15,7 @@ class PreviewStateTests(unittest.TestCase):
         s = PreviewState()
         s.enter(PreviewMode.CUSTOM)
         self.assertTrue(s.is_custom)
-        # все остальные — погашены автоматически
+        # все остальные - погашены автоматически
         self.assertNotEqual(s.mode, PreviewMode.WEAPON)
         self.assertFalse(s.is_spy_masks)
         self.assertFalse(s.is_crithit)

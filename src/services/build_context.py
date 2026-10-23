@@ -15,11 +15,11 @@ logger = get_logger(__name__)
 @dataclass
 class TextureBuildContext:
     """
-    Общие параметры рендера VTF-текстур внутри одной сборки.
+    Общие параметры рендера VTF-текстур внутри одной сборки
 
     Бандлит константы, которые иначе пришлось бы прокидывать в кучу
     вспомогательных функций (vtf-папка, размер, формат, флаги, опции,
-    готовый VTF пользователя). Содержит общий рендер вторичных текстур.
+    готовый VTF пользователя). Содержит общий рендер вторичных текстур
     """
 
     vtf_output_path: Path
@@ -29,17 +29,36 @@ class TextureBuildContext:
     vtf_options: dict
     custom_vtf_path: Optional[str] = None
     #: Можно ли класть рельеф поверх родной нормали материала: у своей
-    #: (заменённой) модели развёртка другая, и родная нормаль легла бы мимо.
+    #: (заменённой) модели развёртка другая, и родная нормаль легла бы мимо
     stock_normal_ok: bool = True
-    #: Главная — игровая без вопроса (BuildRequest.main_from_game).
+    #: Главная - игровая без вопроса (BuildRequest.main_from_game)
     main_from_game: bool = False
-    #: Свои настройки карточки поверх общих: имя → (size, format, flags,
-    #: options), как `_eff` сборки. Нет — у всех материалов общие.
+    #: Свои настройки карточки поверх общих: имя -> (size, format, flags,
+    #: options), как `_eff` сборки. Нет - у всех материалов общие
     settings_for: Optional[Callable[[str], tuple]] = None
+    #: VtfJobs стадии текстур: обычные картинки жмутся в фоне
+    jobs: Optional[object] = None
+
+    def image_to_vtf(self, image_path, png_name: str, flags, options) -> None:
+        """Картинка -> VTF в папке мода через временный png_name: в фоне,
+        если стадия его ведёт, иначе сразу"""
+        from src.services.texture_service import TextureService
+        png = self.vtf_output_path / png_name
+        args = (image_path, self.vtf_output_path, png, "", self.size,
+                self.format_type, flags, options)
+        if self.jobs is not None:
+            self.jobs.submit(TextureService.image_to_vtf, *args, key=str(png))
+        else:
+            TextureService.image_to_vtf(*args)
+
+    def wait_vtfs(self) -> None:
+        """Перед чтением уже собранного VTF: фоновое сжатие должно закончиться"""
+        if self.jobs is not None:
+            self.jobs.wait()
 
     def for_material(self, name: str) -> "TextureBuildContext":
         """Контекст с настройками карточки `name`: ими собирается её VTF.
-        Доп. материалы (голова тела, «Прочее») раньше шли общими."""
+        Доп. материалы (голова тела, «Прочее») тоже со своими"""
         if not self.settings_for:
             return self
         size, fmt, flags, options = self.settings_for(name)
@@ -52,14 +71,14 @@ class TextureBuildContext:
         self, image_path: str, target_vtf_path: Path, png_name: str
     ) -> Optional[float]:
         """
-        Рендерит пользовательское изображение во вторичный VTF.
+        Рендерит пользовательское изображение во вторичный VTF
 
-        custom VTF → копия; анимированное изображение → анимированный VTF
-        (возвращает fps); иначе → обычный VTF через PNG. Опция normal всегда
-        снимается (вторичные материалы не бывают normal-map).
+        custom VTF -> копия, анимированное изображение -> анимированный VTF
+        (возвращает fps), иначе -> обычный VTF через PNG. Опция normal всегда
+        снимается (вторичные материалы не бывают normal-map)
 
         Returns:
-            fps анимации или None.
+            fps анимации или None
         """
         from src.services.texture_service import TextureService
 
@@ -68,8 +87,8 @@ class TextureBuildContext:
             return None
 
         # Делегируем единому рендеру главной текстуры. Вторичные материалы не
-        # бывают normal-map → снимаем опцию 'normal' (тогда idёт обычная ветка
-        # PNG→VTF, без создания *_normal.vtf).
+        # бывают normal-map -> снимаем опцию 'normal' (тогда idёт обычная ветка
+        # PNG->VTF, без создания *_normal.vtf)
         opts = dict(self.vtf_options) if self.vtf_options else {}
         opts.pop("normal", None)
         animated_fps, _ = TextureService.render_image_to_vtf(
@@ -82,6 +101,7 @@ class TextureBuildContext:
             format_type=self.format_type,
             flags=self.flags,
             vtf_options=opts,
+            jobs=self.jobs,
         )
         return animated_fps
 
@@ -89,41 +109,41 @@ class TextureBuildContext:
 @dataclass
 class MaterialSlots:
     """
-    Куда мод пишет материалы и где искать их оригиналы в игре.
+    Куда мод пишет материалы и где искать их оригиналы в игре
 
     Эта шестёрка ходит вместе через всю сборку: у функций, которые пишут
-    материалы, было по 12-21 аргументу, и больше половины — вот эти пути
+    материалы, было по 12-21 аргументу, и больше половины - вот эти пути
     (плюс параметры рендера, для которых уже есть TextureBuildContext).
-    Перечислять их по одному в каждой сигнатуре — верный способ однажды
-    передать не тот путь и заметить это только по фиолетовой модели в игре.
+    Перечислять их по одному в каждой сигнатуре - верный способ однажды
+    передать не тот путь и заметить это только по фиолетовой модели в игре
     """
 
-    #: Папка мода, куда кладутся VTF и VMT материалов.
+    #: Папка мода, куда кладутся VTF и VMT материалов
     vtf_output_path: Path
-    #: Готовый VMT главного материала — образец для вторичных.
+    #: Готовый VMT главного материала - образец для вторичных
     vmt_path: Path
-    #: Путь materials/... внутри мода (куда указывает $basetexture).
+    #: Путь materials/... внутри мода (куда указывает $basetexture)
     patched_cdmaterials_path: str
-    #: Пути $cdmaterials ОРИГИНАЛЬНОЙ модели — где искать текстуры игры.
+    #: Пути $cdmaterials ОРИГИНАЛЬНОЙ модели - где искать текстуры игры
     original_cdmaterials_paths: List[str] = field(default_factory=list)
     tf2_textures_vpk: Optional[str] = None
     tf2_misc_vpk: Optional[str] = None
-    #: Материалы, чей VTF в моде — копия игрового, а не работа человека
+    #: Материалы, чей VTF в моде - копия игрового, а не работа человека
     #: (ответ «из игры»). «Скопировать главную» у убер/зомби-варианта такую
-    #: пару не копирует: вариант остаётся игровым.
+    #: пару не копирует: вариант остаётся игровым
     game_copies: set = field(default_factory=set)
 
     def vtf(self, name: str) -> Path:
-        """Путь VTF материала внутри мода."""
+        """Путь VTF материала внутри мода"""
         return self.vtf_output_path / f"{name}.vtf"
 
     def own_vtf(self, name: str) -> Optional[Path]:
-        """VTF материала со своей картинкой человека (не копия игровой) или None."""
+        """VTF материала со своей картинкой человека (не копия игровой) или None"""
         path = self.vtf(name)
         return path if path.exists() and name.lower() not in self.game_copies else None
 
     def vmt(self, name: str) -> Path:
-        """Путь VMT материала внутри мода."""
+        """Путь VMT материала внутри мода"""
         return self.vtf_output_path / f"{name}.vmt"
 
 
@@ -136,12 +156,12 @@ class BuildContext:
     weapon_key: str
     temp_dir: Path
     # Пользовательские предупреждения о НЕкритичных, но важных проблемах сборки
-    # (текстура/материал не найдены → в игре будет фиолет). Показываются после
-    # сборки, чтобы пользователь не искал причину «успешного» но битого мода.
+    # (текстура/материал не найдены -> в игре будет фиолет). Показываются после
+    # сборки, чтобы пользователь не искал причину «успешного» но битого мода
     warnings: List[str] = field(default_factory=list)
 
     def warn(self, message: str) -> None:
-        """Добавляет предупприждение пользователю (без дублей) + лог."""
+        """Добавляет предупприждение пользователю (без дублей) + лог"""
         if message not in self.warnings:
             self.warnings.append(message)
         logger.warning(f"[BUILD WARN] {message}")
@@ -263,18 +283,17 @@ class BuildContext:
         Returns:
             BuildContext: Новый контекст сборки
         """
-        # Папка сборки — прямо в системном %TEMP% и с коротким именем: внутри
+        # Папка сборки - прямо в системном %TEMP% и с коротким именем: внутри
         # неё лежат пути вида vpkroot\materials\vgui\replay\thumbnails\models\
         # workshop\…, а vpk.exe, VTFCmd и studiomdl не умеют путей длиннее 260
-        # символов. Прежняя `<данные>\tools\temp\build_<время>_<id>_<режим>`
-        # съедала на ~50 символов больше, и сборка шапок падала. Префикс
-        # `tf2sg_` — уборка %TEMP% при старте снимает брошенные папки сама
-        # (file_utils.cleanup_stale_temp_artifacts), каждую по своему возрасту.
+        # символов, а у шапок длинные пути и так на грани. Префикс
+        # `tf2sg_` - уборка %TEMP% при старте снимает брошенные папки сама
+        # (file_utils.cleanup_stale_temp_artifacts), каждую по своему возрасту
         if base_temp_dir is None:
             import tempfile
             base_temp_dir = Path(tempfile.gettempdir())
 
-        # Случайный суффикс исключает коллизию двух сборок разом; режим — в лог.
+        # Случайный суффикс исключает коллизию двух сборок разом, режим - в лог
         build_id = f"tf2sg_b_{os.urandom(3).hex()}"
         temp_dir = base_temp_dir / build_id
         

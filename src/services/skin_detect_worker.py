@@ -1,17 +1,17 @@
 """
-Воркер определения стилей (skinfamilies) оригинальной игровой модели.
+Воркер определения стилей (skinfamilies) оригинальной игровой модели
 
 Используется при замене модели кастомной: чтобы приложение узнало, сколько
 стилей (skin 0/1/2…) и какие роли (Bloody/Clean/команды/австралий) есть у
-оригинала, и предложило пользователю их переопределить.
+оригинала, и предложило пользователю их переопределить
 
-Источник истины — QC декомпилированной игровой модели:
+Источник истины - QC декомпилированной игровой модели:
   1. Сначала ищем готовый QC в кэше декомпиляции (мгновенно).
-  2. Если кэша нет — извлекаем MDL из VPK и декомпилируем через Crowbar
-     (тот же путь, что и 3D-превью; результат тоже кладётся в кэш).
+  2. Если кэша нет - извлекаем MDL из VPK и декомпилируем через Crowbar
+     (тот же путь, что и 3D-превью, результат тоже кладётся в кэш)
 
-НИЧЕГО не трогает в дефолтном пути сборки — только читает QC и отдаёт
-структуру стилей наверх через сигнал.
+НИЧЕГО не трогает в дефолтном пути сборки - только читает QC и отдаёт
+структуру стилей наверх через сигнал
 """
 
 import os
@@ -30,12 +30,12 @@ logger = get_logger(__name__)
 
 
 class SkinDetectWorker(BaseWorker):
-    """Определяет skinfamilies оригинальной модели в фоне."""
+    """Определяет skinfamilies оригинальной модели в фоне"""
 
     # dict из ModelBuildService.extract_skin_info (num_skins, roles, is_team, …)
     detected = Signal(object)
-    # Не удалось (модель не найдена / ошибка декомпиляции) — UI просто не
-    # показывает стили, кастомная замена продолжает работать как одно-скиновая.
+    # Не удалось (модель не найдена / ошибка декомпиляции) - UI просто не
+    # показывает стили, кастомная замена продолжает работать как одно-скиновая
     failed = Signal(str)
 
     def __init__(
@@ -78,7 +78,7 @@ class SkinDetectWorker(BaseWorker):
         Строки скина, которые в игре - отдельный предмет («Критокола» - строка 2
         модели Бонка), становятся стилями с его именем. QC знает их только как
         «Skin N», а безымянные строки в полосу стилей не идут - и такую
-        текстуру было не выбрать и не поправить.
+        текстуру было не выбрать и не поправить
         """
         from src.data.item_skin_styles import styled_skins
         from src.data.weapon_model_index import tf2_root_from_misc_vpk
@@ -91,7 +91,7 @@ class SkinDetectWorker(BaseWorker):
         have = {int(index) for _label, index in info.get('styles') or ()}
         # Строка-копия более ранней (у «Ботоубийц» огнемёта строки 3/5/7 -
         # та же синяя: их цвет даёт навешенная голова робота) - не стиль:
-        # править в ней нечего, текстура общая.
+        # править в ней нечего, текстура общая
         extra = [(name, skin) for name, skin in named
                  if 0 < skin < len(rows) and skin not in have and rows[skin] not in rows[:skin]]
         if not extra:
@@ -104,17 +104,17 @@ class SkinDetectWorker(BaseWorker):
                       for s in info.get('skins') or []],
         }
 
-    # ── получение QC ─────────────────────────────────────────────────────── #
+    # получение QC
 
     def _get_qc(self) -> Optional[str]:
-        """QC из кэша или после декомпиляции (cache miss)."""
-        # 1) Быстрый путь — любой кэш для этого weapon_key.
+        """QC из кэша или после декомпиляции (cache miss)"""
+        # 1) Быстрый путь - любой кэш для этого weapon_key
         cached_qc = decompile_cache.find_cached_qc_for_weapon(self.weapon_key)
         if cached_qc:
             logger.info(f"[SKIN] кэш QC для {self.weapon_key}")
             return cached_qc
 
-        # 2) Cache miss — извлекаем и декомпилируем (как 3D-превью).
+        # 2) Cache miss - извлекаем и декомпилируем (как 3D-превью)
         return self._extract_and_decompile()
 
     def _mdl_rel(self) -> str:
@@ -131,7 +131,7 @@ class SkinDetectWorker(BaseWorker):
         )
 
     def _mdl_candidates(self) -> list:
-        """Пути MDL внутри VPK в порядке приоритета."""
+        """Пути MDL внутри VPK в порядке приоритета"""
         from src.data.weapon_quirks import PREVIEW_MDL_OVERRIDE
         from src.data.player_characters import PLAYER_BODY_MODE_KEYS as _PBK
 
@@ -146,11 +146,11 @@ class SkinDetectWorker(BaseWorker):
         )
 
     def _extract_and_decompile(self) -> Optional[str]:
-        """QC после извлечения из VPK и Crowbar. None — показывать нечего.
+        """QC после извлечения из VPK и Crowbar. None - показывать нечего
 
-        Определение стилей — фоновая подсказка, а не основная работа: любая
+        Определение стилей - фоновая подсказка, а не основная работа: любая
         неудача здесь означает «стилей не знаем», и наверх уходит пустой
-        результат, а не ошибка.
+        результат, а не ошибка
         """
         try:
             result = model_decompile_service.ensure_decompiled(

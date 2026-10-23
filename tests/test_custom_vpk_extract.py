@@ -1,10 +1,10 @@
 """
-Тесты распаковки VPK в CustomVPKService._extract_via_vpk_exe.
+Тесты распаковки VPK в CustomVPKService._extract_via_vpk_exe
 
-Регрессия: модуль использовал `subprocess` и `ToolPaths` без импорта — вызов
+Регрессия: модуль использовал `subprocess` и `ToolPaths` без импорта - вызов
 падал с NameError на первой же строке (ToolPaths.get_vpk_tool() вне try/except),
 ломая быстрый путь распаковки через vpk.exe. Эти тесты гарантируют, что путь
-работает и имена доступны.
+работает и имена доступны
 """
 
 import tempfile
@@ -22,7 +22,7 @@ def _fake_completed(returncode=0, stdout="", stderr=""):
 class ExtractViaVpkExeTests(unittest.TestCase):
     def test_module_has_subprocess_and_toolpaths(self):
         # Прямая защита от регрессии отсутствующих импортов: оба имени должны
-        # быть доступны в неймспейсе модуля (иначе путь падает с NameError).
+        # быть доступны в неймспейсе модуля (иначе путь падает с NameError)
         import src.services.custom_vpk_service as mod
         self.assertTrue(hasattr(mod, "subprocess"))
         self.assertTrue(hasattr(mod, "ToolPaths"))
@@ -34,10 +34,10 @@ class ExtractViaVpkExeTests(unittest.TestCase):
             out_dir = base / "out"
             out_dir.mkdir()
             vpk_tool = base / "vpk.exe"
-            vpk_tool.write_bytes(b"stub")  # ToolPaths.get_vpk_tool().exists() → True
+            vpk_tool.write_bytes(b"stub")  # ToolPaths.get_vpk_tool().exists() -> True
 
             def fake_run(*args, **kwargs):
-                # Эмулируем успешную распаковку: vpk.exe создаёт файл.
+                # Эмулируем успешную распаковку: vpk.exe создаёт файл
                 (out_dir / "extracted.txt").write_text("data")
                 return _fake_completed(returncode=0)
 

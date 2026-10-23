@@ -1,9 +1,9 @@
 """
-Стадия «строки BLU»: VTF+VMT синей строки $texturegroup поколоночно.
+Стадия «строки BLU»: VTF+VMT синей строки $texturegroup поколоночно
 
 Столбец бывает трёх видов: вариант без RED-пары (австралий-строка длиннее
 обычной), общий столбец (одно имя в обеих командах) и командный (своё синее
-имя). У каждого вида свой шаг.
+имя). У каждого вида свой шаг
 """
 
 import os
@@ -29,7 +29,7 @@ def build_blu_row_textures(
     Создаёт VTF+VMT для BLU-строки $texturegroup (row 1). На каждый столбец:
     спрашивает отдельное изображение, копирует соответствующую RED-текстуру,
     тянет оригинал из игры или пропускает (служебные/нейтральные shared,
-    скин-варианты без RED-аналога). Выравнивание по col_idx с red_row.
+    скин-варианты без RED-аналога). Выравнивание по col_idx с red_row
     """
     from src.data.material_filter import is_editable_material, is_hidden_at_build
     if not blu_row:
@@ -44,14 +44,14 @@ def build_blu_row_textures(
         # Служебные материалы (sheen-оверлеи, глаза и т.п.) и скрытые
         # (ЧС, маски шпиона) не спрашиваем: их пишет оригиналом
         # write_blacklisted_materials. Пропускаем по col_idx, не удаляя
-        # из списка, чтобы сохранить выравнивание с red_row.
+        # из списка, чтобы сохранить выравнивание с red_row
         if not is_editable_material(blu_tex_name) or is_hidden_at_build(blu_tex_name):
             continue
         # Австралий командой не меняется: его пишет оригиналом
-        # write_blacklisted_materials, а свою текстуру — panel-extra. Здесь
+        # write_blacklisted_materials, а свою текстуру - panel-extra. Здесь
         # он шёл «общим столбцом» с вопросом и VMT от главного, и терял
-        # золотой блеск. Праздничные имена (c_wrangler_xmas_blue) — родные
-        # командные материалы, их этот цикл и пишет.
+        # золотой блеск. Праздничные имена (c_wrangler_xmas_blue) - родные
+        # командные материалы, их этот цикл и пишет
         if qc_skin_parser.is_australium(blu_tex_name):
             continue
         # Находим соответствующее RED имя для этого столбца
@@ -69,7 +69,7 @@ def build_blu_row_textures(
 
 
 def _put_game_copy(slots, name, data) -> None:
-    """VTF материала - байтами игровой текстуры; помечается копией игры."""
+    """VTF материала - байтами игровой текстуры, помечается копией игры"""
     with open(slots.vtf(name), "wb") as f:
         f.write(data)
     slots.game_copies.add(name.lower())
@@ -81,13 +81,14 @@ def _variant_column(blu_tex_name, col_idx, ask, main_vtf, texture_filename,
     Скин-вариант (австралий, gold) имеет БОЛЬШЕ материалов, чем обычный.
     Например: normal { c_scattergun }, australian { c_scattergun, c_scattergun_gold }.
     c_scattergun_gold нет в RED-строке, но нам всё равно нужно его включить в мод.
-    Спрашиваем пользователя и создаём текстуру (или копируем основную).
+    Спрашиваем пользователя и создаём текстуру (или копируем основную)
     """
     logger.info(
         f"Дополнительный материал варианта (нет RED аналога): {blu_tex_name} (col {col_idx})"
     )
     variant_vtf_path = slots.vtf(blu_tex_name)
     variant_vmt_path = slots.vmt(blu_tex_name)
+    tex.wait_vtfs()   # копия главной читает её готовый VTF
 
     if not variant_vtf_path.exists():
         img = ask(blu_tex_name)
@@ -105,13 +106,13 @@ def _variant_column(blu_tex_name, col_idx, ask, main_vtf, texture_filename,
                     slots.game_copies.add(blu_tex_name.lower())
             img = None  # VTF на месте, пропускаем блок ниже
         if img == EXTRA_TEX_USE_MAIN or (img and not os.path.isfile(img)):
-            img = None   # ниже — копия основной
+            img = None   # ниже - копия основной
         if img:
             tex.for_material(blu_tex_name).render_user_image_vtf(
                 img, variant_vtf_path, f"{blu_tex_name}.png")
             logger.info(f"Создан VTF варианта (отд. изображение): {blu_tex_name}.vtf")
         elif not variant_vtf_path.exists():
-            # Пользователь отказался или нет callback — копируем основную
+            # Пользователь отказался или нет callback - копируем основную
             if main_vtf.exists():
                 copy_file_safe(main_vtf, variant_vtf_path)
                 logger.info(f"Создан VTF варианта (копия основной): {blu_tex_name}.vtf")
@@ -127,14 +128,14 @@ def _variant_column(blu_tex_name, col_idx, ask, main_vtf, texture_filename,
 
 def _shared_column(blu_tex_name, ask, main_vtf, slots, tex, animated_fps) -> None:
     """
-    BLU имя совпадает с RED — общая (нейтральная) скиновая текстура (sniper_lens,
+    BLU имя совпадает с RED - общая (нейтральная) скиновая текстура (sniper_lens,
     c_arrow и т.п.): спрашиваем пользователя, как для extra_materials.
-    Служебные общие сюда не доходят - их отсекает проверка в начале цикла.
+    Служебные общие сюда не доходят - их отсекает проверка в начале цикла
     """
     shared_vtf_path = slots.vtf(blu_tex_name)
     shared_vmt_path = slots.vmt(blu_tex_name)
     # VMT уже записан (тем же именем в соседнем столбце, у синего
-    # «из игры» — ссылкой без VTF): второй раз не спрашиваем.
+    # «из игры» - ссылкой без VTF): второй раз не спрашиваем
     if not shared_vtf_path.exists() and not shared_vmt_path.exists():
         img = ask(blu_tex_name)
         if img == EXTRA_TEX_USE_GAME_ORIGINAL:
@@ -148,6 +149,7 @@ def _shared_column(blu_tex_name, ask, main_vtf, slots, tex, animated_fps) -> Non
             _put_game_copy(slots, blu_tex_name, game_vtf)
             logger.info(f"Shared VTF из игры: {blu_tex_name}.vtf")
         elif img == EXTRA_TEX_USE_MAIN:
+            tex.wait_vtfs()
             if not main_vtf.exists():
                 logger.debug(f"Shared: главной VTF нет, пропуск: {blu_tex_name}")
                 return
@@ -160,19 +162,14 @@ def _shared_column(blu_tex_name, ask, main_vtf, slots, tex, animated_fps) -> Non
             mt = tex.for_material(blu_tex_name)
             flags, merged = TextureService.resolve_vtf_flags_and_options(
                 mt.flags, mt.vtf_options, drop_normal=True)
-            png = slots.vtf_output_path / f"{blu_tex_name}.png"
-            TextureService.process_image(img, png, mt.size)
-            TextureService.create_vtf(str(png), str(slots.vtf_output_path),
-                                      mt.format_type, flags, merged)
-            if png.exists():
-                png.unlink()
+            mt.image_to_vtf(img, f"{blu_tex_name}.png", flags, merged)
             logger.info(f"Создан shared VTF: {blu_tex_name}.vtf")
         else:
-            # Пользователь пропустил — не включаем
+            # Пользователь пропустил - не включаем
             logger.debug(f"Shared texture пропущена пользователем: {blu_tex_name}")
             return
 
-    # VTF существует → создаём VMT если нет
+    # VTF существует -> создаём VMT если нет
     if not shared_vmt_path.exists():
         game_source.write_material_vmt(shared_vmt_path, slots.vmt_path,
                                        slots.patched_cdmaterials_path, blu_tex_name)
@@ -182,7 +179,7 @@ def _shared_column(blu_tex_name, ask, main_vtf, slots, tex, animated_fps) -> Non
 
 def _team_column(blu_tex_name, red_tex_name, col_idx, ask, ctx, slots, tex,
                  animated_fps, is_normal_map, extra_materials_vtf_paths) -> None:
-    """Командный столбец: своё синее имя у RED-материала."""
+    """Командный столбец: своё синее имя у RED-материала"""
     logger.info(f"Создаем текстуры для BLU команды: {blu_tex_name} (RED: {red_tex_name})")
     blu_vtf_path = slots.vtf(blu_tex_name)
     blu_vmt_path = slots.vmt(blu_tex_name)
@@ -190,11 +187,10 @@ def _team_column(blu_tex_name, red_tex_name, col_idx, ask, ctx, slots, tex,
     # Спрашиваем у пользователя отдельное изображение для BLU материала
     img = ask(blu_tex_name)
     # «Из игры»: синяя текстура и так лежит в игре, и VMT смотрит на
-    # неё её путём, как у золота. Копия VTF в моде была мёртвым весом
+    # неё её путём, как у золота. Копия VTF в моде - мёртвый вес
     # (у медигана 5,5 МБ при своей текстуре в 87 КБ). Только когда
-    # родной VMT смотрит на текстуру с именем материала — ту самую,
-    # что раньше копировалась; иначе (синий цвет задан в VMT, а
-    # текстура общая с красным) всё по-старому.
+    # родной VMT смотрит на текстуру с именем материала, иначе (синий
+    # цвет задан в VMT, а текстура общая с красным) VTF копируется
     game_tex = (game_source.game_texture(blu_tex_name, ctx, slots)
                 if img == EXTRA_TEX_USE_GAME_ORIGINAL else None)
     if game_tex and game_tex.rsplit('/', 1)[-1].lower() != blu_tex_name.lower():
@@ -211,8 +207,9 @@ def _team_column(blu_tex_name, red_tex_name, col_idx, ask, ctx, slots, tex,
             _put_game_copy(slots, blu_tex_name, game_vtf)
             logger.info(f"Извлечён VTF из игры для BLU текстуры: {blu_tex_name}.vtf")
         else:
-            # «Скопировать главную» у BLU — это его RED-пара; сюда же
-            # падает «из игры», когда синей текстуры в игре нет.
+            # «Скопировать главную» у BLU - это его RED-пара, сюда же
+            # падает «из игры», когда синей текстуры в игре нет
+            tex.wait_vtfs()
             red_src = (slots.vtf(red_tex_name) if col_idx == 0
                        else extra_materials_vtf_paths.get(red_tex_name, slots.vtf(red_tex_name)))
             if red_src.exists():
@@ -224,12 +221,12 @@ def _team_column(blu_tex_name, red_tex_name, col_idx, ask, ctx, slots, tex,
     if img and os.path.isfile(img):
         # Пользователь дал отдельное изображение для этого BLU материала
         logger.info(f"Используем отдельное изображение для BLU {blu_tex_name}: {img}")
-        # Синий — та же карточка, что и красная пара: её настройки.
+        # Синий - та же карточка, что и красная пара: её настройки
         tex.for_material(red_tex_name).render_user_image_vtf(
             img, blu_vtf_path, f"{blu_tex_name}.png")
     elif not blu_vtf_path.exists() and not game_tex:
-        # Пользователь не предоставил изображение для BLU —
-        # не включаем в мод, движок найдёт оригинал сам.
+        # Пользователь не предоставил изображение для BLU -
+        # не включаем в мод, движок найдёт оригинал сам
         logger.debug(f"BLU текстура пропускается (нет изображения): {blu_tex_name}")
         return
 
@@ -244,6 +241,7 @@ def _team_column(blu_tex_name, red_tex_name, col_idx, ask, ctx, slots, tex,
 
     # Normal map для BLU
     if is_normal_map:
+        tex.wait_vtfs()
         red_normal_vtf = slots.vtf(f"{red_tex_name}_normal")
         if red_normal_vtf.exists():
             copy_file_safe(red_normal_vtf, slots.vtf(f"{blu_tex_name}_normal"))

@@ -1,14 +1,14 @@
 """
-Договор между страницей и Python.
+Договор между страницей и Python
 
 Страница зовёт методы по ИМЕНИ строкой, а dev-сервер раскрывает присланный
 объект как `fn(**params)`. Значит, разъехаться можно тремя способами, и все
 три уже случались: метод есть в api.js, но забыт в белом списке сервера;
 метод переименован в Python; у параметра другое имя. Ошибка при этом видна
-только в браузере и только когда до кнопки дошли руками.
+только в браузере и только когда до кнопки дошли руками
 
-Тест читает сам JS (регулярками — разбирать JS ради списка строк незачем) и
-сверяет с настоящими сигнатурами.
+Тест читает сам JS (регулярками - разбирать JS ради списка строк незачем) и
+сверяет с настоящими сигнатурами
 """
 
 from __future__ import annotations
@@ -23,19 +23,19 @@ from frontend.devserver import ALLOWED
 
 ROOT = Path(__file__).resolve().parent.parent
 #: Весь фронт целиком, с подпапками: вызовы разъехались по модулям
-#: (`controls_for` живёт в controls.js, частицы — в particles/), и список
-#: файлов пришлось бы дополнять после каждого распила.
+#: (`controls_for` живёт в controls.js, частицы - в particles/), и список
+#: файлов пришлось бы дополнять после каждого распила
 _SOURCES = tuple(sorted((ROOT / "frontend" / "mockup").rglob("*.js")))
 
-#: `call('метод', { ключ, ключ })` и `cached(...)` — в api.js через обёртки,
+#: `call('метод', { ключ, ключ })` и `cached(...)` - в api.js через обёртки,
 #: в app.js как `api.call(...)`. Тело объекта берём только без вложенности:
-#: с ним ключи первого уровня регуляркой уже не выделить, а таких вызовов нет.
+#: с ним ключи первого уровня регуляркой уже не выделить, а таких вызовов нет
 _CALL = re.compile(r"\b(?:api\.)?(?:call|cached)\(\s*'([a-z_0-9]+)'"
                    r"(?:\s*,\s*\{([^{}]*)\})?")
 
 
 def _calls() -> list[tuple[str, str, list[str]]]:
-    """(файл, метод, ключи) по всем вызовам с литеральным объектом."""
+    """(файл, метод, ключи) по всем вызовам с литеральным объектом"""
     found = []
     for path in _SOURCES:
         text = path.read_text(encoding="utf-8")
@@ -50,7 +50,7 @@ def _calls() -> list[tuple[str, str, list[str]]]:
 
 
 def test_calls_found() -> None:
-    """Страховка на саму регулярку: молчаливый ноль обесценил бы тест."""
+    """Страховка на саму регулярку: молчаливый ноль обесценил бы тест"""
     assert len(_calls()) > 100
 
 
@@ -59,7 +59,7 @@ def test_calls_found() -> None:
 def test_call_reaches_python(source: str, method: str, keys: list[str]) -> None:
     fn = ALLOWED.get(method)
     assert fn is not None, (
-        f"{source}: метод '{method}' не в белом списке frontend/devserver.py — "
+        f"{source}: метод '{method}' не в белом списке frontend/devserver.py - "
         f"страница получит 404")
 
     params = inspect.signature(fn).parameters
@@ -73,7 +73,7 @@ def test_call_reaches_python(source: str, method: str, keys: list[str]) -> None:
 
 
 def test_allowed_methods_are_public_api() -> None:
-    """Белый список ведёт в пакет api, а не в случайную функцию."""
+    """Белый список ведёт в пакет api, а не в случайную функцию"""
     from src.app import api
 
     for name, fn in ALLOWED.items():

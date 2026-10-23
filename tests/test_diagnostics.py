@@ -1,4 +1,4 @@
-"""Тесты диагностики модов (чистый бэкенд, без Qt)."""
+"""Тесты диагностики модов (чистый бэкенд, без Qt)"""
 
 import struct
 import tempfile
@@ -19,7 +19,7 @@ def _codes(findings):
     return {f.code for f in findings}
 
 
-# ── Бинарные читатели ────────────────────────────────────────────────────── #
+# Бинарные читатели
 
 class VtfReaderTests(unittest.TestCase):
     def test_parse_size(self):
@@ -48,11 +48,11 @@ class MdlReaderTests(unittest.TestCase):
         struct.pack_into("<i", buf, 0xD0, 0x100)  # textureindex
         struct.pack_into("<i", buf, 0xD4, 1)      # numcdtextures
         struct.pack_into("<i", buf, 0xD8, 0x150)  # cdtextureindex
-        # mstudiotexture_t @0x100: sznameindex → имя на 0x140
+        # mstudiotexture_t @0x100: sznameindex -> имя на 0x140
         struct.pack_into("<i", buf, 0x100, 0x40)
         name_bytes = material.encode() + b"\x00"
         buf[0x140:0x140 + len(name_bytes)] = name_bytes
-        # cd pointer array @0x150: 1 указатель → строка на 0x160
+        # cd pointer array @0x150: 1 указатель -> строка на 0x160
         struct.pack_into("<i", buf, 0x150, 0x160)
         cd_bytes = cdmaterials.encode() + b"\x00"
         buf[0x160:0x160 + len(cd_bytes)] = cd_bytes
@@ -69,7 +69,7 @@ class MdlReaderTests(unittest.TestCase):
         # Руки инженера: в таблице скинов есть рука Ганслингера, но сетки с
         # ней в модели нет. Игра её не рисует, и фиолетового от неё не будет.
         # Материал вне таблицы (замена у LOD) проверяется как раньше, а имя,
-        # которое не прочиталось, не сдвигает остальные.
+        # которое не прочиталось, не сдвигает остальные
         names = ["arm_red", "hand", "", "arm_blue", "mech_blue", "lod_arm"]
         buf = bytearray(0x800)
         buf[0:4] = b"IDST"
@@ -77,10 +77,10 @@ class MdlReaderTests(unittest.TestCase):
         for i, name in enumerate(names):
             struct.pack_into("<i", buf, 0x100 + i * 64, 0x300 + i * 16 - (0x100 + i * 64))
             buf[0x300 + i * 16:0x300 + i * 16 + len(name)] = name.encode()
-        # Два скина по три столбца: {arm, hand, mech} RED и BLU.
+        # Два скина по три столбца: {arm, hand, mech} RED и BLU
         struct.pack_into("<iii", buf, 0xDC, 3, 2, 0x400)
         struct.pack_into("<6h", buf, 0x400, 0, 1, 2, 3, 1, 4)
-        # Одна часть тела, одна модель, две сетки: столбцы 0 и 1.
+        # Одна часть тела, одна модель, две сетки: столбцы 0 и 1
         struct.pack_into("<ii", buf, 0xE8, 1, 0x500)
         struct.pack_into("<iiii", buf, 0x500, 0, 1, 0, 0x10)          # модели @0x510
         struct.pack_into("<ii", buf, 0x510 + 72, 2, 0x100)            # сетки @0x610
@@ -96,7 +96,7 @@ class MdlReaderTests(unittest.TestCase):
         self.assertEqual(hdr.material_names, [])
 
 
-# ── Разбор VMT ───────────────────────────────────────────────────────────── #
+# Разбор VMT
 
 class VmtParseTests(unittest.TestCase):
     def test_shader_and_texture_refs(self):
@@ -108,11 +108,11 @@ class VmtParseTests(unittest.TestCase):
         refs = vmt.texture_refs()
         self.assertEqual(refs["basetexture"], "materials/models/w/gun")
         self.assertEqual(refs["bumpmap"], "materials/models/w/gun_normal")
-        self.assertNotIn("envmap", refs)   # env_cubemap — не файл
+        self.assertNotIn("envmap", refs)   # env_cubemap - не файл
 
     def test_shared_game_textures_not_tracked(self):
-        # Рескины ссылаются на общие игровые lightwarp/detail/phong и не везут их —
-        # эти параметры не должны попадать в проверку «нет текстуры».
+        # Рескины ссылаются на общие игровые lightwarp/detail/phong и не везут их -
+        # эти параметры не должны попадать в проверку «нет текстуры»
         vmt = parse_vmt("materials/x.vmt",
                         '"VertexLitGeneric"\n{\n'
                         '\t"$basetexture" "models/w/gun"\n'
@@ -126,7 +126,7 @@ class VmtParseTests(unittest.TestCase):
         self.assertNotIn("phongexponenttexture", refs)
 
 
-# ── Проверки (изолированно) ──────────────────────────────────────────────── #
+# Проверки (изолированно)
 
 class ChecksTests(unittest.TestCase):
     def _mod(self, **kw):
@@ -145,13 +145,13 @@ class ChecksTests(unittest.TestCase):
         self.assertEqual(checks.check_vmt_textures_exist(mod), [])
 
     def test_game_texture_not_flagged(self):
-        # VMT ссылается на текстуру, которую даёт сама игра: фиолета не будет.
+        # VMT ссылается на текстуру, которую даёт сама игра: фиолета не будет
         mod = self._mod(vmts=[parse_vmt("materials/m/gun.vmt", self._VMT)],
                         game_has=lambda rel: rel == "materials/m/gun.vtf")
         self.assertEqual(checks.check_vmt_textures_exist(mod), [])
 
     def test_texture_extension_stripped_like_engine(self):
-        # Игровые VMT праздничного оружия пишут `$baseTexture "….psd"`.
+        # Игровые VMT праздничного оружия пишут `$baseTexture "….psd"`
         from src.services.diagnostics.context import normalize_material_path
         self.assertEqual(normalize_material_path("Models\\W\\Saw_XMAS.psd"), "models/w/saw_xmas")
         self.assertEqual(normalize_material_path("models/w/saw.vtf"), "models/w/saw")
@@ -170,7 +170,7 @@ class ChecksTests(unittest.TestCase):
         self.assertNotIn("model.missing_material", _codes(checks.check_models(game)))
 
     def test_missing_texture_deduped(self):
-        # Одна и та же недостающая текстура в двух VMT → одна находка.
+        # Одна и та же недостающая текстура в двух VMT -> одна находка
         a = parse_vmt("materials/a.vmt", self._VMT)
         b = parse_vmt("materials/b.vmt", self._VMT)
         mod = self._mod(vmts=[a, b])
@@ -209,12 +209,12 @@ class ChecksTests(unittest.TestCase):
                         external_paths={"materials/m/x.vmt"})
         codes = _codes(checks.check_conflicts(mod))
         self.assertIn("conflict.overlap", codes)
-        # нет пересечения → нет находки
+        # нет пересечения -> нет находки
         mod2 = self._mod(all_rel={"materials/m/x.vmt"}, external_paths={"models/z.mdl"})
         self.assertEqual(checks.check_conflicts(mod2), [])
 
 
-# ── Интеграция: сборка из папки + прогон всех проверок ───────────────────── #
+# Интеграция: сборка из папки + прогон всех проверок
 
 class LocalizationTests(unittest.TestCase):
     def test_render_selects_language_with_params(self):
@@ -223,7 +223,7 @@ class LocalizationTests(unittest.TestCase):
         t_ru, _, _ = render("summary", "ru", nv=2, nt=3, nm=1)
         self.assertIn("Inspected: 2 VMT, 3 VTF, 1 MDL", t_en)
         self.assertNotEqual(t_en, t_ru)             # реально переведено
-        # неизвестный язык → фолбэк на en, неизвестный код → пусто
+        # неизвестный язык -> фолбэк на en, неизвестный код -> пусто
         self.assertEqual(render("summary", "xx", nv=0, nt=0, nm=0)[0],
                          render("summary", "en", nv=0, nt=0, nm=0)[0])
         self.assertEqual(render("nope", "en"), ("", "", ""))
@@ -262,7 +262,7 @@ class BuildInspectedModTests(unittest.TestCase):
             self.assertEqual(mod.vtf_sizes["materials/models/weapons/gun"], (256, 256))
 
             findings = run_all_checks(mod)
-            # Здоровый мод → нет ошибок и нет предупреждений (только INFO-сводка).
+            # Здоровый мод -> нет ошибок и нет предупреждений (только INFO-сводка)
             self.assertFalse([f for f in findings
                               if f.severity in (Severity.ERROR, Severity.WARNING)])
             self.assertIn("summary", _codes(findings))

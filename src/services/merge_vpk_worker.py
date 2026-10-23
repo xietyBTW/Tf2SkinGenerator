@@ -1,5 +1,5 @@
 """
-Воркер для асинхронного объединения нескольких VPK-модов в один (фоновый поток).
+Воркер для асинхронного объединения нескольких VPK-модов в один (фоновый поток)
 """
 
 from typing import Tuple
@@ -11,10 +11,10 @@ from src.data.translations import TRANSLATIONS
 
 class MergeVpkWorker(StandardWorker):
     """
-    Фоновое объединение VPK-файлов через MergeVPKService.
+    Фоновое объединение VPK-файлов через MergeVPKService
 
     Сигналы (наследуются от StandardWorker): finished(bool, str),
-    progress(int, str), error(str).
+    progress(int, str), error(str)
     """
 
     def __init__(self, vpk_files, filename, export_folder, language: str = "en", parent=None):

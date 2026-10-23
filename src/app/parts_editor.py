@@ -1,23 +1,23 @@
 """
-Части модели: своя картинка или цвет на отдельном куске геометрии.
+Части модели: своя картинка или цвет на отдельном куске геометрии
 
-Материал у предмета один, значит и текстура одна. «Синий приклад» — это вклейка
+Материал у предмета один, значит и текстура одна. «Синий приклад» - это вклейка
 в общую текстуру по месту части на развёртке (texture_compose_service).
 Склейка кладётся туда же, куда легла бы обычная своя текстура, поэтому сборка
-и превью про части не знают.
+и превью про части не знают
 
-Правда о покраске — мазки (`part_textures`, `part_colors`) и основа под ними
-(`part_bases`). Склейка из них ВЫВОДИТСЯ, её файл — всего лишь последний
-результат: его можно удалить и собрать заново. «Эта текстура — наша склейка»
-значит ровно одно: у слота есть запись в `part_bases`.
+Правда о покраске - мазки (`part_textures`, `part_colors`) и основа под ними
+(`part_bases`). Склейка из них ВЫВОДИТСЯ, её файл - всего лишь последний
+результат: его можно удалить и собрать заново. «Эта текстура - наша склейка»
+значит ровно одно: у слота есть запись в `part_bases`
 
 Пересборка идёт ВНЕ замка сеанса: на 2048² это доли секунды, и всё это время
 страница не могла бы спросить ничего другого. Под замком снимается задание
-(основа, слои, куда писать) и потом кладётся результат; обогнанный более
-свежей правкой результат выбрасывается по номеру поколения.
+(основа, слои, куда писать) и потом кладётся результат, обогнанный более
+свежей правкой результат выбрасывается по номеру поколения
 
-Слот — карточка плюс стиль или команда (`part_specs.slot_key`): у стиля
-Bloody и у синей команды своя стопка мазков.
+Слот - карточка плюс стиль или команда (`part_specs.slot_key`): у стиля
+Bloody и у синей команды своя стопка мазков
 """
 
 from __future__ import annotations
@@ -41,38 +41,38 @@ logger = get_logger(__name__)
 
 
 def _existing(path: Optional[str]) -> Optional[str]:
-    """Путь, если файл на месте, иначе None."""
+    """Путь, если файл на месте, иначе None"""
     return path if path and os.path.isfile(path) else None
 
 
 class PartsEditor:
-    """Покраска частей модели одного сеанса."""
+    """Покраска частей модели одного сеанса"""
 
-    #: Сколько склеек держим на диске. Одной мало: путь — это ещё и адрес
+    #: Сколько склеек держим на диске. Одной мало: путь - это ещё и адрес
     #: картинки во вьювере и в альбоме, и удалить только что показанную нельзя,
-    #: пока браузер её грузит.
+    #: пока браузер её грузит
     _KEEP_COMPOSITES = 4
 
     #: Длинная сторона кадра анимации для вьювера: он держит все кадры
-    #: текстурами на видеокарте, 60 кадров 1024² — это 240 МБ.
-    #: ponytail: один размер на всех; ужимать до 512 — если слабые видеокарты
-    #: пожалуются.
+    #: текстурами на видеокарте, 60 кадров 1024² - это 240 МБ.
+    #: ponytail: один размер на всех, ужимать до 512 - если слабые видеокарты
+    #: пожалуются
     _ANIM_PREVIEW_SIZE = 1024
 
     def __init__(self, host: "AppSession") -> None:
         self._host = host
-        #: Порядок появления склеек: старые ФАЙЛЫ чистим (`_drop_old_composites`).
+        #: Порядок появления склеек: старые ФАЙЛЫ чистим (`_drop_old_composites`)
         self._compose_files: List[str] = []
-        #: Номера файлов склеек: имя — это ещё и адрес во вьювере, и по прежнему
-        #: имени браузер показал бы прошлую склейку из кэша.
+        #: Номера файлов склеек: имя - это ещё и адрес во вьювере, и по прежнему
+        #: имени браузер показал бы прошлую склейку из кэша
         self._compose_counter = itertools.count(1)
-        #: Последнее поколение каждого слота: результат старше него — обогнан.
+        #: Последнее поколение каждого слота: результат старше него - обогнан
         self._generations = itertools.count(1)
         self._latest: Dict[str, int] = {}
-        #: {склейка превью: полная склейка со всеми кадрами} — на одну сборку.
+        #: {склейка превью: полная склейка со всеми кадрами} - на одну сборку
         self._baked: Dict[str, str] = {}
         #: Анимация частей в 3D: номер последнего расчёта (старые обрываются
-        #: по нему) и что крутить, если настройку включат позже.
+        #: по нему) и что крутить, если настройку включат позже
         self._anim_seq = 0
         self._anim_last: Any = None
         self._anim_lock = threading.Lock()
@@ -85,31 +85,29 @@ class PartsEditor:
     def _lock(self):
         return self._host._lock
 
-    # ═══════════════════════════════════════════════════════════════════════ #
     # Модель, карточка, слот
-    # ═══════════════════════════════════════════════════════════════════════ #
 
     def _parts_model(self, material: str = '') -> Any:
-        """(разбор модели, имя материала в OBJ, ключ карточки) или ошибка.
+        """(разбор модели, имя материала в OBJ, ключ карточки) или ошибка
 
         Имена расходятся: у одноматериальной модели карточка зовётся служебным
-        ключом, а группа в OBJ — материалом из SMD. Связываем их здесь, чтобы
-        дальше никто про это не думал.
+        ключом, а группа в OBJ - материалом из SMD. Связываем их здесь, чтобы
+        дальше никто про это не думал
         """
         from src.domain.preview.texture_state import is_decor
         from src.services import mesh_parts_service
 
         if is_decor(material):
             return self._decor_parts_model(material)
-        # Карточка части-материала: её геометрия — часть исходного материала, и
-        # красят её там же (разбор на части о материалах частей не знает).
+        # Карточка части-материала: её геометрия - часть исходного материала, и
+        # красят её там же (разбор на части о материалах частей не знает)
         material = self.preview.textures.part_cards.get(material, material)
         model = mesh_parts_service.load(self._host._obj_path, self.preview.part_cuts,
                                         self.preview.part_regions)
         if not model:
             return {'error': 'Модель ещё не загружена'}
         # Номера частей считаются по геометрии в кадре: у разбитой бутылки они
-        # другие, и мазки легли бы не на те куски основной.
+        # другие, и мазки легли бы не на те куски основной
         if self._host._bodygroups:
             return {'error': 'Части красят основное состояние модели - верните переключатель'}
         found = self._mesh_of(model, material)
@@ -117,10 +115,10 @@ class PartsEditor:
 
     def _item_meshes(self, model: Any) -> List[str]:
         """Материалы OBJ, которые и есть предмет: без призрака оригинала
-        (подгонка своей модели) и пушки-носителя праздничного оружия — она
-        подложка сцены, а предмет — гирлянда на ней. Без этого у
+        (подгонка своей модели) и пушки-носителя праздничного оружия - она
+        подложка сцены, а предмет - гирлянда на ней. Без этого у
         одноматериальной гирлянды имён выходило два, и её карточку
-        («__single__») искали по имени."""
+        («__single__») искали по имени"""
         names = [n for n in model.materials if not n.startswith('ghost:')]
         own = set(self.preview.scene_item_materials or ())
         if own & set(names):
@@ -128,11 +126,11 @@ class PartsEditor:
         return names
 
     def _mesh_of(self, model: Any, material: str) -> Any:
-        """(материал в OBJ, карточка) по имени карточки или ошибка."""
+        """(материал в OBJ, карточка) по имени карточки или ошибка"""
         t = self.preview.textures
-        # Австралий — та же геометрия, что у главного материала, со своей
-        # текстурой: его карточку назвали прямо, либо он включён в кадре —
-        # тогда части красят то, что человек видит.
+        # Австралий - та же геометрия, что у главного материала, со своей
+        # текстурой: его карточку назвали прямо, либо он включён в кадре -
+        # тогда части красят то, что человек видит
         gold = t.is_variant_material(material)
         if gold:
             material = ''
@@ -140,7 +138,7 @@ class PartsEditor:
         if len(names) == 1:
             # У одноматериальной модели карточка ВСЕГДА служебная, как её ни
             # назови: вьювер знает материал по имени из SMD и присылает его,
-            # а работа хранится под ключом главной текстуры.
+            # а работа хранится под ключом главной текстуры
             obj_mat, card = names[0], t.storage_main_key()
         else:
             wanted = (material or t.stable_main() or '').lower()
@@ -155,8 +153,8 @@ class PartsEditor:
         return obj_mat, card
 
     def _card_of_mesh(self, model: Any, obj_mat: str) -> str:
-        """Обратное `_mesh_of`: карточка материала OBJ (главная — служебным
-        ключом у одноматериальной модели), без варианта австралия."""
+        """Обратное `_mesh_of`: карточка материала OBJ (главная - служебным
+        ключом у одноматериальной модели), без варианта австралия"""
         t = self.preview.textures
         names = self._item_meshes(model)
         if len(names) == 1:
@@ -165,11 +163,11 @@ class PartsEditor:
         return next((m for m in known if m.lower() == obj_mat.lower()), obj_mat)
 
     def _decor_parts_model(self, material: str) -> Any:
-        """Части гирлянды: разбор её собственной модели, карточка = меш.
+        """Части гирлянды: разбор её собственной модели, карточка = меш
 
-        Геометрия гирлянды — отдельный OBJ, и номера треугольников в нём свои;
+        Геометрия гирлянды - отдельный OBJ, и номера треугольников в нём свои;
         вьювер присылает их по мешу гирлянды. Поэтому ни служебного ключа, ни
-        варианта здесь нет — имя меша и есть карточка.
+        варианта здесь нет - имя меша и есть карточка
         """
         from src.services import mesh_parts_service
 
@@ -183,7 +181,7 @@ class PartsEditor:
         return model, material, material
 
     def _parts_obj(self, obj_mat: str) -> str:
-        """OBJ, в котором лежит материал: у гирлянды — свой."""
+        """OBJ, в котором лежит материал: у гирлянды - свой"""
         from src.domain.preview.texture_state import is_decor
         decor = self._host.decor.for_card(obj_mat) if is_decor(obj_mat) else None
         return decor.obj_path if decor else self._host._obj_path
@@ -191,11 +189,11 @@ class PartsEditor:
     def _slot(self, card: str, style: Optional[int] = None,
               team: Optional[str] = None) -> str:
         """
-        Ключ хранения покраски: карточка плюс стиль или команда.
+        Ключ хранения покраски: карточка плюс стиль или команда
 
         Склейка ложится в слот стиля (`skin_overrides`) или команды, и мазки у
-        каждого слота свои: покрасил Bloody у гильотины, вернулся на базовый —
-        там чисто, и следующий мазок не пересоберёт текстуру с чужими мазками.
+        каждого слота свои: покрасил Bloody у гильотины, вернулся на базовый -
+        там чисто, и следующий мазок не пересоберёт текстуру с чужими мазками
         """
         from src.domain.preview.texture_state import is_decor
         from src.shared.constants import Team
@@ -203,8 +201,8 @@ class PartsEditor:
         t = self.preview.textures
         if style is None:
             style = self.preview.active_style
-        # У гирлянды нет стилей; команда — как у любой карточки: у огоньков
-        # фестивайзера синие свои, и мазки на них — своя стопка.
+        # У гирлянды нет стилей, команда - как у любой карточки: у огоньков
+        # фестивайзера синие свои, и мазки на них - своя стопка
         if is_decor(card):
             style = 0
         if team is None:
@@ -214,13 +212,13 @@ class PartsEditor:
 
     def _per_team(self, card: str) -> bool:
         """Своя ли у карточки текстура на каждую команду. У командного
-        материала — всегда; у нейтрального — под «сделать командным»: тогда
-        RED и BLU правят порознь, и основа у мазков тоже своя."""
+        материала - всегда, у нейтрального - под «сделать командным»: тогда
+        RED и BLU правят порознь, и основа у мазков тоже своя"""
         t = self.preview.textures
         return t.is_team_material(card) or bool(t.force_team)
 
     def _slot_texture(self, card: str, style: int, team: str) -> Optional[str]:
-        """Что лежит на карточке в этом стиле/команде — без разрешения."""
+        """Что лежит на карточке в этом стиле/команде - без разрешения"""
         from src.domain.preview.texture_state import is_decor
         t = self.preview.textures
         if style and not is_decor(card):
@@ -229,13 +227,13 @@ class PartsEditor:
 
     def _put_slot_texture(self, card: str, path: Optional[str],
                           style: int, team: str) -> None:
-        """Кладёт текстуру в слот стиля/команды. Активный слот — обычной
-        маршрутизацией (нейтральная текстура уходит в обе команды), чужой —
-        напрямую: его правила показа сейчас не действуют."""
+        """Кладёт текстуру в слот стиля/команды. Активный слот - обычной
+        маршрутизацией (нейтральная текстура уходит в обе команды), чужой -
+        напрямую: его правила показа сейчас не действуют"""
         from src.domain.preview.texture_state import is_decor
         from src.shared.constants import Team
         t = self.preview.textures
-        # У гирлянды стилей нет: её слот — это только команда.
+        # У гирлянды стилей нет: её слот - это только команда
         if is_decor(card):
             if team == t.active_team:
                 t.set_texture(card, path)
@@ -251,7 +249,7 @@ class PartsEditor:
         else:
             # Нейтральная карточка одна на обе команды: `parse_slot` называет
             # её слот красным, и запись в одну команду оставила бы другой
-            # прежнюю, возможно уже удалённую, склейку.
+            # прежнюю, возможно уже удалённую, склейку
             where = [t.textures.setdefault(side, {}) for side in (Team.RED, Team.BLU)]
         for slot in where:
             if path:
@@ -261,11 +259,11 @@ class PartsEditor:
 
     def _shape_key(self, obj_mat: str) -> str:
         """
-        Отпечаток РАЗБИЕНИЯ: модель, её время и сделанные разрезы.
+        Отпечаток РАЗБИЕНИЯ: модель, её время и сделанные разрезы
 
         По нему решается, отдавать ли карты треугольников: они занимают 96%
-        ответа, а меняются только от резки. Разрез — список НАБОРОВ островов:
-        {0: [[1], [2]]} и {0: [[1, 2]]} — разные разбиения.
+        ответа, а меняются только от резки. Разрез - список НАБОРОВ островов:
+        {0: [[1], [2]]} и {0: [[1, 2]]} - разные разбиения
         """
         cuts = sorted(
             (int(g), tuple(sorted(tuple(sorted(int(i) for i in bundle))
@@ -277,29 +275,27 @@ class PartsEditor:
             stamp = os.path.getmtime(obj) if obj else 0.0
         except OSError:
             pass
-        # Области — наборы треугольников, их бывает на тысячи номеров: в
-        # отпечаток идёт их хэш, а не сами списки.
+        # Области - наборы треугольников, их бывает на тысячи номеров: в
+        # отпечаток идёт их хэш, а не сами списки
         areas = hashlib.md5(repr(self.preview.part_regions.get(obj_mat) or [])
                             .encode('utf-8')).hexdigest()[:12]
         return f"{obj}|{stamp}|{obj_mat}|{cuts}|{areas}"
 
     def _brush(self) -> Dict[str, Any]:
-        """Настройки кисти на СЕЙЧАС — для мазков, которые пришли без своих."""
+        """Настройки кисти на СЕЙЧАС - для мазков, которые пришли без своих"""
         p = self.preview
         return {'strength': p.part_tint, 'exact': p.part_exact,
                 'edge': p.part_edge, 'edge_color': p.part_edge_color}
 
-    # ═══════════════════════════════════════════════════════════════════════ #
     # Что показать
-    # ═══════════════════════════════════════════════════════════════════════ #
 
     def describe(self, material: str = '', known_shape: str = '') -> Dict[str, Any]:
         """
-        Части модели: что показать списком и чем подсвечивать в 3D.
+        Части модели: что показать списком и чем подсвечивать в 3D
 
-        `tri_part` — номер части для КАЖДОГО треугольника материала: вьювер
+        `tri_part` - номер части для КАЖДОГО треугольника материала: вьювер
         отдаёт попадание мыши номером треугольника, и по-другому связать клик с
-        частью нечем.
+        частью нечем
         """
         found = self._parts_model(material)
         if isinstance(found, dict):
@@ -311,7 +307,7 @@ class PartsEditor:
         colors = self.preview.part_colors.get(slot, {})
         parts = model.parts_of(obj_mat)
         # Странице отдаём ключ ГЕОМЕТРИИ, а не карточку варианта: по нему она
-        # держит карты треугольников для вьювера, и у австралия они те же.
+        # держит карты треугольников для вьювера, и у австралия они те же
         shown = card if not self.preview.textures.is_variant_material(card) \
             else (material or self.preview.textures.storage_main_key())
         tri_part = [0] * len(model.uv.get(obj_mat) or [])
@@ -327,38 +323,38 @@ class PartsEditor:
         out: Dict[str, Any] = {
             'material': shown,
             # Свои материалы этого материала: по ним страница рисует список в
-            # настройках инструмента «Материал».
+            # настройках инструмента «Материал»
             'materials': [{'name': e['name'], 'triangles': len(e['tris']),
                            'existing': bool(e.get('existing'))}
                           for e in self.preview.part_materials.get(obj_mat, [])],
-            # Родные материалы модели, которым тоже можно отдать части.
+            # Родные материалы модели, которым тоже можно отдать части
             'targets': self._native_targets(model, obj_mat),
             'can_own': self._can_own(material or card),
             'parts': [{
                 'id': part.index,
                 'area': round(part.uv_area, 4),
                 'triangles': len(part.triangles),
-                # Куски, делящие развёртку, в игре красятся вместе — молчать
-                # об этом нельзя.
+                # Куски, делящие развёртку, в игре красятся вместе - молчать
+                # об этом нельзя
                 'shared': list(part.shared),
-                # Картинки части слоями, снизу вверх.
+                # Картинки части слоями, снизу вверх
                 'images': [dict(i) for i in images.get(part.index, [])],
                 'color': colors.get(part.index),
                 # Дробление настраивается на КУСОК, а не на часть: номер части
-                # меняется вместе с разбиением, номер куска — нет.
+                # меняется вместе с разбиением, номер куска - нет
                 'chunk': part.chunk,
                 'sub': part.sub,
-                # Группа — куски, делящие развёртку: они режутся вместе.
+                # Группа - куски, делящие развёртку: они режутся вместе
                 'group': part.group,
-                # Острова, из которых собран отрезок; пусто — остаток куска.
+                # Острова, из которых собран отрезок, пусто - остаток куска
                 'islands': list(part.islands),
-                # Область, выделенная ножницами; -1 — не область. По номеру её
-                # возвращают обратно.
+                # Область, выделенная ножницами; -1 - не область. По номеру её
+                # возвращают обратно
                 'region': part.region,
                 # Место части на развёртке: по нему страница подсвечивает
-                # область прямо на текстуре.
+                # область прямо на текстуре
                 'bbox': [round(v, 5) for v in part.uv_bbox],
-                # Свой материал части ('' — общий).
+                # Свой материал части ('' - общий)
                 'own': owner(part),
             } for part in parts],
             'group_islands': model.group_islands.get(obj_mat) or {},
@@ -369,26 +365,26 @@ class PartsEditor:
             'shape': shape,
         }
         if known_shape != shape:
-            # Карту «треугольник → часть» отдаём, только когда разбиение
-            # изменилось. Острова вьювер считает сам — по UV меша.
+            # Карту «треугольник -> часть» отдаём, только когда разбиение
+            # изменилось. Острова вьювер считает сам - по UV меша
             out['tri_part'] = tri_part
         return out
 
     def _given(self, model: Any, obj_mat: str, part: int) -> str:
-        """Родной материал модели, которому часть отдана целиком ('' — нет)."""
+        """Родной материал модели, которому часть отдана целиком ('' - нет)"""
         piece = next((x for x in model.parts_of(obj_mat) if x.index == part), None)
         live = [e for e in self._live_entries(model, obj_mat) if e.get('existing')]
         return self._owner_card(live, piece) if piece is not None and live else ''
 
     @staticmethod
     def _owner_card(entries: List[dict], part: Any) -> str:
-        """Материал части (из `_live_entries`), в котором она целиком ('' — в общем)."""
+        """Материал части (из `_live_entries`), в котором она целиком ('' - в общем)"""
         tris = set(part.triangles)
         return next((e['name'] for e in entries if tris and tris <= set(e['tris'])), '')
 
     def _live_entries(self, model: Any, obj_mat: str) -> List[dict]:
         """Материалы частей `obj_mat`, чьи номера треугольников годятся для
-        этой модели (part_materials.fits): остальные выбирали на другой."""
+        этой модели (part_materials.fits): остальные выбирали на другой"""
         from src.services import part_materials as pm
 
         total = len(model.uv.get(obj_mat) or [])
@@ -399,14 +395,14 @@ class PartsEditor:
     def _keep_for(self, model: Any, obj_mat: str, card: str,
                   style: int) -> Optional[Callable[[int], bool]]:
         """
-        Чьи треугольники красит склейка карточки `card` (None — все).
+        Чьи треугольники красит склейка карточки `card` (None - все)
 
         Мазки частей лежат в слоте исходного и идут в склейку каждого его
         материала части, но ложатся только на треугольники этого материала:
         развёртки материалов могут накрывать одно место текстуры (зеркальные
         половины, своя модель снаряда со своей развёрткой), и краска одного
         потекла бы на другой. В стиле так же: строка стиля даёт материалу
-        части свой столбец (part_materials.add_part_columns).
+        части свой столбец (part_materials.add_part_columns)
         """
         source = self._source_card(card)
         entries = [e for e in self._live_entries(model, obj_mat) if e.get('card') == source]
@@ -420,11 +416,11 @@ class PartsEditor:
 
     def part_mask(self, material: str = '', part: int = 0) -> Dict[str, Any]:
         """
-        Картинка-подсветка одной части: её форма на развёртке.
+        Картинка-подсветка одной части: её форма на развёртке
 
         Показывать надо ту же маску, по которой красит склейка: прямоугольник
         у детали, лежащей наискось, накрывал соседние куски. Файл кэшируется по
-        отпечатку разбиения — форма меняется только от резки.
+        отпечатку разбиения - форма меняется только от резки
         """
         found = self._parts_model(material)
         if isinstance(found, dict):
@@ -437,7 +433,7 @@ class PartsEditor:
 
         from src.services import texture_compose_service
         # В пропорциях САМОЙ текстуры: у тела шпиона она 1024×512, и квадратная
-        # маска ложилась бы на кадр растянутой.
+        # маска ложилась бы на кадр растянутой
         shape = self._texture_shape(card)
         stamp = hashlib.md5(self._shape_key(obj_mat).encode('utf-8')).hexdigest()[:10]
         tail = f"{shape[0]}x{shape[1]}" if shape else 'square'
@@ -448,7 +444,7 @@ class PartsEditor:
         return {'part': int(part), 'mask': out}
 
     def _texture_shape(self, card: str):
-        """Размер картинки, показанной на этом материале. None — не прочитать."""
+        """Размер картинки, показанной на этом материале. None - не прочитать"""
         t = self.preview.textures
         path = t.uploaded_for_mat(card) or t.game_base(card)
         if not path or not os.path.isfile(path):
@@ -463,11 +459,11 @@ class PartsEditor:
     def part_shape(self, material: str = '', part: int = 0,
                    layer: Optional[int] = None) -> Dict[str, Any]:
         """
-        Развёртка одной части: по ней окно посадки рисует, куда ляжет картинка.
+        Развёртка одной части: по ней окно посадки рисует, куда ляжет картинка
 
-        ``layer`` — какую из картинок части правят (отрицательный — с конца);
-        None — кладут новую. Основа для окна — всё, что уже лежит на материале,
-        КРОМЕ правимого слоя: его окно рисует живьём.
+        ``layer`` - какую из картинок части правят (отрицательный - с конца);
+        None - кладут новую. Основа для окна - всё, что уже лежит на материале,
+        КРОМЕ правимого слоя: его окно рисует живьём
         """
         found = self._parts_model(material)
         if isinstance(found, dict):
@@ -484,7 +480,7 @@ class PartsEditor:
             idx: Optional[int] = None
             if layer is not None and stack and -len(stack) <= int(layer) < len(stack):
                 idx = int(layer) % len(stack)
-            # Под частью в своём материале лежит его текстура, а не исходного.
+            # Под частью в своём материале лежит его текстура, а не исходного
             job = self._context_job(
                 model, obj_mat, card, skip=(int(part), idx) if idx is not None else None,
                 under=self._owner_card(self._live_entries(model, obj_mat), one) or card)
@@ -492,7 +488,7 @@ class PartsEditor:
         frames: List[str] = []
         delays: List[int] = []
         if spec:
-            # Кадры анимации раскладываем сами: браузер их из гифки не достаёт.
+            # Кадры анимации раскладываем сами: браузер их из гифки не достаёт
             from src.services import texture_compose_service
             frames, delays = texture_compose_service.export_frames(
                 spec['path'], os.path.join(self._host._work_dir(), 'frames'),
@@ -502,7 +498,7 @@ class PartsEditor:
             'delays': delays,
             'part': one.index,
             # Габарит, в который вписана картинка: у наклейки, пережившей
-            # разрез, это габарит ПРЕЖНЕЙ части (её якорь).
+            # разрез, это габарит ПРЕЖНЕЙ части (её якорь)
             'bbox': [round(v, 6) for v in ((spec and spec.get('anchor')) or one.uv_bbox)],
             'polygons': [[[round(u, 6), round(v, 6)] for u, v in tri]
                          for tri in model.polygons(obj_mat, one.index)],
@@ -514,9 +510,9 @@ class PartsEditor:
 
     def _context_job(self, model: Any, obj_mat: str, card: str,
                      skip: Optional[tuple], under: str = '') -> Dict[str, Any]:
-        """Под замком: основа окна посадки — материал со всем, что на нём лежит,
+        """Под замком: основа окна посадки - материал со всем, что на нём лежит,
         кроме правимого слоя (иначе под живой картинкой лежала бы её же копия).
-        `under` — чья основа под мазками (материал части), по умолчанию `card`."""
+        `under` - чья основа под мазками (материал части), по умолчанию `card`"""
         keep = self._keep_for(model, obj_mat, under or card, self.preview.active_style)
         return {'base': self._compose_base(under or card) or '',
                 'layers': self._part_layers(model, obj_mat, self._slot(card), skip, keep),
@@ -533,25 +529,23 @@ class PartsEditor:
         if not result:
             return job['base']
         with self._lock:
-            # В общую очередь: уберётся со старыми склейками, а не копится.
+            # В общую очередь: уберётся со старыми склейками, а не копится
             self._compose_files.append(result)
         return result
 
-    # ═══════════════════════════════════════════════════════════════════════ #
     # Мазки
-    # ═══════════════════════════════════════════════════════════════════════ #
 
     def set_part_texture(self, material: str = '', part: int = 0,
                          path: Optional[str] = None,
                          options: Optional[Dict[str, Any]] = None,
                          layer: Optional[int] = None) -> Dict[str, Any]:
         """
-        Картинки одной части — слоями, снизу вверх.
+        Картинки одной части - слоями, снизу вверх
 
-        ``path`` — новая картинка: без ``layer`` ложится ПОВЕРХ уже лежащих,
-        с ним — заменяет названный слой. Без пути, но с ``options`` — правка
+        ``path`` - новая картинка: без ``layer`` ложится ПОВЕРХ уже лежащих,
+        с ним - заменяет названный слой. Без пути, но с ``options`` - правка
         посадки уже положенной (``layer``, по умолчанию верхней). Без того и
-        другого — убрать названный слой либо все картинки части разом.
+        другого - убрать названный слой либо все картинки части разом
         """
         found = self._parts_model(material)
         if isinstance(found, dict):
@@ -584,7 +578,7 @@ class PartsEditor:
                 idx = -1 if at is None else at
                 spec = dict(stack[idx])
                 # Якорь переживает правку посадки: он говорит, В ЧЁМ картинка
-                # живёт, а окно двигает её ВНУТРИ этого габарита.
+                # живёт, а окно двигает её ВНУТРИ этого габарита
                 fresh = part_specs.image_spec({**options, 'path': spec['path']})
                 spec.update({k: v for k, v in fresh.items() if k not in ('path', 'anchor')})
                 stack[idx] = spec
@@ -602,13 +596,13 @@ class PartsEditor:
     def _absolute_size(self, options: Optional[Dict[str, Any]], path: str,
                        model: Any, obj_mat: str, card: str, part: int) -> Dict[str, Any]:
         """
-        Посадка с размером В ДОЛЯХ ТЕКСТУРЫ (`size_uv`) — в масштабы части.
+        Посадка с размером В ДОЛЯХ ТЕКСТУРЫ (`size_uv`) - в масштабы части
 
         Так приходит вставка скопированной картинки: «того же размера» значит
-        того же на текстуре, а масштаб считается от габарита части — один и
+        того же на текстуре, а масштаб считается от габарита части - один и
         тот же масштаб на другой детали дал бы другую картинку. Пересчёт здесь,
         а не на странице: габарит части, размер текстуры и картинки знает
-        Python, и склейка вписывает ровно по этим числам (`place_image`).
+        Python, и склейка вписывает ровно по этим числам (`place_image`)
         """
         opts = dict(options or {})
         size = opts.pop('size_uv', None)
@@ -634,12 +628,12 @@ class PartsEditor:
             base_w, base_h = iw * k, ih * k
         opts['scale'] = float(size[0]) * tex_w / base_w
         opts['scale_y'] = float(size[1]) * tex_h / base_h
-        opts['offset'] = [0.0, 0.0]            # на новой детали — по её центру
+        opts['offset'] = [0.0, 0.0]            # на новой детали - по её центру
         return opts
 
     def move_part_texture(self, material: str = '', part: int = 0,
                           layer: int = 0, to: int = 0) -> Dict[str, Any]:
-        """Переставляет картинку части в стопке: порядок и есть наложение."""
+        """Переставляет картинку части в стопке: порядок и есть наложение"""
         found = self._parts_model(material)
         if isinstance(found, dict):
             return found
@@ -666,14 +660,14 @@ class PartsEditor:
                         strength: Optional[float] = None,
                         exact: Optional[bool] = None) -> Dict[str, Any]:
         """
-        Красит части: {номер части: цвет}, значение None — снять.
+        Красит части: {номер части: цвет}, значение None - снять
 
-        Цвет — «#rrggbb» или градиент словарём (см. `part_specs.color_spec`).
-        Скопом, а не по одной: «раскрасить всё случайно» и сброс — одно
-        действие человека, и склейка на них одна.
+        Цвет - «#rrggbb» или градиент словарём (см. `part_specs.color_spec`).
+        Скопом, а не по одной: «раскрасить всё случайно» и сброс - одно
+        действие человека, и склейка на них одна
 
         Без цветов это смена КИСТИ (сила, точный цвет): уже покрашенное помнит
-        свою и не перекрашивается — ни пересборки, ни шага Ctrl+Z.
+        свою и не перекрашивается - ни пересборки, ни шага Ctrl+Z
         """
         found = self._parts_model(material)
         if isinstance(found, dict):
@@ -686,7 +680,7 @@ class PartsEditor:
             if exact is not None:
                 self.preview.part_exact = bool(exact)
             # Часть, отданная родному материалу модели, красится его
-            # текстурой: мазок по ней лёг бы в склейку, которая её не рисует.
+            # текстурой: мазок по ней лёг бы в склейку, которая её не рисует
             given = {int(p): self._given(model, obj_mat, int(p))
                      for p, c in (colors or {}).items() if c}
             given = {p: name for p, name in given.items() if name}
@@ -707,7 +701,7 @@ class PartsEditor:
                 jobs = self._plans(model, obj_mat, card)
         if jobs is None:
             # Настройку кисти запомнить надо (ползунок вернётся к ней с
-            # работой), а шагом истории она не является.
+            # работой), а шагом истории она не является
             self._host._autosave(step=False)
             return self._host.view_state()
         return self._commit(jobs)
@@ -717,7 +711,7 @@ class PartsEditor:
         """
         Окантовка для СЛЕДУЮЩИХ мазков: ширина в долях стороны текстуры, чтобы
         работа одинаково выглядела и в 512, и в 2048. Полоса ложится ВНУТРЬ
-        части — наружу она покрасила бы соседнюю деталь.
+        части - наружу она покрасила бы соседнюю деталь
         """
         found = self._parts_model(material)
         if isinstance(found, dict):
@@ -730,7 +724,7 @@ class PartsEditor:
         return self._host.view_state()
 
     def clear_parts(self, material: str = '') -> Dict[str, Any]:
-        """Снимает с частей всё разом — «начать заново» одной кнопкой."""
+        """Снимает с частей всё разом - «начать заново» одной кнопкой"""
         found = self._parts_model(material)
         if isinstance(found, dict):
             return found
@@ -743,22 +737,20 @@ class PartsEditor:
             jobs = self._plans(model, obj_mat, card)
         return self._commit(jobs)
 
-    # ═══════════════════════════════════════════════════════════════════════ #
-    # Части — своими материалами (src/services/part_materials.py)
-    # ═══════════════════════════════════════════════════════════════════════ #
+    # Части - своими материалами (src/services/part_materials.py)
 
     def set_part_material(self, material: str = '', parts: Optional[Iterable[int]] = None,
                           target: str = '') -> Dict[str, Any]:
         """
-        Отдаёт части в свой материал или возвращает их в общий.
+        Отдаёт части в свой материал или возвращает их в общий
 
-        `target`: '' — новый материал, имя — добавить в этот, '-' — вернуть в
+        `target`: '' - новый материал, имя - добавить в этот, '-' - вернуть в
         общий. Имя бывает и родным материалом модели (`_native_targets`):
-        тогда треугольники просто берут его — своей карточки и столбца в
+        тогда треугольники просто берут его - своей карточки и столбца в
         $texturegroup у такой записи нет (`existing`), рисуется он своей
         текстурой по развёртке исходного, как и в игре. Треугольник
         принадлежит одному материалу: отданный в новый уходит из прежнего.
-        Опустевший материал исчезает вместе с карточкой.
+        Опустевший материал исчезает вместе с карточкой
         """
         from src.services import part_materials as pm
 
@@ -775,14 +767,14 @@ class PartsEditor:
             return {'error': 'Выберите части'}
         sources = pm.sources_of_obj(self._host._obj_path)
         if not sources:
-            # OBJ собран до того, как превью стало помнить свои SMD.
+            # OBJ собран до того, как превью стало помнить свои SMD
             return {'error': 'Откройте предмет заново'}
 
         t = self.preview.textures
         base_card = t.storage_main_key() if t.is_variant_material(card) else card
-        # `total` — сколько треугольников у материала сейчас, `late` — сколько
+        # `total` - сколько треугольников у материала сейчас, `late` - сколько
         # из них само оружие до снаряда в оружии: номера годятся только для
-        # такой модели (сборка и вьювер сверяются, part_materials.fits).
+        # такой модели (сборка и вьювер сверяются, part_materials.fits)
         now = {'total': len(model.uv.get(obj_mat) or []),
                **({'late': model.late[obj_mat]} if obj_mat in model.late else {})}
         created = ''
@@ -791,7 +783,7 @@ class PartsEditor:
             into = None
             if target and target != '-':
                 # Проверка до вычитания: иначе ошибка оставила бы треугольники
-                # ничьими. Материал, выбранный на другой модели, не годится.
+                # ничьими. Материал, выбранный на другой модели, не годится
                 into = next((e for e in self._live_entries(model, obj_mat)
                              if e['name'] == target), None)
                 if into is None and target in self._native_targets(model, obj_mat):
@@ -822,9 +814,9 @@ class PartsEditor:
             self.preview.sync_part_cards()
             if created:
                 self._fork_card(base_card, created)
-            # Треугольники сменили материал — каждая склейка красит теперь
+            # Треугольники сменили материал - каждая склейка красит теперь
             # другой их набор (`_keep_for`): исходный и все его материалы
-            # частей, в каждом стиле, где на исходном есть мазки.
+            # частей, в каждом стиле, где на исходном есть мазки
             jobs = self._every_slot_jobs(model, obj_mat, base_card)
         self._finish(jobs)
         self._host._autosave(step=True)
@@ -832,27 +824,27 @@ class PartsEditor:
 
     def _native_targets(self, model: Any, obj_mat: str) -> List[str]:
         """Родные материалы предмета, которым можно отдать части `obj_mat`:
-        все, кроме него самого, гирлянды и материалов частей."""
+        все, кроме него самого, гирлянды и материалов частей"""
         from src.domain.preview.texture_state import is_decor
 
         p = self.preview
         if p.custom_smd_path and not p.custom_keep_materials:
-            return []          # «только форма»: в сборке все её материалы — один
+            return []          # «только форма»: в сборке все её материалы - один
         own = {n.lower() for n in p.part_material_names()}
         return [m for m in self._item_meshes(model)
                 if m.lower() != obj_mat.lower() and not is_decor(m) and m.lower() not in own]
 
     def _stroke_styles(self, card: str) -> set:
-        """Стили, в слотах которых у карточки есть мазки (0 — базовый)."""
+        """Стили, в слотах которых у карточки есть мазки (0 - базовый)"""
         p = self.preview
         return {part_specs.parse_slot(slot)[1]
                 for slot in [*p.part_textures, *p.part_colors]
                 if part_specs.parse_slot(slot)[0] == card}
 
     def _every_slot_jobs(self, model: Any, obj_mat: str, card: str) -> List[Optional[Dict[str, Any]]]:
-        """ПОД ЗАМКОМ: склейки карточки и её материалов частей во всех слотах —
+        """ПОД ЗАМКОМ: склейки карточки и её материалов частей во всех слотах -
         базовом, показанном и каждом стиле с мазками. У стиля слот один на обе
-        команды (`part_specs.slot_key`), основу ему ищем глазами показанной."""
+        команды (`part_specs.slot_key`), основу ему ищем глазами показанной"""
         styles = {0, self.preview.active_style} | self._stroke_styles(card)
         shown = (self.preview.textures.active_team,)
         return [job for style in sorted(styles)
@@ -860,16 +852,16 @@ class PartsEditor:
                 for job in self._plans(model, obj_mat, card, style, team)]
 
     def _teams(self, card: str) -> Tuple[str, ...]:
-        """Команды, у которых у карточки свой слот."""
+        """Команды, у которых у карточки свой слот"""
         from src.shared.constants import Team
         return (Team.RED, Team.BLU) if self._per_team(card) else (Team.RED,)
 
     def _fork_card(self, base: str, name: str) -> None:
         """
-        ПОД ЗАМКОМ: новый материал части — копия исходного. Его своя картинка
+        ПОД ЗАМКОМ: новый материал части - копия исходного. Его своя картинка
         (та, что под мазками) по командам, правка VMT, карты и настройки
         текстуры переходят к материалу части, и часть выглядит как раньше.
-        Дальше они живут порознь: картинка на исходном часть не задевает.
+        Дальше они живут порознь: картинка на исходном часть не задевает
         """
         p = self.preview
         for team in self._teams(base):
@@ -878,9 +870,9 @@ class PartsEditor:
                    else self._slot_texture(base, 0, team))
             if _existing(own):
                 self._put_slot_texture(name, own, 0, team)
-        # Стили — так же: своя картинка исходного в стиле переходит к части.
+        # Стили - так же: своя картинка исходного в стиле переходит к части.
         # Без этого часть, выбранная в Bloody у гильотины, в нём теряла бы
-        # правку исходного и показывала игровую кровь.
+        # правку исходного и показывала игровую кровь
         team = p.textures.active_team
         for style in sorted({s for s in p.textures.skin_overrides if s}
                             | (self._stroke_styles(base) - {0})):
@@ -897,8 +889,8 @@ class PartsEditor:
         self._fork_vmt(base, name)
 
     def _fork_vmt(self, base: str, name: str) -> None:
-        """Правка VMT исходного — копией к материалу части, вместе с игровым
-        оригиналом: по нему сборка переносит правку на строки скина."""
+        """Правка VMT исходного - копией к материалу части, вместе с игровым
+        оригиналом: по нему сборка переносит правку на строки скина"""
         from src.services.edited_vmt_service import EditedVMTService as Vmt
 
         target = self._host.materials.vmt_target(base)
@@ -923,8 +915,8 @@ class PartsEditor:
         """Можно ли дать частям свой материал. Сборка переносит их в SMD той
         модели, на которой их выбрали: у мода из VPK и у гирлянды его нет, а
         Dead Ringer показывает одну модель, а в мод кладёт материалы другой.
-        Своя модель — можно: её SMD сборка кладёт на место игрового тем же
-        порядком треугольников (part_materials.specs_for_custom_model)."""
+        Своя модель - можно: её SMD сборка кладёт на место игрового тем же
+        порядком треугольников (part_materials.specs_for_custom_model)"""
         from src.data.weapon_quirks import MATERIAL_ONLY_WEAPON_KEYS, PREVIEW_MDL_OVERRIDE
         from src.domain.preview.texture_state import is_decor
 
@@ -933,9 +925,9 @@ class PartsEditor:
                     or key in MATERIAL_ONLY_WEAPON_KEYS or key in PREVIEW_MDL_OVERRIDE)
 
     def drop_part_material(self, name: str = '', material: str = '') -> Dict[str, Any]:
-        """Возвращает все части материала в общий; карточка исчезает (у
-        родного материала модели она остаётся — он был и до частей).
-        `material` — забрать только части этого материала."""
+        """Возвращает все части материала в общий, карточка исчезает (у
+        родного материала модели она остаётся - он был и до частей).
+        `material` - забрать только части этого материала"""
         p = self.preview
         within = ''
         if material:
@@ -951,7 +943,7 @@ class PartsEditor:
             if not self._forget_part_material(name, within):
                 return {'error': 'Нет такого материала'}
             p.sync_part_cards()
-        # Мазки на этих треугольниках снова красит склейка исходного.
+        # Мазки на этих треугольниках снова красит склейка исходного
         found = self._parts_model(card)
         if not isinstance(found, dict):
             model, obj_mat, _ = found
@@ -964,8 +956,8 @@ class PartsEditor:
     def _forget_part_material(self, name: str, within: str = '') -> bool:
         """Убирает материал части и всё, что лежало на его карточке (под
         замком). Родной материал модели (`existing`) только забирает свои
-        треугольники назад: его карточка — его, и бывает он целью у разных
-        материалов (`within` — только у этого)."""
+        треугольники назад: его карточка - его, и бывает он целью у разных
+        материалов (`within` - только у этого)"""
         p = self.preview
         found = False
         for base, entries in list(p.part_materials.items()):
@@ -985,22 +977,22 @@ class PartsEditor:
                 return True
         return found
 
-    # ── Снаряд в оружии ──────────────────────────────────────────────────── #
+    # Снаряд в оружии
 
     def forget_projectile(self, part_smd: str) -> None:
         """
         Сбрасывает правки, привязанные к треугольникам снаряда в оружии: его
         модель сменилась (своя ↔ игровая), и номера его треугольников и частей
-        теперь чужие — как forget_decor_look у гирлянды.
+        теперь чужие - как forget_decor_look у гирлянды
 
         Снаряд идёт в конце своего материала (`ModelParts.late`), так что номера
-        частей и треугольников самого оружия не меняются; уходят мазки частей
+        частей и треугольников самого оружия не меняются, уходят мазки частей
         снаряда, его разрезы и области, его треугольники в материалах частей.
         Материал, которого кроме снаряда нет ни у кого (ракета Ракетницы),
         уходит весь. Область ножниц, задевшая и оружие, и снаряд, обрезается
-        до оружия — номера частей оружия при этом сдвигаются, и его мазки
+        до оружия - номера частей оружия при этом сдвигаются, и его мазки
         переезжают по треугольникам, как при резке (`_reshape`). Зовётся ДО
-        смены модели: разбор берётся с кадра.
+        смены модели: разбор берётся с кадра
         """
         from src.services import mesh_parts_service
         from src.services import part_materials as pm
@@ -1018,8 +1010,8 @@ class PartsEditor:
             if not model:
                 return
             for name in shell:
-                # Имя в OBJ — как в SMD; скрытого снаряда со своим материалом
-                # в кадре нет вовсе — тогда снаряду принадлежит всё.
+                # Имя в OBJ - как в SMD; скрытого снаряда со своим материалом
+                # в кадре нет вовсе - тогда снаряду принадлежит всё
                 mesh = next((m for m in model.uv if m.lower() == name.lower()), name)
                 total = len(model.uv.get(mesh) or [])
                 end = model.weapon_end(mesh) if mesh in model.uv else 0
@@ -1027,7 +1019,7 @@ class PartsEditor:
                          if self._slot_mesh(model, s, mesh) == mesh]
                 was = model.parts_of(mesh)
                 # Материалы частей, выбранные на другой модели, и так не
-                # собираются: новый `late` «оживил» бы их на чужих номерах.
+                # собираются: новый `late` «оживил» бы их на чужих номерах
                 for entry in list(p.part_materials.get(mesh, [])):
                     if not pm.fits(entry, total, end):
                         continue
@@ -1070,10 +1062,10 @@ class PartsEditor:
         self._finish(jobs)
 
     def _slot_mesh(self, model: Any, slot: str, shell: str) -> str:
-        """Материал OBJ, части которого красят мазки слота ('' — не модели).
+        """Материал OBJ, части которого красят мазки слота ('' - не модели).
         Карточку, названную как материал снаряда `shell`, сверяем по имени:
         скрытого снаряда в кадре нет, и для одноматериального OBJ `_mesh_of`
-        назвал бы меш оружия."""
+        назвал бы меш оружия"""
         from src.domain.preview.texture_state import is_decor
 
         card = part_specs.parse_slot(slot)[0]
@@ -1086,17 +1078,17 @@ class PartsEditor:
 
     def own_projectile(self, texture: Optional[str]) -> str:
         """
-        Своя модель снаряда из OBJ/GLB — своим материалом части; его имя
-        или '' (не вышло).
+        Своя модель снаряда из OBJ/GLB - своим материалом части, его имя
+        или '' (не вышло)
 
         Развёртка у такой модели своя, под свою картинку. В текстуре оружия
-        она легла бы на чужие места, а краска снаряда — на оружие; в текстуре
+        она легла бы на чужие места, а краска снаряда - на оружие, в текстуре
         игрового снаряда, которую делят и другие модели (летящее ядро Пушки,
-        ракета Обжигающего выстрела), испортила бы их. Свой материал — своя
+        ракета Обжигающего выстрела), испортила бы их. Свой материал - своя
         текстура: картинка из файла, без неё ровная серая под покраску. Карты
         материала исходного сняты по его развёртке и сюда не переходят.
         Зовётся, когда приехал OBJ со своим снарядом: номера его треугольников
-        знает только он.
+        знает только он
         """
         from src.services import mesh_parts_service
         from src.services import part_materials as pm
@@ -1133,7 +1125,7 @@ class PartsEditor:
         return created
 
     def _plain_image(self) -> str:
-        """Ровная серая основа своего снаряда, у которого в файле нет картинки."""
+        """Ровная серая основа своего снаряда, у которого в файле нет картинки"""
         path = os.path.join(self._host._work_dir(), 'plain_projectile.png')
         if not os.path.isfile(path):
             from PIL import Image
@@ -1142,18 +1134,18 @@ class PartsEditor:
 
     def part_material_view(self) -> Dict[str, Any]:
         """Что нужно вьюверу: какие треугольники каких мешей рисовать своими
-        материалами.
+        материалами
 
         Номера годятся только для модели, на которой выбирали части: в другом
         состоянии (разбитая бутылка) или после обновления игры меш другой, и
         такой материал не показывается вовсе (part_materials.fits). Снаряд в
-        оружии идёт в конце материала: скрыт он или заменён своей моделью —
+        оружии идёт в конце материала: скрыт он или заменён своей моделью -
         материалы самого оружия остаются. `total` уходит вьюверу затем же:
-        в другой сцене (руки) меш с тем же именем бывает другим.
+        в другой сцене (руки) меш с тем же именем бывает другим
 
-        Треугольники — отрезками [начало, сколько]: часть почти всегда лежит
-        подряд (1576 номеров у обреза — 16 отрезков), а ответ уходит странице
-        при каждой правке."""
+        Треугольники - отрезками [начало, сколько]: часть почти всегда лежит
+        подряд (1576 номеров у обреза - 16 отрезков), а ответ уходит странице
+        при каждой правке"""
         if not self.preview.part_materials or self._host._shape_changed():
             return {}
         from src.services import mesh_parts_service
@@ -1179,16 +1171,15 @@ class PartsEditor:
 
     def set_base(self, card: str, path: Optional[str]) -> Optional[Dict[str, Any]]:
         """
-        Своя текстура на покрашенную карточку: ложится ПОД мазки.
+        Своя текстура на покрашенную карточку: ложится ПОД мазки
 
-        Раньше она заменяла склейку, а мазки оставались числиться: чипы
-        говорили «покрашено», текстура — нет, и следующий мазок внезапно
-        возвращал всё поверх новой картинки.
+        Не вместо склейки: мазки продолжали бы числиться, и следующий мазок
+        вернул бы всё поверх новой картинки
 
-        None — карточка не покрашена, текстура кладётся обычным путём; {} —
-        легла под мазки; {'error': …} — пересобрать сейчас нельзя (модель не
+        None - карточка не покрашена, текстура кладётся обычным путём; {} -
+        легла под мазки; {'error': …} - пересобрать сейчас нельзя (модель не
         та или не загружена), и основу не трогаем: иначе на экране и в сборке
-        осталась бы склейка на прежней основе.
+        осталась бы склейка на прежней основе
         """
         with self._lock:
             if self._slot(card) not in self.preview.part_bases:
@@ -1196,9 +1187,9 @@ class PartsEditor:
         found = self._parts_model(card)
         if isinstance(found, dict):
             return found
-        # Модель и меш — от разбора, а карточка — ИСХОДНАЯ: разбор переводит
+        # Модель и меш - от разбора, а карточка - ИСХОДНАЯ: разбор переводит
         # главную карточку в австралиевую, когда тот включён, и основа легла
-        # бы не в тот слот.
+        # бы не в тот слот
         model, obj_mat, _ = found
         with self._lock:
             slot = self._slot(card)
@@ -1206,17 +1197,17 @@ class PartsEditor:
                 return None
             self.preview.part_bases[slot] = path or ''
             source = self._source_card(card)
-            # У материала части мазки — в слоте исходного: пересобираем только
-            # его склейку, исходный не трогаем.
+            # У материала части мазки - в слоте исходного: пересобираем только
+            # его склейку, исходный не трогаем
             jobs = (self._plans(model, obj_mat, source, only=card) if source != card
                     else self._plans(model, obj_mat, card))
         self._finish(jobs)
         return {}
 
-    # ── Резка ─────────────────────────────────────────────────────────────── #
+    # Резка
 
     def set_part_detail(self, material: str = '', detail: float = 0.0) -> Dict[str, Any]:
-        """Раздробить ВСЕ куски одинаково: доля 0..1 от числа швов каждого куска."""
+        """Раздробить ВСЕ куски одинаково: доля 0..1 от числа швов каждого куска"""
         def everything(model, obj_mat) -> Dict[int, List[List[int]]]:
             share = max(0.0, min(1.0, float(detail)))
             out: Dict[int, List[List[int]]] = {}
@@ -1224,9 +1215,9 @@ class PartsEditor:
                 if count < 2:
                     continue
                 # Обычное округление, а не round(): у группы с одним швом
-                # round(0.5) даёт 0 (банковское правило).
+                # round(0.5) даёт 0 (банковское правило)
                 take = int(share * (count - 1) + 0.5)
-                # Острова пронумерованы от крупного: «первые N» — самые заметные.
+                # Острова пронумерованы от крупного: «первые N» - самые заметные
                 if take:
                     out[group] = [[i] for i in range(take)]
             return out
@@ -1236,11 +1227,11 @@ class PartsEditor:
     def toggle_part_island(self, material: str = '', group: int = 0,
                            island: int = 0) -> Dict[str, Any]:
         """
-        Отрезает названный остров развёртки или приращивает его обратно.
+        Отрезает названный остров развёртки или приращивает его обратно
 
-        Режется ГРУППА — все куски, делящие эту развёртку: у рук шпиона левая и
+        Режется ГРУППА - все куски, делящие эту развёртку: у рук шпиона левая и
         правая делят её целиком, и разрезать одну без другой нельзя. Остров,
-        вынутый из набора, возвращается в остаток куска.
+        вынутый из набора, возвращается в остаток куска
         """
         def one(model, obj_mat) -> Dict[int, List[List[int]]]:
             out = self._cut_plan(obj_mat)
@@ -1261,19 +1252,19 @@ class PartsEditor:
         return self._reshape(material, one)
 
     def _cut_plan(self, obj_mat: str) -> Dict[int, List[List[int]]]:
-        """Копия разрезов ЭТОГО материала, которую можно править отдельно."""
+        """Копия разрезов ЭТОГО материала, которую можно править отдельно"""
         return {int(g): [list(b) for b in v]
                 for g, v in (self.preview.part_cuts.get(obj_mat) or {}).items()}
 
     def add_part_region(self, material: str = '',
                         triangles: Optional[List[int]] = None) -> Dict[str, Any]:
         """
-        Выделенное ножницами — в отдельную часть.
+        Выделенное ножницами - в отдельную часть
 
         Треугольники с ТЕМИ ЖЕ пикселями развёртки (зеркальная половина)
         добираются сами: в игре они покрасятся вместе, и часть, которая об
-        этом молчит, обещала бы то, чего не будет. Сколько добрано — в ответе
-        (`mirrored`), странице об этом говорить.
+        этом молчит, обещала бы то, чего не будет. Сколько добрано - в ответе
+        (`mirrored`), странице об этом говорить
         """
         picked = {int(t) for t in (triangles or ())}
         if not picked:
@@ -1289,7 +1280,7 @@ class PartsEditor:
             full = {twin for t in chosen for twin in same[tuple(sorted(uv[t]))]}
             added['mirrored'] = len(full - chosen)
             # Прежние области отдают выделенное новой: у треугольника одна
-            # часть, и хранить его дважды — значит однажды ответить не то.
+            # часть, и хранить его дважды - значит однажды ответить не то
             kept = [[t for t in region if t not in full]
                     for region in self.preview.part_regions.get(obj_mat) or []]
             return [r for r in kept if r] + [sorted(full)]
@@ -1300,8 +1291,8 @@ class PartsEditor:
         return out
 
     def remove_part_region(self, material: str = '', region: int = 0) -> Dict[str, Any]:
-        """Возвращает область обратно: её треугольники — снова тем частям, из
-        которых её вырезали."""
+        """Возвращает область обратно: её треугольники - снова тем частям, из
+        которых её вырезали"""
         def drop(model, obj_mat) -> List[List[int]]:
             made = [list(r) for r in self.preview.part_regions.get(obj_mat) or []]
             if 0 <= int(region) < len(made):
@@ -1312,14 +1303,14 @@ class PartsEditor:
 
     def _reshape(self, material: str, plan=None, regions=None) -> Dict[str, Any]:
         """
-        Меняет разбиение и переносит на новые части уже покрашенное.
+        Меняет разбиение и переносит на новые части уже покрашенное
 
-        ``plan(model, obj_mat)`` — новые разрезы по островам, ``regions`` —
-        новый список областей; что не передано, то не меняется.
+        ``plan(model, obj_mat)`` - новые разрезы по островам, ``regions`` -
+        новый список областей, что не передано, то не меняется
 
         Перенос идёт ПО ТРЕУГОЛЬНИКАМ: номер части от дробления зависит.
         Каждая новая часть наследует мазки той старой, из которой вышла больше
-        всего треугольников.
+        всего треугольников
         """
         from src.services.mesh_parts_service import bundles_of
 
@@ -1330,14 +1321,14 @@ class PartsEditor:
         was = model.parts_of(obj_mat)
         owner = {tri: part.index for part in was for tri in part.triangles}
         #: Габарит прежних частей: по нему наклейка остаётся на месте, когда
-        #: часть под ней разрезали надвое.
+        #: часть под ней разрезали надвое
         boxes = {part.index: list(part.uv_bbox) for part in was}
         wanted = plan(model, obj_mat) if plan else None
         areas = regions(model, obj_mat) if regions else None
 
         with self._lock:
-            # Разрезы — СВОИ у каждого материала: номера групп считаются внутри
-            # материала (у головы шпиона и у его тела есть своя «группа 1»).
+            # Разрезы - СВОИ у каждого материала: номера групп считаются внутри
+            # материала (у головы шпиона и у его тела есть своя «группа 1»)
             if wanted is not None:
                 self.preview.part_cuts[obj_mat] = {
                     g: [list(b) for b in made] for g, made in bundles_of(wanted).items()}
@@ -1351,7 +1342,7 @@ class PartsEditor:
                 return found
             model, obj_mat, card = found
             # Номера частей общие на геометрию, а мазки лежат по слотам (стиль,
-            # команда): переносим их все.
+            # команда): переносим их все
             slots = [k for k in set(self.preview.part_textures) | set(self.preview.part_colors)
                      if part_specs.parse_slot(k)[0] == card]
             for slot in slots:
@@ -1362,9 +1353,9 @@ class PartsEditor:
         return self._commit(jobs)
 
     def _move_paintkit_layouts(self, model: Any, obj_mat: str, owner: Dict[int, int]) -> None:
-        """Раскладка War Paint держится за номера частей (``p3``) — переносим
+        """Раскладка War Paint держится за номера частей (``p3``) - переносим
         её так же, по треугольникам. Только у главного материала: War Paint
-        раскладывается по нему, у соседнего номера частей свои."""
+        раскладывается по нему, у соседнего номера частей свои"""
         from collections import Counter
 
         if not self.preview.paintkit_layouts:
@@ -1385,7 +1376,7 @@ class PartsEditor:
 
     def _move_parts(self, model: Any, obj_mat: str, slot: str,
                     owner: Dict[int, int], boxes: Dict[int, list]) -> None:
-        """Переносит мазки одного слота на новые части — по треугольникам."""
+        """Переносит мазки одного слота на новые части - по треугольникам"""
         images = self.preview.part_textures.get(slot) or {}
         colors = self.preview.part_colors.get(slot) or {}
         if not (images or colors):
@@ -1398,10 +1389,10 @@ class PartsEditor:
                 continue
             before = votes.most_common(1)[0][0]
             # Картинки и цвет переносятся по отдельности: у части бывает и то,
-            # и другое.
+            # и другое
             if before in images:
-                # Якорь ставим ОДИН раз — при первом разрезе. Дальше он уже
-                # описывает исходное место картинки.
+                # Якорь ставим ОДИН раз - при первом разрезе. Дальше он уже
+                # описывает исходное место картинки
                 moved_images[part.index] = [
                     {**spec, 'anchor': spec['anchor'] or boxes.get(before)}
                     for spec in images[before]]
@@ -1410,18 +1401,16 @@ class PartsEditor:
         self.preview.part_textures[slot] = moved_images
         self.preview.part_colors[slot] = moved_colors
 
-    # ═══════════════════════════════════════════════════════════════════════ #
     # Склейка: задание под замком, расчёт без него
-    # ═══════════════════════════════════════════════════════════════════════ #
 
     def _compose_base(self, card: str, style: Optional[int] = None,
                       team: Optional[str] = None) -> Optional[str]:
         """
-        Основа склейки слота: своя текстура человека под мазками, иначе игровая —
-        у стиля его собственная (Bloody у гильотины), у команды её кадр.
+        Основа склейки слота: своя текстура человека под мазками, иначе игровая -
+        у стиля его собственная (Bloody у гильотины), у команды её кадр
 
         Для непокрашенного слота (окно посадки перед первым мазком) своя
-        текстура — то, что лежит на нём сейчас.
+        текстура - то, что лежит на нём сейчас
         """
         t = self.preview.textures
         if style is None:
@@ -1436,9 +1425,9 @@ class PartsEditor:
         if own:
             return own
         if style:
-            # Оригинал стиля; у материала части — оригинал стиля исходного.
+            # Оригинал стиля, у материала части - оригинал стиля исходного.
             # Не `style_texture`: она отдаёт правку стиля, а на покрашенном
-            # слоте это прошлая склейка — мазки копились бы слоями.
+            # слоте это прошлая склейка - мазки копились бы слоями
             originals = t.style_game_tex.get(style, {})
             game = (_existing(originals.get(card))
                     or _existing(originals.get(t.part_cards.get(card, card))))
@@ -1449,7 +1438,7 @@ class PartsEditor:
 
     def _as_team(self, team: str):
         """Временно смотрит на состояние глазами другой команды: `game_base`
-        и разрешение текстур читают активную команду."""
+        и разрешение текстур читают активную команду"""
         t = self.preview.textures
 
         @contextlib.contextmanager
@@ -1466,9 +1455,9 @@ class PartsEditor:
                      skip: Optional[tuple] = None,
                      keep: Optional[Callable[[int], bool]] = None) -> List[Any]:
         """Слои склейки из мазков слота. Сперва ЦВЕТ (тонировка игровой
-        текстуры), потом картинки поверх него. ``skip`` — (часть, номер
-        картинки), которую окно посадки рисует само; ``keep`` — только эти
-        треугольники (`_keep_for`)."""
+        текстуры), потом картинки поверх него. ``skip`` - (часть, номер
+        картинки), которую окно посадки рисует само; ``keep`` - только эти
+        треугольники (`_keep_for`)"""
         from src.services.texture_compose_service import Layer
 
         images = self.preview.part_textures.get(slot) or {}
@@ -1483,7 +1472,7 @@ class PartsEditor:
             if not polys and keep is not None:
                 continue
             # Картинка вписана в габарит ВСЕЙ части, даже если склейка красит
-            # только её долю: иначе у части на два материала она бы съехала.
+            # только её долю: иначе у части на два материала она бы съехала
             whole = None
             if keep is not None and len(polys) != len(model.polygons(obj_mat, part)):
                 whole = next((tuple(p.uv_bbox) for p in model.parts_of(obj_mat)
@@ -1506,11 +1495,11 @@ class PartsEditor:
               style: Optional[int] = None, team: Optional[str] = None
               ) -> Optional[Dict[str, Any]]:
         """
-        ПОД ЗАМКОМ: что пересобрать для слота. Шагает его поколение — всё, что
-        считалось для слота раньше, этим обогнано.
+        ПОД ЗАМКОМ: что пересобрать для слота. Шагает его поколение - всё, что
+        считалось для слота раньше, этим обогнано
 
-        Мазков не осталось — склейке не с чего: слот возвращается к своей
-        основе сразу, без расчёта, и задания нет.
+        Мазков не осталось - склейке не с чего: слот возвращается к своей
+        основе сразу, без расчёта, и задания нет
         """
         t = self.preview.textures
         if style is None:
@@ -1527,7 +1516,7 @@ class PartsEditor:
                 self._put_slot_texture(card, p.part_bases.pop(slot) or None, style, team)
             return None
         if slot not in p.part_bases:
-            # Первый мазок: что лежит на слоте сейчас — своя текстура человека.
+            # Первый мазок: что лежит на слоте сейчас - своя текстура человека
             p.part_bases[slot] = self._slot_texture(card, style, team) or ''
         return {'slot': slot, 'gen': self._latest[slot],
                 'epoch': p.edits_epoch, 'card': card,
@@ -1543,18 +1532,18 @@ class PartsEditor:
                only: str = '') -> List[Optional[Dict[str, Any]]]:
         """
         ПОД ЗАМКОМ: задания склейки для слота карточки и для материалов её
-        частей (`only` — только для этого материала части, слот исходного не
-        трогаем).
+        частей (`only` - только для этого материала части, слот исходного не
+        трогаем)
 
         Мазки частей лежат в слоте исходного: номера частей общие на
         геометрию, а часть может уйти в свой материал и вернуться. У материала
-        части своя основа — его картинка или игровая текстура исходного, —
+        части своя основа - его картинка или игровая текстура исходного, -
         поэтому склейка у него своя, с теми же мазками, и каждая склейка
         красит только треугольники своего материала (`_keep_for`). В стиле
-        так же — у части там свой столбец (сборка берёт её правку стиля).
-        Вариант (австралий) материалы частей не трогает — в сборке у них
+        так же - у части там свой столбец (сборка берёт её правку стиля).
+        Вариант (австралий) материалы частей не трогает - в сборке у них
         игровое золото. Родной материал модели, получивший части
-        (`existing`), склейки отсюда не получает: его слот — его карточки.
+        (`existing`), склейки отсюда не получает: его слот - его карточки
         """
         t = self.preview.textures
         if style is None:
@@ -1578,8 +1567,8 @@ class PartsEditor:
 
     def _part_job(self, name: str, team: str, layers: Optional[List[Any]],
                   style: int = 0) -> Optional[Dict[str, Any]]:
-        """ПОД ЗАМКОМ: склейка материала части в слоте стиля/команды; без
-        мазков — вернуть ему его основу (как `_plan` у обычной карточки)."""
+        """ПОД ЗАМКОМ: склейка материала части в слоте стиля/команды, без
+        мазков - вернуть ему его основу (как `_plan` у обычной карточки)"""
         p = self.preview
         slot = self._slot(name, style, team)
         self._latest[slot] = next(self._generations)
@@ -1598,16 +1587,16 @@ class PartsEditor:
                                     f"parts_{self._next_compose()}.png")}
 
     def _source_card(self, card: str) -> str:
-        """Карточка, в слоте которой лежат мазки: у материала части — его
-        исходного, у остальных — она сама."""
+        """Карточка, в слоте которой лежат мазки: у материала части - его
+        исходного, у остальных - она сама"""
         return self.preview.textures.part_cards.get(card, card)
 
     def _finish(self, jobs: Iterable[Optional[Dict[str, Any]]]) -> bool:
         """
-        Считает задания БЕЗ замка и кладёт результаты под ним.
+        Считает задания БЕЗ замка и кладёт результаты под ним
 
-        False — хоть одно задание обогнала более свежая правка: её запрос
-        положит свой результат и сам запишет работу.
+        False - хоть одно задание обогнала более свежая правка: её запрос
+        положит свой результат и сам запишет работу
         """
         from src.services import texture_compose_service
 
@@ -1621,7 +1610,7 @@ class PartsEditor:
             with self._lock:
                 # Обогнано: свежей правкой этого слота, подменой всего
                 # состояния (другой предмет, отмена, «забыть») или слот уже не
-                # покрашен.
+                # покрашен
                 if (self._latest.get(job['slot']) != job['gen']
                         or self.preview.edits_epoch != job['epoch']
                         or job['slot'] not in self.preview.part_bases):
@@ -1635,22 +1624,22 @@ class PartsEditor:
                 self._compose_files.append(result)
                 self._drop_old_composites()
                 self._put_slot_texture(job['card'], result, job['style'], job['team'])
-            # Вьювер крутит одну анимацию частей — у исходного материала;
-            # склейка материала части оборвала бы её (`_anim_seq`).
+            # Вьювер крутит одну анимацию частей - у исходного материала;
+            # склейка материала части оборвала бы её (`_anim_seq`)
             if job['card'] not in self.preview.textures.part_cards:
                 self._animate_parts(job['card'], job['mesh'], result,
                                     job['base'], job['layers'])
         return current
 
     def _commit(self, jobs) -> Dict[str, Any]:
-        """Досчитать, записать работу шагом истории и отдать вид."""
+        """Досчитать, записать работу шагом истории и отдать вид"""
         if self._finish(jobs):
             self._host._autosave()
         return self._host.view_state()
 
     def recompose_slots(self, slots: Iterable[str]) -> None:
-        """Пересобирает названные слоты — после отмены: снимок вернул мазки, а
-        файлы его склеек могли уже уйти с диска."""
+        """Пересобирает названные слоты - после отмены: снимок вернул мазки, а
+        файлы его склеек могли уже уйти с диска"""
         jobs = []
         for slot in sorted(slots):
             card, style, team = part_specs.parse_slot(slot)
@@ -1669,12 +1658,12 @@ class PartsEditor:
 
     def _drop_old_composites(self) -> None:
         """
-        ПОД ЗАМКОМ: убирает с диска устаревшие склейки.
+        ПОД ЗАМКОМ: убирает с диска устаревшие склейки
 
         Каждый мазок пишет новый файл: без уборки за день набегало 1090 файлов
         на 248 МБ. Держим последние `_KEEP_COMPOSITES` и всё, что назначено
-        хоть какому-то материалу — любой команды, любого стиля оружия и любого
-        отложенного стиля шапки.
+        хоть какому-то материалу - любой команды, любого стиля оружия и любого
+        отложенного стиля шапки
         """
         live = self._live_texture_paths()
         recent = set(self._compose_files[-self._KEEP_COMPOSITES:])
@@ -1689,7 +1678,7 @@ class PartsEditor:
 
     def _live_texture_paths(self) -> set:
         """Пути, назначенные сейчас хоть какому-то материалу. Склейка стиля
-        лежит в `skin_overrides`, стиля шапки — в его снимке."""
+        лежит в `skin_overrides`, стиля шапки - в его снимке"""
         live: set = set()
 
         def walk(node) -> None:
@@ -1708,7 +1697,7 @@ class PartsEditor:
         walk(self._host._hat_styles)
         return live
 
-    # ── Анимация частей в 3D ─────────────────────────────────────────────── #
+    # Анимация частей в 3D
 
     @staticmethod
     def _parts_animation_on() -> bool:
@@ -1718,12 +1707,12 @@ class PartsEditor:
     def _animate_parts(self, card: str, mesh: str, still: str, base: str,
                        layers: List[Any]) -> None:
         """
-        Крутит гифку с части в 3D — фоном, после того как мазок уже показан.
+        Крутит гифку с части в 3D - фоном, после того как мазок уже показан
 
-        Склейка превью — один кадр; кадры для вьювера рисуются отдельным
+        Склейка превью - один кадр, кадры для вьювера рисуются отдельным
         потоком в уменьшенном размере и приезжают событием `parts_animated`.
         Новый мазок обрывает прежний расчёт. Выключено настройкой по умолчанию:
-        это секунды работы и сотни мегабайт на видеокарте после каждого мазка.
+        это секунды работы и сотни мегабайт на видеокарте после каждого мазка
         """
         from src.services import texture_compose_service
 
@@ -1744,15 +1733,15 @@ class PartsEditor:
             if not frames or not alive():
                 return
             self._drop_old_animations(seq)
-            # Меш зовётся по материалу из OBJ, а не по ключу карточки.
+            # Меш зовётся по материалу из OBJ, а не по ключу карточки
             self._host._put('parts_animated', material=card, mesh=mesh,
                             still=still, frames=frames, fps=fps)
 
         threading.Thread(target=run, daemon=True, name=f'parts-anim-{seq}').start()
 
     def _drop_old_animations(self, seq: int) -> None:
-        """Кадры прежних анимаций: держим одну предыдущую — браузер может ещё
-        грузить её, — остальные с диска долой (60 файлов на мазок)."""
+        """Кадры прежних анимаций: держим одну предыдущую - браузер может ещё
+        грузить её, - остальные с диска долой (60 файлов на мазок)"""
         import shutil
 
         root = os.path.join(self._host._work_dir(), 'anim')
@@ -1765,23 +1754,23 @@ class PartsEditor:
                 shutil.rmtree(os.path.join(root, name), ignore_errors=True)
 
     def refresh_parts_animation(self) -> None:
-        """Настройку переключили: включили — крутим то, что на модели сейчас,
-        выключили — обрываем расчёт, а кадры со сцены снимет сама страница."""
+        """Настройку переключили: включили - крутим то, что на модели сейчас,
+        выключили - обрываем расчёт, а кадры со сцены снимет сама страница"""
         with self._anim_lock:
             last = self._anim_last
             self._anim_seq += 1
         if not (last and self._parts_animation_on()):
             return
-        # Склейка могла смениться без мазка: другой предмет, возврат работы.
+        # Склейка могла смениться без мазка: другой предмет, возврат работы
         card, _, still = last[:3]
         if self.preview.textures.uploaded_for_mat(card) != still:
             return
         self._animate_parts(*last)
 
-    # ── Анимация частей для сборки ───────────────────────────────────────── #
+    # Анимация частей для сборки
 
     def _card_of(self, path: str) -> Optional[Tuple[str, int, str]]:
-        """(карточка, стиль, команда), где лежит этот файл."""
+        """(карточка, стиль, команда), где лежит этот файл"""
         from src.shared.constants import Team
 
         t = self.preview.textures
@@ -1797,17 +1786,17 @@ class PartsEditor:
 
     def bake_plan(self, paths: Iterable[Optional[str]]) -> Dict[str, Any]:
         """
-        Какие склейки сборке надо испечь заново, со всеми кадрами.
+        Какие склейки сборке надо испечь заново, со всеми кадрами
 
         Превью держит от гифки на части один кадр, а в игру должна уехать вся
         анимация. Возвращает {путь склейки превью: (основа, слои, путь полной
-        склейки)} и запоминает подмену путей (`baked_path`); материалы без
-        анимации сюда не попадают — их склейка и так полная.
+        склейки)} и запоминает подмену путей (`baked_path`), материалы без
+        анимации сюда не попадают - их склейка и так полная
         """
         with self._lock:
             # Под замком: `_compose_base` на время смотрит глазами другой
             # команды (`_as_team`), а склейки теперь кладутся из других
-            # потоков — и `set_team` посреди этого окна откатился бы.
+            # потоков - и `set_team` посреди этого окна откатился бы
             return self._bake_plan(paths)
 
     def _bake_plan(self, paths: Iterable[Optional[str]]) -> Dict[str, Any]:
@@ -1823,13 +1812,13 @@ class PartsEditor:
             card, style, team = where
             slot = self._slot(card, style, team)
             if slot not in self.preview.part_bases:
-                continue                         # не склейка — своя текстура
+                continue                         # не склейка - своя текстура
             found = self._parts_model(card)
             if isinstance(found, dict):
-                logger.warning(f"анимация частей: {card} — {found['error']}")
+                logger.warning(f"анимация частей: {card} - {found['error']}")
                 continue
             model, obj_mat, _ = found
-            # У материала части мазки — в слоте исходного (см. `_plans`).
+            # У материала части мазки - в слоте исходного (см. `_plans`)
             layers = self._part_layers(
                 model, obj_mat, self._slot(self._source_card(card), style, team),
                 keep=self._keep_for(model, obj_mat, card, style))
@@ -1843,11 +1832,11 @@ class PartsEditor:
         return plan
 
     def baked_path(self, path: Optional[str]) -> Optional[str]:
-        """Путь, который пойдёт в сборку: полная склейка вместо превью."""
+        """Путь, который пойдёт в сборку: полная склейка вместо превью"""
         return self._baked.get(path, path) if path else path
 
     def bake(self, plan: Dict[str, Any], report) -> None:
-        """Печёт полные склейки по плану. Зовётся из воркера сборки."""
+        """Печёт полные склейки по плану. Зовётся из воркера сборки"""
         from src.services import texture_compose_service
 
         for n, (base, layers, full) in enumerate(plan.values(), 1):
@@ -1857,7 +1846,7 @@ class PartsEditor:
 
     def drop_baked(self) -> None:
         """Полные склейки нужны только сборке: у текстуры 2048 шестьдесят
-        кадров весят сотни мегабайт, держать их до выхода незачем."""
+        кадров весят сотни мегабайт, держать их до выхода незачем"""
         for full in self._baked.values():
             with contextlib.suppress(OSError):
                 os.remove(full)

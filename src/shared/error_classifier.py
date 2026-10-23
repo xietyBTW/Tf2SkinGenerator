@@ -1,6 +1,6 @@
 """
 Классификатор ошибок: сопоставляет технические сообщения с понятными объяснениями
-для обычных пользователей.
+для обычных пользователей
 """
 
 from typing import Callable, List, Tuple
@@ -9,7 +9,7 @@ from typing import Callable, List, Tuple
 # (predicate, ru_title, ru_desc, en_title, en_desc)
 _RULES: List[Tuple[Callable, str, str, str, str]] = [
 
-    # ── Путь к TF2 не настроен ────────────────────────────────────────────
+    # Путь к TF2 не настроен
     (
         lambda m: any(x in m for x in [
             "не указана папка tf2", "tf2 folder not specified", "tf2 path not specified",
@@ -29,7 +29,7 @@ _RULES: List[Tuple[Callable, str, str, str, str]] = [
         ),
     ),
 
-    # ── Папка TF2 не существует ───────────────────────────────────────────
+    # Папка TF2 не существует
     (
         lambda m: any(x in m for x in [
             "директория tf2 не найдена", "tf2 directory not found",
@@ -46,7 +46,7 @@ _RULES: List[Tuple[Callable, str, str, str, str]] = [
         ),
     ),
 
-    # ── Путь ведёт на файл, а не папку ───────────────────────────────────
+    # Путь ведёт на файл, а не папку
     (
         lambda m: any(x in m for x in [
             "указанный путь не является директорией", "specified path is not a directory",
@@ -63,7 +63,7 @@ _RULES: List[Tuple[Callable, str, str, str, str]] = [
         ),
     ),
 
-    # ── Crowbar не найден ─────────────────────────────────────────────────
+    # Crowbar не найден
     (
         lambda m: "crowbar" in m,
         "Декомпилятор Crowbar не найден",
@@ -80,7 +80,7 @@ _RULES: List[Tuple[Callable, str, str, str, str]] = [
         ),
     ),
 
-    # ── Файл модели (.mdl) не найден в VPK ────────────────────────────────
+    # Файл модели (.mdl) не найден в VPK
     (
         lambda m: any(x in m for x in [
             "mdl file not found", "не найден .mdl файл", "не найден mdl файл",
@@ -105,7 +105,7 @@ _RULES: List[Tuple[Callable, str, str, str, str]] = [
         ),
     ),
 
-    # ── Модель нашлась, но не извлеклась ─────────────────────────────────
+    # Модель нашлась, но не извлеклась
     (
         lambda m: any(x in m for x in [
             "mdl file was not extracted", "mdl файл не был извлечен",
@@ -126,7 +126,7 @@ _RULES: List[Tuple[Callable, str, str, str, str]] = [
         ),
     ),
 
-    # ── Оружие не в базе данных ───────────────────────────────────────────
+    # Оружие не в базе данных
     (
         lambda m: any(x in m for x in [
             "not found in model paths", "не найдено в списке путей",
@@ -134,19 +134,19 @@ _RULES: List[Tuple[Callable, str, str, str, str]] = [
         ]),
         "Оружие не поддерживается",
         (
-            "Это оружие отсутствует в базе данных программы — "
+            "Это оружие отсутствует в базе данных программы - "
             "для него не настроен путь к 3D-модели.\n\n"
             "Попробуйте выбрать другое оружие или обновите программу до последней версии."
         ),
         "Weapon not supported",
         (
-            "This weapon is not in the program's database — "
+            "This weapon is not in the program's database - "
             "it has no configured model path.\n\n"
             "Try selecting a different weapon or update the program to the latest version."
         ),
     ),
 
-    # ── Ошибка чтения QC-файла ────────────────────────────────────────────
+    # Ошибка чтения QC-файла
     (
         lambda m: any(x in m for x in [
             "$cdmaterials", "$texturegroup", "$modelname", "qc file",
@@ -171,7 +171,7 @@ _RULES: List[Tuple[Callable, str, str, str, str]] = [
         ),
     ),
 
-    # ── Ошибка компиляции studiomdl ───────────────────────────────────────
+    # Ошибка компиляции studiomdl
     (
         lambda m: any(x in m for x in [
             "studiomdl", "error compiling", "ошибка компиляции",
@@ -182,7 +182,7 @@ _RULES: List[Tuple[Callable, str, str, str, str]] = [
         (
             "studiomdl.exe не смог скомпилировать модель оружия.\n\n"
             "Возможные причины:\n"
-            "• Если вы загружаете свою модель — проверьте, что она "
+            "• Если вы загружаете свою модель - проверьте, что она "
             "экспортирована в формате SMD и не содержит ошибок геометрии\n"
             "• Файлы TF2 были изменены обновлением игры\n"
             "• Антивирус заблокировал работу studiomdl.exe\n\n"
@@ -192,7 +192,7 @@ _RULES: List[Tuple[Callable, str, str, str, str]] = [
         (
             "studiomdl.exe failed to compile the weapon model.\n\n"
             "Possible reasons:\n"
-            "• If using a custom model — make sure it's exported in SMD format "
+            "• If using a custom model - make sure it's exported in SMD format "
             "and has no geometry errors\n"
             "• TF2 files were changed by a game update\n"
             "• Antivirus blocked studiomdl.exe\n\n"
@@ -200,7 +200,7 @@ _RULES: List[Tuple[Callable, str, str, str, str]] = [
         ),
     ),
 
-    # ── Ошибка конвертации текстуры (VTFCmd) ──────────────────────────────
+    # Ошибка конвертации текстуры (VTFCmd)
     (
         lambda m: any(x in m for x in [
             "vtf creation failed", "vtf создание не удалось",
@@ -212,7 +212,7 @@ _RULES: List[Tuple[Callable, str, str, str, str]] = [
             "Проверьте:\n"
             "• Присутствует ли VTFCmd.exe в папке tools программы\n"
             "• Поддерживается ли формат вашего изображения (PNG, JPEG, TGA, BMP)\n"
-            "• Совместим ли выбранный формат сжатия (DXT1/DXT5) с размером изображения — "
+            "• Совместим ли выбранный формат сжатия (DXT1/DXT5) с размером изображения - "
             "размер должен быть кратен 4"
         ),
         "Texture creation failed",
@@ -221,12 +221,12 @@ _RULES: List[Tuple[Callable, str, str, str, str]] = [
             "Check:\n"
             "• Is VTFCmd.exe present in the program's tools folder\n"
             "• Is your image format supported (PNG, JPEG, TGA, BMP)\n"
-            "• Is the selected compression (DXT1/DXT5) compatible with your image size — "
+            "• Is the selected compression (DXT1/DXT5) compatible with your image size - "
             "dimensions must be multiples of 4"
         ),
     ),
 
-    # ── Ошибка упаковки VPK ───────────────────────────────────────────────
+    # Ошибка упаковки VPK
     (
         lambda m: any(x in m for x in [
             "vpk creation failed", "vpk создание не удалось",
@@ -250,7 +250,7 @@ _RULES: List[Tuple[Callable, str, str, str, str]] = [
         ),
     ),
 
-    # ── VPK файл не появился после сборки ────────────────────────────────
+    # VPK файл не появился после сборки
     (
         lambda m: any(x in m for x in [
             "vpkroot.vpk не найден", "vpkroot.vpk not found",
@@ -275,13 +275,13 @@ _RULES: List[Tuple[Callable, str, str, str, str]] = [
         ),
     ),
 
-    # ── Слишком длинный путь (Windows ограничение) ────────────────────────
+    # Слишком длинный путь (Windows ограничение)
     (
         lambda m: any(x in m for x in [
             "путь слишком длинный", "path too long", "error_path_too_long",
         ]),
         # Сборка идёт во временной папке системы (BuildContext.create), а не
-        # рядом с программой: переносить саму программу бесполезно.
+        # рядом с программой: переносить саму программу бесполезно
         "Слишком длинный путь к файлам",
         (
             "Утилиты Source не открывают файлы, путь к которым длиннее 260 "
@@ -300,7 +300,7 @@ _RULES: List[Tuple[Callable, str, str, str, str]] = [
         ),
     ),
 
-    # ── Изображение не найдено ────────────────────────────────────────────
+    # Изображение не найдено
     (
         lambda m: any(x in m for x in [
             "изображение не найдено", "image not found",
@@ -320,7 +320,7 @@ _RULES: List[Tuple[Callable, str, str, str, str]] = [
         ),
     ),
 
-    # ── Пользовательский VTF не найден ───────────────────────────────────
+    # Пользовательский VTF не найден
     (
         lambda m: any(x in m for x in [
             "custom vtf", "vtf файл не найден", "vtf file not found",
@@ -338,7 +338,7 @@ _RULES: List[Tuple[Callable, str, str, str, str]] = [
         ),
     ),
 
-    # ── Отказано в доступе ────────────────────────────────────────────────
+    # Отказано в доступе
     (
         lambda m: any(x in m for x in [
             "access is denied", "access denied", "permission denied",
@@ -364,7 +364,7 @@ _RULES: List[Tuple[Callable, str, str, str, str]] = [
         ),
     ),
 
-    # ── Мало места на диске ───────────────────────────────────────────────
+    # Мало места на диске
     (
         lambda m: any(x in m for x in [
             "no space left", "not enough space", "недостаточно места",
@@ -382,7 +382,7 @@ _RULES: List[Tuple[Callable, str, str, str, str]] = [
         ),
     ),
 
-    # ── Объединение VPK модов ─────────────────────────────────────────────
+    # Объединение VPK модов
     (
         lambda m: any(x in m for x in [
             "merging vpk", "объединен", "error_merging_vpk",
@@ -401,7 +401,7 @@ _RULES: List[Tuple[Callable, str, str, str, str]] = [
         ),
     ),
 
-    # ── Общая ошибка при работе с моделью ────────────────────────────────
+    # Общая ошибка при работе с моделью
     (
         lambda m: any(x in m for x in [
             "ошибка при работе с моделью", "error while working with model",
@@ -411,7 +411,7 @@ _RULES: List[Tuple[Callable, str, str, str, str]] = [
         (
             "Произошла ошибка во время работы с моделью оружия.\n\n"
             "Это может быть связано с декомпиляцией, заменой геометрии "
-            "или компиляцией модели. Подробности — в «Технических деталях»."
+            "или компиляцией модели. Подробности - в «Технических деталях»."
         ),
         "Model processing error",
         (
@@ -425,14 +425,14 @@ _RULES: List[Tuple[Callable, str, str, str, str]] = [
 
 def classify(message: str, language: str = "ru") -> Tuple[str, str]:
     """
-    Возвращает (понятный_заголовок, понятное_описание) по тексту технической ошибки.
+    Возвращает (понятный_заголовок, понятное_описание) по тексту технической ошибки
 
     Args:
         message: Техническое сообщение об ошибке (на любом языке).
-        language: Язык интерфейса ('ru' или 'en').
+        language: Язык интерфейса ('ru' или 'en')
 
     Returns:
-        (title, description) — пара строк для отображения пользователю.
+        (title, description) - пара строк для отображения пользователю
     """
     m = message.lower()
     is_ru = (language == "ru")

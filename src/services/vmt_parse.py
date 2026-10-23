@@ -1,18 +1,16 @@
 """
-Разбор VMT как дерева KeyValues — единственный способ ЧИТАТЬ материалы.
+Разбор VMT как дерева KeyValues - единственный способ ЧИТАТЬ материалы
 
-Почему не регулярки. VMT — это не строки вида «$param значение», а дерево:
+Почему не регулярки. VMT - это не строки вида «$param значение», а дерево:
 у материала есть шейдер, параметры, вложенные блоки (`proxies`, `>=DX90`,
 `replace`), комментарии `//` и значения в кавычках с пробелами и обратными
 слэшами. Регулярка по строке не отличает настоящий параметр от
-закомментированного и от упоминания внутри прокси. Так и было: шесть
-независимых наборов регулярок в разных модулях расходились на одних и тех же
-файлах — два из трёх парсеров $basetexture возвращали ЗАКОММЕНТИРОВАННОЕ
-значение, а часть не нормализовала обратные слэши.
+закомментированного и от упоминания внутри прокси, а разные наборы регулярок
+расходятся на одних и тех же файлах
 
 Здесь один разбор и типизированный доступ к нему. Модуль только ЧИТАЕТ:
 правка VMT остаётся текстовой (VMTService), потому что там важно сохранить
-исходное форматирование файла пользователя.
+исходное форматирование файла пользователя
 """
 
 from __future__ import annotations
@@ -25,10 +23,10 @@ from src.shared.logging_config import get_logger
 
 logger = get_logger(__name__)
 
-#: Токены: строка в кавычках, скобки блока, либо голое слово.
+#: Токены: строка в кавычках, скобки блока, либо голое слово
 _TOKEN = re.compile(r'"([^"]*)"|([{}])|([^\s{}"]+)')
-#: Комментарий до конца строки; внутри кавычек `//` комментарием НЕ является,
-#: поэтому режем построчно с учётом чётности кавычек (см. _strip_comments).
+#: Комментарий до конца строки, внутри кавычек `//` комментарием НЕ является,
+#: поэтому режем построчно с учётом чётности кавычек (см. _strip_comments)
 _LINE_COMMENT = "//"
 
 
@@ -49,10 +47,10 @@ def _strip_comments(text: str) -> str:
 
 
 def _tokenize(text: str) -> List[Tuple[str, str]]:
-    """[(вид, значение)] где вид — 'str' | 'brace'.
+    """[(вид, значение)] где вид - 'str' | 'brace'
 
     Идём по finditer, а не по findall: у findall несовпавшие группы тоже
-    пустые строки, и отличить `""` от голого слова становится нельзя.
+    пустые строки, и отличить `""` от голого слова становится нельзя
     """
     tokens: List[Tuple[str, str]] = []
     for m in _TOKEN.finditer(_strip_comments(text)):
@@ -68,34 +66,34 @@ def _tokenize(text: str) -> List[Tuple[str, str]]:
 
 @dataclass
 class VmtNode:
-    """Блок VMT: параметры и вложенные блоки, оба с сохранением порядка."""
+    """Блок VMT: параметры и вложенные блоки, оба с сохранением порядка"""
 
-    #: {имя в нижнем регистре: значение} — при повторе побеждает ПЕРВОЕ,
-    #: как и при чтении KeyValues движком.
+    #: {имя в нижнем регистре: значение} - при повторе побеждает ПЕРВОЕ,
+    #: как и при чтении KeyValues движком
     params: Dict[str, str] = field(default_factory=dict)
-    #: {имя в нижнем регистре: [блоки]} — блоков с одним именем может быть
-    #: несколько (`replace` в разных ветках качества).
+    #: {имя в нижнем регистре: [блоки]} - блоков с одним именем может быть
+    #: несколько (`replace` в разных ветках качества)
     blocks: Dict[str, List["VmtNode"]] = field(default_factory=dict)
 
     def add_param(self, key: str, value: str) -> None:
         # Ключ нормализуем ТАК ЖЕ, как при чтении (_key): без $ и в нижнем
-        # регистре — иначе запись «$basetexture» не найдётся по «basetexture»
+        # регистре - иначе запись «$basetexture» не найдётся по «basetexture»
         self.params.setdefault(_key(key), value)
 
     def add_block(self, key: str, node: "VmtNode") -> None:
         self.blocks.setdefault(_key(key), []).append(node)
 
-    # ── Чтение ───────────────────────────────────────────────────────────── #
+    # Чтение
 
     def get(self, name: str, default: Optional[str] = None) -> Optional[str]:
-        """Параметр этого уровня. Имя можно писать с $ и в любом регистре."""
+        """Параметр этого уровня. Имя можно писать с $ и в любом регистре"""
         return self.params.get(_key(name), default)
 
     def find(self, name: str) -> Optional[str]:
-        """Параметр ГДЕ УГОДНО в дереве: свой уровень, затем вложенные блоки.
+        """Параметр ГДЕ УГОДНО в дереве: свой уровень, затем вложенные блоки
 
         Нужен для параметров, которые живут внутри прокси
-        (`animatedtextureframerate`) или в ветке качества (`>=DX90`).
+        (`animatedtextureframerate`) или в ветке качества (`>=DX90`)
         """
         key = _key(name)
         if key in self.params:
@@ -118,7 +116,7 @@ def _key(name: str) -> str:
 
 @dataclass
 class VmtDoc:
-    """Разобранный VMT: имя шейдера и корневой блок."""
+    """Разобранный VMT: имя шейдера и корневой блок"""
 
     shader: str = ""
     root: VmtNode = field(default_factory=VmtNode)
@@ -133,10 +131,10 @@ class VmtDoc:
     def block(self, name: str) -> Optional[VmtNode]:
         return self.root.block(name)
 
-    # ── Типизированный доступ ────────────────────────────────────────────── #
+    # Типизированный доступ
 
     def path(self, name: str) -> Optional[str]:
-        """Значение-путь: прямые слэши, нижний регистр, без крайних слэшей."""
+        """Значение-путь: прямые слэши, нижний регистр, без крайних слэшей"""
         raw = self.get(name)
         if raw is None:
             return None
@@ -151,7 +149,7 @@ class VmtDoc:
             return default
 
     def flag(self, name: str, default: bool = False) -> bool:
-        """«1»/«0» из VMT в bool; всё непонятное — default."""
+        """«1»/«0» из VMT в bool; всё непонятное - default"""
         raw = self.get(name)
         if raw is None:
             return default
@@ -164,7 +162,7 @@ class VmtDoc:
             return default
 
     def color(self, name: str) -> Optional[Tuple[int, int, int]]:
-        """«{ 189 59 59 }» → (189, 59, 59); «[.74 .23 .23]» → доли единицы."""
+        """«{ 189 59 59 }» -> (189, 59, 59), «[.74 .23 .23]» -> доли единицы"""
         return parse_color(self.get(name))
 
 
@@ -172,11 +170,11 @@ _RE_TRIPLE = re.compile(r"[-+]?\d*\.?\d+")
 
 
 def parse_color(value: Optional[str]) -> Optional[Tuple[int, int, int]]:
-    """Цвет VMT → (r, g, b) 0-255.
+    """Цвет VMT -> (r, g, b) 0-255
 
-    Скобки решают масштаб: фигурные — уже 0-255, квадратные — доли единицы.
+    Скобки решают масштаб: фигурные - уже 0-255, квадратные - доли единицы.
     Ориентируемся именно на скобку, а не на «есть ли значение больше 1»:
-    [1 1 1] — это белый, а не почти чёрный.
+    [1 1 1] - это белый, а не почти чёрный
     """
     if not value:
         return None
@@ -190,7 +188,7 @@ def parse_color(value: Optional[str]) -> Optional[Tuple[int, int, int]]:
 
 
 def parse(text: str) -> VmtDoc:
-    """Разбирает текст VMT. Битый файл даёт пустой документ, а не исключение."""
+    """Разбирает текст VMT. Битый файл даёт пустой документ, а не исключение"""
     doc = VmtDoc()
     if not text:
         return doc
@@ -199,9 +197,9 @@ def parse(text: str) -> VmtDoc:
         return doc
 
     i = 0
-    # Заголовок: имя шейдера — только если СРАЗУ за ним открывается блок.
+    # Заголовок: имя шейдера - только если СРАЗУ за ним открывается блок.
     # Иначе перед нами обрывок VMT без обёртки («$basetexture models/x»), и
-    # первый токен — обычный ключ, а не шейдер.
+    # первый токен - обычный ключ, а не шейдер
     if (tokens[0][0] == "str" and len(tokens) > 1
             and tokens[1] == ("brace", "{")):
         doc.shader = tokens[0][1].strip().lower()
@@ -213,16 +211,16 @@ def parse(text: str) -> VmtDoc:
 
 
 def _fill(node: VmtNode, tokens: List[Tuple[str, str]], i: int) -> int:
-    """Наполняет node токенами начиная с i; возвращает позицию после блока."""
+    """Наполняет node токенами начиная с i; возвращает позицию после блока"""
     while i < len(tokens):
         kind, value = tokens[i]
         if kind == "brace":
-            # Закрывающая — конец блока; лишняя открывающая — пропускаем
+            # Закрывающая - конец блока, лишняя открывающая - пропускаем
             i += 1
             if value == "}":
                 return i
             continue
-        # Ключ; дальше либо значение, либо вложенный блок
+        # Ключ, дальше либо значение, либо вложенный блок
         i += 1
         if i >= len(tokens):
             break
@@ -232,28 +230,28 @@ def _fill(node: VmtNode, tokens: List[Tuple[str, str]], i: int) -> int:
             i = _fill(child, tokens, i + 1)
             node.add_block(value, child)
         elif nxt_kind == "brace":
-            i += 1          # «}» сразу после ключа — мусор, пропускаем
+            i += 1          # «}» сразу после ключа - мусор, пропускаем
         else:
             node.add_param(value, nxt_value)
             i += 1
     return i
 
 
-# ── Частые запросы одной строкой ─────────────────────────────────────────── #
+# Частые запросы одной строкой
 
 def basetexture(text: str) -> Optional[str]:
-    """$basetexture как путь относительно materials/ (или None)."""
+    """$basetexture как путь относительно materials/ (или None)"""
     return parse(text).path("basetexture")
 
 
 def animated_framerate(text: str) -> Optional[float]:
-    """animatedtextureframerate из прокси AnimatedTexture (или None).
+    """animatedtextureframerate из прокси AnimatedTexture (или None)
 
     Прокси бывает несколько, и частота нужна того, что листает
     `$basetexture`. У гирлянд первым идёт прокси огня (`$detail`, 30 кадров
-    в секунду), а сами лампочки мигают раз в секунду — первый попавшийся
+    в секунду), а сами лампочки мигают раз в секунду - первый попавшийся
     параметр давал мерцание в тридцать раз быстрее игры. Прокси без
-    `animatedtexturevar` и VMT без прокси ищутся по-старому, по всему дереву.
+    `animatedtexturevar` и VMT без прокси ищутся по-старому, по всему дереву
     """
     doc = parse(text)
     for node in blocks_named(doc.root, "animatedtexture"):
@@ -266,8 +264,8 @@ def animated_framerate(text: str) -> Optional[float]:
 
 
 def blocks_named(node: VmtNode, name: str):
-    """Все блоки с этим именем на любой глубине — прокси бывают и внутри
-    ветки качества (`>=DX90 { Proxies { … } }`)."""
+    """Все блоки с этим именем на любой глубине - прокси бывают и внутри
+    ветки качества (`>=DX90 { Proxies { … } }`)"""
     key = _key(name)
     for child_key, children in node.blocks.items():
         for child in children:
@@ -277,7 +275,7 @@ def blocks_named(node: VmtNode, name: str):
 
 
 def params_named(node: VmtNode, name: str):
-    """Все значения параметра на любой глубине: свой уровень, затем ветки."""
+    """Все значения параметра на любой глубине: свой уровень, затем ветки"""
     key = _key(name)
     if key in node.params:
         yield node.params[key]

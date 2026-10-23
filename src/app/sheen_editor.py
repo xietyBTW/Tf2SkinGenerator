@@ -1,10 +1,10 @@
 """
 Блеск Killstreak на показанном оружии: где на модели лежит маска и превью
-конструктора узора (src/services/sheen_builder.py) в пропорции оружия.
+конструктора узора (src/services/sheen_builder.py) в пропорции оружия
 
-От сеанса нужны показанное оружие, его модель, мод из VPK и пути к игре.
+От сеанса нужны показанное оружие, его модель, мод из VPK и пути к игре
 
-Доступ — `session().sheen`; `api.py` зовёт его методы напрямую.
+Доступ - `session().sheen`; `api.py` зовёт его методы напрямую
 """
 
 from __future__ import annotations
@@ -22,28 +22,28 @@ logger = get_logger(__name__)
 
 
 class SheenEditor:
-    """Маска блеска показанного оружия и превью своих узоров."""
+    """Маска блеска показанного оружия и превью своих узоров"""
 
     def __init__(self, host: "AppSession") -> None:
         self._host = host
         #: Номера превью конструктора и последний выданный: старый расчёт по
         #: нему видит, что узор уже другой, и бросает работу. next() у count
-        #: атомарен, а `+= 1` из двух потоков сервера мог выдать один номер.
+        #: атомарен, а `+= 1` из двух потоков сервера мог выдать один номер
         self._preview_numbers = itertools.count(1)
         self._preview_seq = 0
 
     def sheen_mask_params(self) -> Optional[Dict[str, Any]]:
-        """Положение полосы блеска для показанного оружия — из заголовка его
-        MDL в игре (vmt_effects.sheen_mask_params). None — не оружие или нет
+        """Положение полосы блеска для показанного оружия - из заголовка его
+        MDL в игре (vmt_effects.sheen_mask_params). None - не оружие или нет
         игры. Своя геометрия: берётся стоковая модель, полоса может лечь
-        чуть иначе."""
+        чуть иначе"""
         from src.services import vmt_effects
         from src.services.game_vpk_reader import GameVpkReader
 
         if not self._host._shown_weapon():
             return None
         # Мод из VPK со своей моделью: полоса - по ней. У куная из мода
-        # модель на 2.5 единицы длиннее стоковой, и низ выпадал из маски.
+        # модель на 2.5 единицы длиннее стоковой, и низ выпадал из маски
         p = self._host.preview
         if p.custom_vpk_mode and p.custom_vpk_own_model and self._host._vpk_mod_path:
             data = self._mod_mdl(self._host._shown_weapon())
@@ -56,7 +56,7 @@ class SheenEditor:
 
         reader = GameVpkReader([paths['misc_vpk']])
         try:
-            # Не у всех оружий модель лежит в c_models/<ключ>/: тогда по имени.
+            # Не у всех оружий модель лежит в c_models/<ключ>/: тогда по имени
             data = _find_mdl(reader, self._host._shown_mdl())
         finally:
             reader.close()
@@ -64,7 +64,7 @@ class SheenEditor:
 
     def _mod_mdl(self, weapon_key: str) -> Optional[bytes]:
         """MDL оружия из архива показанного мода (имя = ключ оружия;
-        гирлянда того же мода - отдельный файл и сюда не попадает)."""
+        гирлянда того же мода - отдельный файл и сюда не попадает)"""
         import vpk as vpklib
         try:
             pak = vpklib.open(self._host._vpk_mod_path)
@@ -77,7 +77,7 @@ class SheenEditor:
         return None
 
     def _sheen_aspect(self) -> tuple:
-        """(пропорция показанного оружия, оружие ли это) — как в имени маски."""
+        """(пропорция показанного оружия, оружие ли это) - как в имени маски"""
         from src.services import sheen_builder
         try:
             bounds = self.sheen_mask_params()
@@ -103,12 +103,12 @@ class SheenEditor:
 
     def sheen_pattern_preview(self, spec: Dict[str, Any], length: float,
                               full: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-        """Кадры узора из конструктора картинкой-сеткой — в пропорции
-        показанного оружия (как ляжет в игре), иначе обычного ствола.
+        """Кадры узора из конструктора картинкой-сеткой - в пропорции
+        показанного оружия (как ляжет в игре), иначе обычного ствола
 
         Новый вызов прерывает предыдущий ({'cancelled': True}): страница
         шлёт правку, не дожидаясь прошлого расчёта, и тяжёлый узор (высокое
-        качество, 8 с прохода) не держит её секундами на устаревших кадрах."""
+        качество, 8 с прохода) не держит её секундами на устаревших кадрах"""
         import tempfile
         from pathlib import Path
 

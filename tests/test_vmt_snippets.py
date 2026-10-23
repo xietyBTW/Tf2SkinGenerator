@@ -10,8 +10,8 @@ from src.data.vmt_snippets import (
 
 class VmtSnippetsTests(unittest.TestCase):
     def test_en_and_ru_docs_cover_same_params(self):
-        # Английский и русский словари должны описывать одни и те же параметры —
-        # иначе тултип пропадёт при смене языка.
+        # Английский и русский словари должны описывать одни и те же параметры -
+        # иначе тултип пропадёт при смене языка
         self.assertEqual(set(VMT_PARAM_DOCS), set(VMT_PARAM_DOCS_EN))
 
     def test_param_doc_selects_language(self):
@@ -19,7 +19,7 @@ class VmtSnippetsTests(unittest.TestCase):
         self.assertEqual(param_doc("$basetexture", "ru"), VMT_PARAM_DOCS["$basetexture"])
 
     def test_param_doc_defaults_to_english(self):
-        # Английская версия приложения не должна получать русские подсказки.
+        # Английская версия приложения не должна получать русские подсказки
         self.assertEqual(param_doc("$phong"), VMT_PARAM_DOCS_EN["$phong"])
         self.assertNotEqual(param_doc("$phong", "en"), VMT_PARAM_DOCS["$phong"])
 
@@ -37,10 +37,10 @@ if __name__ == "__main__":
 
 
 def test_australium_snippet_matches_valve_gold_vmts():
-    """Набор — общий у c_*_gold.vmt Valve: золотая кубмапа, ровный phong,
-    лайтварп оружия, маска блеска в альфе. Мешающие ключи гасятся слиянием."""
+    """Набор - общий у c_*_gold.vmt Valve: золотая кубмапа, ровный phong,
+    лайтварп оружия, маска блеска в альфе. Мешающие ключи гасятся слиянием"""
     from src.data.vmt_snippets import VMT_MERGE_REMOVES, VMT_SNIPPETS
-    label = "Австралий — золотой металл"
+    label = "Австралий - золотой металл"
     snippet = next(sn for lb, sn, _ in VMT_SNIPPETS["Эффекты"] if lb == label)
     for key in ('"$envmap" "cubemaps/cubemap_gold001"', '"$envmaptint" "[2.5 2.5 1.15]"',
                 '"$phongexponent"', '"$basemapalphaphongmask" "1"',
@@ -50,20 +50,20 @@ def test_australium_snippet_matches_valve_gold_vmts():
 
 
 def test_reference_keys_are_lowercase_params():
-    """Ключи справочника — имена в нижнем регистре: так их ищут подсказки."""
+    """Ключи справочника - имена в нижнем регистре: так их ищут подсказки"""
     from src.data.vmt_snippets import VMT_PARAM_DOCS
     for name in VMT_PARAM_DOCS:
         assert name.startswith("$") and name == name.lower(), name
 
 
 def test_param_doc_ignores_case():
-    """В VMT игры пишут и $cloakPassEnabled — подсказка не должна пропадать."""
+    """В VMT игры пишут и $cloakPassEnabled - подсказка не должна пропадать"""
     from src.data.vmt_snippets import VMT_PARAM_DOCS, param_doc
     assert param_doc("$cloakPassEnabled", "ru") == VMT_PARAM_DOCS["$cloakpassenabled"]
 
 
 def test_every_menu_entry_has_english():
-    """Меню «Готовые эффекты» на английском не должно остаться русским."""
+    """Меню «Готовые эффекты» на английском не должно остаться русским"""
     from src.data.vmt_snippets import VMT_SNIPPETS, VMT_SNIPPETS_EN
     for category, items in VMT_SNIPPETS.items():
         assert category in VMT_SNIPPETS_EN, category

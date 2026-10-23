@@ -1,14 +1,14 @@
 """
-Где в VPK лежит текстура материала для 3D-превью.
+Где в VPK лежит текстура материала для 3D-превью
 
-Вынесено из Preview3DWorker: чистые функции над открытыми архивами (`paks` —
+Вынесено из Preview3DWorker: чистые функции над открытыми архивами (`paks` -
 список pak с доступом `pak[path].read()`), путями `$cdmaterials` и разобранным
-QC (QcModel). Отдают байты VTF и имена материалов; картинки на диск пишет и
-сигналы шлёт поток.
+QC (QcModel). Отдают байты VTF и имена материалов, картинки на диск пишет и
+сигналы шлёт поток
 
 Главное правило: текстуру берём по `$cdmaterials` из QC показываемой модели.
 У части оружия в игре две версии (c_items и workshop), и угадывание по
-стандартным путям подсовывало текстуру чужой развёртки.
+стандартным путям подсовывало текстуру чужой развёртки
 """
 
 from typing import Iterator, Optional
@@ -19,14 +19,14 @@ from src.shared.logging_config import get_logger
 
 logger = get_logger(__name__)
 
-#: Командный суффикс головы персонажа: VTF один, тонируется в VMT.
+#: Командный суффикс головы персонажа: VTF один, тонируется в VMT
 _TEAM_SUFFIXES = ("_red", "_blue")
-#: Оверлей-меши рук (киллстрик): своего VTF нет, рисуются базовым.
+#: Оверлей-меши рук (киллстрик): своего VTF нет, рисуются базовым
 _OVERLAY_SUFFIXES = ("_sheen2", "_sheen", "_overlay", "_fresnel")
 
 
 def read_first(pak, paths: list) -> tuple:
-    """Первый существующий путь в архиве → (байты, путь) или (None, None)."""
+    """Первый существующий путь в архиве -> (байты, путь) или (None, None)"""
     for path in paths:
         try:
             return pak[path].read(), path
@@ -35,10 +35,10 @@ def read_first(pak, paths: list) -> tuple:
     return None, None
 
 
-# ── VTF материала из SMD ─────────────────────────────────────────────────── #
+# VTF материала из SMD
 
 def player_folder(mode: str, weapon_key: str) -> Optional[str]:
-    """Папка materials/models/player/{папка}/ для рук и тел персонажей."""
+    """Папка materials/models/player/{папка}/ для рук и тел персонажей"""
     import os
 
     from src.data.item_kinds import kind_of
@@ -50,8 +50,8 @@ def player_folder(mode: str, weapon_key: str) -> Optional[str]:
         if textures_list:
             return textures_list[0][0]
     elif kind.is_character:
-        # Нельзя просто брать стем MDL — у Heavy MDL = "heavy.mdl",
-        # но папка текстур = "hvyweapon".
+        # Нельзя просто брать стем MDL - у Heavy MDL = "heavy.mdl",
+        # но папка текстур = "hvyweapon"
         return PLAYER_CHARACTERS.get(mode, {}).get(
             "folder",
             os.path.splitext(os.path.basename(weapon_key))[0]
@@ -61,29 +61,29 @@ def player_folder(mode: str, weapon_key: str) -> Optional[str]:
 
 def vtf_candidates(mat_name: str, arm_folder: Optional[str],
                    cdmaterials: Optional[list] = None) -> list:
-    """Пути VTF для имени материала из SMD в порядке приоритета."""
+    """Пути VTF для имени материала из SMD в порядке приоритета"""
     paths: list = []
     mat_lower = mat_name.lower()
 
     # Приоритет: папка рук игрока (materials/models/player/{folder}/)
     # Пробуем оба варианта: оригинальный регистр и lowercase,
     # т.к. SMD может использовать mixed-case (engineer_handL), а VTF в VPK
-    # хранится в lowercase (engineer_handl).
+    # хранится в lowercase (engineer_handl)
     if arm_folder:
         paths += _player_paths(arm_folder, mat_name)
-        # SMD ссылается на {class}_head_red, а реальный VTF — {class}_head.vtf
-        # (scout_head_red → scout_head.vtf). Sheen/overlay-меши рук рендерятся
-        # эффектом киллстрика поверх той же геометрии: hvyweapon_hands_sheen →
-        # hvyweapon_hands.vtf.
+        # SMD ссылается на {class}_head_red, а реальный VTF - {class}_head.vtf
+        # (scout_head_red -> scout_head.vtf). Sheen/overlay-меши рук рендерятся
+        # эффектом киллстрика поверх той же геометрии: hvyweapon_hands_sheen ->
+        # hvyweapon_hands.vtf
         for suffixes in (_TEAM_SUFFIXES, _OVERLAY_SUFFIXES):
             for suf in suffixes:
                 if mat_lower.endswith(suf):
                     paths += _player_paths(arm_folder, mat_name[: -len(suf)])
                     break
 
-    # Пути из QC ($cdmaterials) — авторитетные: текстура лежит ровно там,
+    # Пути из QC ($cdmaterials) - авторитетные: текстура лежит ровно там,
     # куда указывает модель. Покрывает вторую/третью текстуру оружия в
-    # нестандартных папках (parts/, общая папка модели и т.п.).
+    # нестандартных папках (parts/, общая папка модели и т.п.)
     for cd in (cdmaterials or []):
         paths.append(f"materials/{cd}/{mat_name}.vtf")
         if mat_lower != mat_name:
@@ -108,17 +108,17 @@ def _player_paths(folder: str, name: str) -> list:
 
 def find_vtf_for_mat(pak, mat_name: str, arm_folder: Optional[str],
                      cdmaterials: Optional[list] = None) -> Optional[bytes]:
-    """VTF-данные для имени материала из SMD в одном архиве."""
+    """VTF-данные для имени материала из SMD в одном архиве"""
     return read_first(pak, vtf_candidates(mat_name, arm_folder, cdmaterials))[0]
 
 
 def resolve_vtf_via_vmt(paks: list, cdmaterials: list, mat_name: str) -> Optional[bytes]:
     """
-    VTF материала через его VMT: {cdmat}/{mat}.vmt → $basetexture → VTF.
+    VTF материала через его VMT: {cdmat}/{mat}.vmt -> $basetexture -> VTF
 
     Нужно для материалов, у которых текстура задаётся через VMT, а не лежит
     по «угадываемому» пути (напр. центральная вставка Dead Ringer
-    'pocket_watch_fg'). VMT и VTF могут быть в разных VPK — ищем по всем.
+    'pocket_watch_fg'). VMT и VTF могут быть в разных VPK - ищем по всем
     """
     mat_lower = mat_name.lower()
     for pak in paks:
@@ -138,22 +138,22 @@ def resolve_vtf_via_vmt(paks: list, cdmaterials: list, mat_name: str) -> Optiona
 
 def material_vtf(paks: list, mat_name: str, arm_folder: Optional[str],
                  cdmaterials: list) -> Optional[bytes]:
-    """VTF материала: прямые пути по всем архивам, затем через его VMT."""
-    # 1) Прямой поиск VTF по угадываемым путям и $cdmaterials.
+    """VTF материала: прямые пути по всем архивам, затем через его VMT"""
+    # 1) Прямой поиск VTF по угадываемым путям и $cdmaterials
     vtf_data = None
     for pak in paks:
         vtf_data = find_vtf_for_mat(pak, mat_name, arm_folder, cdmaterials)
         if vtf_data:
             break
-    # 2) Fallback: материал → его VMT → $basetexture → VTF
-    #    (покрывает материалы без прямого VTF, напр. pocket_watch_fg).
+    # 2) Fallback: материал -> его VMT -> $basetexture -> VTF
+    #    (покрывает материалы без прямого VTF, напр. pocket_watch_fg)
     if not vtf_data and cdmaterials:
         vtf_data = resolve_vtf_via_vmt(paks, cdmaterials, mat_name)
     return vtf_data
 
 
 def read_in_cdmaterials(paks: list, cdmaterials: list, name: str) -> tuple:
-    """materials/{cdmat}/{name}.vtf по папкам QC → (байты, путь) или (None, None)."""
+    """materials/{cdmat}/{name}.vtf по папкам QC -> (байты, путь) или (None, None)"""
     for cdmat in cdmaterials:
         path = f"materials/{cdmat}/{name}.vtf"
         data = None
@@ -168,10 +168,10 @@ def read_in_cdmaterials(paks: list, cdmaterials: list, name: str) -> tuple:
     return None, None
 
 
-# ── RED: одна текстура оружия ────────────────────────────────────────────── #
+# RED: одна текстура оружия
 
 def weapon_vtf_search(weapon_key: str) -> list:
-    """Пути главной текстуры оружия: нестандартные первыми, затем стандартные."""
+    """Пути главной текстуры оружия: нестандартные первыми, затем стандартные"""
     from src.data.weapon_quirks import WEAPON_TEXTURE_PATHS
     wk = weapon_key
     return WEAPON_TEXTURE_PATHS.get(wk, []) + [
@@ -184,7 +184,7 @@ def weapon_vtf_search(weapon_key: str) -> list:
 
 
 def weapon_blu_vtf_search(weapon_key: str) -> list:
-    """Пути BLU-текстуры оружия по суффиксу _blue."""
+    """Пути BLU-текстуры оружия по суффиксу _blue"""
     from src.data.weapon_quirks import WEAPON_TEXTURE_PATHS
     wk = weapon_key
     return [p.replace(".vtf", "_blue.vtf") for p in WEAPON_TEXTURE_PATHS.get(wk, [])] + [
@@ -199,13 +199,13 @@ def weapon_blu_vtf_search(weapon_key: str) -> list:
 def red_vtf_via_qc(paks: list, model, weapon_key: str,
                    mat_names: Optional[list] = None) -> Optional[bytes]:
     """
-    RED (skin 0) текстура через QC $cdmaterials.
+    RED (skin 0) текстура через QC $cdmaterials
 
     Читает первую строку $texturegroup (или weapon_key, если группы нет).
-    ``mat_names`` — материалы геометрии в кадре: их имена ищем ПЕРВЫМИ.
+    ``mat_names`` - материалы геометрии в кадре: их имена ищем ПЕРВЫМИ.
     У Звона смерти показывается вьюмодель с руками, из которой оставлены
-    одни часы, а первая колонка строки — `spy_hands_red`: без этого
-    карточка часов показывала руки шпиона.
+    одни часы, а первая колонка строки - `spy_hands_red`: без этого
+    карточка часов показывала руки шпиона
     """
     if model is None or not paks:
         return None
@@ -236,7 +236,7 @@ def red_vtf_via_qc(paks: list, model, weapon_key: str,
                     return data
                 except KeyError:
                     continue
-        # Прямой путь не нашёл — через VMT → $baseTexture
+        # Прямой путь не нашёл - через VMT -> $baseTexture
         data = resolve_vtf_via_vmt(paks, cdmaterials, tex_lower)
         if data:
             logger.info(f"[3D] RED texture via QC→VMT: {tex_lower}")
@@ -245,7 +245,7 @@ def red_vtf_via_qc(paks: list, model, weapon_key: str,
 
 
 def tint_from_vmt_paths(paks: list, vmt_search: list):
-    """Краска из первого найденного VMT по списку путей; None — нет."""
+    """Краска из первого найденного VMT по списку путей; None - нет"""
     for pak in paks or []:
         for path in vmt_search:
             try:
@@ -258,21 +258,21 @@ def tint_from_vmt_paths(paks: list, vmt_search: list):
     return None
 
 
-# ── BLU через QC skinfamilies ────────────────────────────────────────────── #
+# BLU через QC skinfamilies
 
 def own_blu_names(model, mat_names: Optional[list]) -> Optional[list]:
-    """Синие имена ТОЛЬКО тех столбцов, что принадлежат материалам модели.
+    """Синие имена ТОЛЬКО тех столбцов, что принадлежат материалам модели
 
     Команда в Source меняет материалы поколоночно, поэтому синюю пару надо
     брать из столбца СВОЕГО материала. Пробегать всю строку нельзя: в ней
     стоят и чужие столбцы (у вьюмодели часов рядом с самими часами лежат
-    руки шпиона), и общие для команд — и первый же попавшийся `*_blue`
-    уезжал предмету на текстуру.
+    руки шпиона), и общие для команд - и первый же попавшийся `*_blue`
+    уезжал предмету на текстуру
 
     Returns:
-        Список синих имён; пустой список — свои столбцы командными не
-        оказались (BLU у предмета нет); None — сопоставить не удалось,
-        решать вызывающему.
+        Список синих имён, пустой список - свои столбцы командными не
+        оказались (BLU у предмета нет); None - сопоставить не удалось,
+        решать вызывающему
     """
     by_lower = {k.lower(): v for k, v in (model.team_map or {}).items()}
     if not by_lower or not mat_names:
@@ -293,10 +293,10 @@ def own_blu_names(model, mat_names: Optional[list]) -> Optional[list]:
 
 
 def team_partner(by_lower: dict, mat_lower: str) -> Optional[str]:
-    """Синяя пара материала по карте «RED в нижнем регистре → BLU».
+    """Синяя пара материала по карте «RED в нижнем регистре -> BLU»
 
-    Имена материалов SMD и $texturegroup иногда расходятся префиксом пути —
-    тогда сверяем по хвосту.
+    Имена материалов SMD и $texturegroup иногда расходятся префиксом пути -
+    тогда сверяем по хвосту
     """
     blu = by_lower.get(mat_lower)
     if blu is None:
@@ -306,11 +306,11 @@ def team_partner(by_lower: dict, mat_lower: str) -> Optional[str]:
 
 
 def blu_tex_names(model, mat_names: Optional[list], weapon_key: str) -> list:
-    """Синие текстуры модели для одиночного BLU; пусто — BLU у предмета нет.
+    """Синие текстуры модели для одиночного BLU; пусто - BLU у предмета нет
 
-    ``mat_names`` — материалы, которые реально показаны в превью. Строка
+    ``mat_names`` - материалы, которые реально показаны в превью. Строка
     $texturegroup описывает ВСЮ модель, а показываем мы иногда лишь её часть
-    (Dead Ringer рисуется вьюмоделью, где рядом с часами лежат руки шпиона).
+    (Dead Ringer рисуется вьюмоделью, где рядом с часами лежат руки шпиона)
     """
     layout = model.layout
     if not layout.second_row:
@@ -318,40 +318,40 @@ def blu_tex_names(model, mat_names: Optional[list], weapon_key: str) -> list:
         return []
 
     # Переключатель RED/BLU показываем только для настоящей команды
-    # (единый авторитет selector_spec.team — тот же, что у сборки), а не для
-    # стилей вроде bloody/clean.
+    # (единый авторитет selector_spec.team - тот же, что у сборки), а не для
+    # стилей вроде bloody/clean
     if not qc_skin_parser.selector_spec(layout).team:
         logger.info(
             f"[3D] второй скин не является BLU-командой: {layout.second_row} "
-            f"— стиль или вариант, переключатель команд не нужен"
+            f"- стиль или вариант, переключатель команд не нужен"
         )
         return []
 
     own = own_blu_names(model, mat_names)
     if own is None:
-        return layout.second_row      # сопоставить не с чем — как раньше
+        return layout.second_row      # сопоставить не с чем - строка как есть
     if not own:
         logger.info(
             f"[3D] {weapon_key}: столбцы модели в $texturegroup командными "
-            f"не являются — BLU у предмета нет (строка {layout.second_row})"
+            f"не являются - BLU у предмета нет (строка {layout.second_row})"
         )
     return own
 
 
 def blu_vtf(paks: list, cdmaterials: list, tex_name: str) -> tuple:
-    """VTF синей текстуры → (байты | None, вид из VMT | None).
+    """VTF синей текстуры -> (байты | None, вид из VMT | None)
 
-    Вид — (basetexture, краска) из VMT, если до VTF дошли через него: синий
-    материал может отличаться от красного только краской.
+    Вид - (basetexture, краска) из VMT, если до VTF дошли через него: синий
+    материал может отличаться от красного только краской
     """
     tex_lower = tex_name.lower()
-    # ── Метод 1: прямой путь materials/{cdmat}/{name}.vtf ─────────────── #
+    # Метод 1: прямой путь materials/{cdmat}/{name}.vtf
     vtf_data, path = read_in_cdmaterials(paks, cdmaterials, tex_lower)
     if vtf_data:
         logger.debug(f"[3D] BLU прямой VTF: {path}")
         return vtf_data, None
 
-    # ── Метод 2: VMT → $baseTexture → VTF (первый архив, где есть VMT) ── #
+    # Метод 2: VMT -> $baseTexture -> VTF (первый архив, где есть VMT)
     if cdmaterials:
         for pak in paks:
             vmt_info = GameVpkReader.find_vmt_in_pak(pak, cdmaterials, tex_lower)
@@ -373,12 +373,12 @@ def blu_vtf(paks: list, cdmaterials: list, tex_name: str) -> tuple:
 def blu_multi_sources(paks: list, model, mat_names: list,
                       arm_folder: Optional[str]) -> Iterator[tuple]:
     """
-    BLU-пара каждого материала по QC skinfamilies: (материал, BLU-имя, VTF | None).
+    BLU-пара каждого материала по QC skinfamilies: (материал, BLU-имя, VTF | None)
 
-    Материал ищется в строке 0 (RED) — по имени, затем по хвосту, — синяя пара
+    Материал ищется в строке 0 (RED) - по имени, затем по хвосту, - синяя пара
     берётся из того же столбца строки 1. Материалы без пары пропускаются.
     Генератор: при сбое на середине вызывающий сохраняет уже найденное.
-    Нужна вторая строка (у модели без неё BLU нет — проверяет вызывающий).
+    Нужна вторая строка (у модели без неё BLU нет - проверяет вызывающий)
     """
     red_family = [t.lower() for t in model.layout.base_rows[0]]
     blu_family = model.layout.second_row
@@ -393,7 +393,7 @@ def blu_multi_sources(paks: list, model, mat_names: list,
 
 
 def _column_of(red_family: list, mat_lower: str) -> int:
-    """Столбец материала в строке RED (case-insensitive, затем по хвосту)."""
+    """Столбец материала в строке RED (case-insensitive, затем по хвосту)"""
     try:
         return red_family.index(mat_lower)
     except ValueError:
@@ -426,8 +426,8 @@ def _blu_multi_vtf(paks: list, cdmaterials: list, blu_tex_name: str,
             return vtf_data
 
     # Fallback: тот же поиск, что и для RED (find_vtf_for_mat умеет
-    # отрезать суффикс _red/_blue → scout_head_blue ищет scout_head.vtf,
-    # т.к. голова персонажа — общий файл, тонируемый под команду в VMT).
+    # отрезать суффикс _red/_blue -> scout_head_blue ищет scout_head.vtf,
+    # т.к. голова персонажа - общий файл, тонируемый под команду в VMT)
     for pak in paks:
         vtf_data = find_vtf_for_mat(pak, blu_tex_name, arm_folder)
         if vtf_data:
@@ -436,15 +436,15 @@ def _blu_multi_vtf(paks: list, cdmaterials: list, blu_tex_name: str,
     return vtf_data
 
 
-# ── Вариант (Australium/Gold/Festive) ────────────────────────────────────── #
+# Вариант (Australium/Gold/Festive)
 
 def variant_name(model) -> Optional[str]:
     """
-    Текстура варианта оружия (Australium/Gold/Festive) по QC или None.
+    Текстура варианта оружия (Australium/Gold/Festive) по QC или None
 
     Строку выбирает qc_skin_parser.pick_preview_variant (приоритет у
-    настоящего австралиума); текстура — столбец 0 этой строки. VPK здесь не
-    нужны: у большинства оружий варианта нет, и открывать архивы зря незачем.
+    настоящего австралиума), текстура - столбец 0 этой строки. VPK здесь не
+    нужны: у большинства оружий варианта нет, и открывать архивы зря незачем
     """
     if model is None or not model.cdmaterials:
         return None
@@ -456,7 +456,7 @@ def variant_name(model) -> Optional[str]:
     return variant_tex
 
 
-# ── Шапка без QC и доп. текстуры по фиксированному пути ──────────────────── #
+# Шапка без QC и доп. текстуры по фиксированному пути
 
 _TF2_CLASSES = ["heavy", "scout", "soldier", "pyro",
                 "demoman", "engineer", "medic", "sniper", "spy"]
@@ -474,10 +474,10 @@ _WORKSHOP_SWAPS = [
 
 
 def hat_vtf_paths(weapon_key: str) -> list:
-    """Угаданные пути VTF шапки по имени MDL (hat_heavy.mdl → hat_heavy.vtf).
+    """Угаданные пути VTF шапки по имени MDL (hat_heavy.mdl -> hat_heavy.vtf)
 
-    `%s` в пути раскрывается во все классы; каждый путь пробуется ещё и в
-    папках workshop/workshop_partner.
+    `%s` в пути раскрывается во все классы, каждый путь пробуется ещё и в
+    папках workshop/workshop_partner
     """
     mdl = weapon_key.replace("\\", "/").lower()
     if "%s" in mdl:
@@ -508,11 +508,11 @@ def hat_vtf_paths(weapon_key: str) -> list:
 
 
 def fixed_extra_vtf(paks: list, ex: dict) -> Optional[bytes]:
-    """VTF доп. текстуры из WEAPON_EXTRA_TEXTURES.
+    """VTF доп. текстуры из WEAPON_EXTRA_TEXTURES
 
-    Прямой путь; затем где картинка лежит в игре (мод кладёт её в свою папку
-    обхода sv_pure); затем через VMT → $basetexture (часто VTF лежит не там,
-    куда смотрит HUD).
+    Прямой путь, затем где картинка лежит в игре (мод кладёт её в свою папку
+    обхода sv_pure), затем через VMT -> $basetexture (часто VTF лежит не там,
+    куда смотрит HUD)
     """
     data = None
     for path in (ex["vpk"], ex.get("game")):
@@ -543,17 +543,17 @@ def fixed_extra_vtf(paks: list, ex: dict) -> Optional[bytes]:
     return data
 
 
-# ── Материалы $texturegroup вне геометрии ────────────────────────────────── #
+# Материалы $texturegroup вне геометрии
 
 def texturegroup_extras(qc_path: str, mat_names: list) -> list:
     """
     Материалы из QC $texturegroup (колонки 1+), которых НЕТ среди материалов
-    геометрии — напр. smiley у гранатомёта демомена. Сборка их предлагает,
-    поэтому превью показывает их карточками (тот же блэклист).
+    геометрии - напр. smiley у гранатомёта демомена. Сборка их предлагает,
+    поэтому превью показывает их карточками (тот же блэклист)
 
     Материалы строк-стилей сюда НЕ попадают: строка стиля выровнена по
-    колонкам со строкой 0, поэтому её материал — ЗАМЕНА базового (см.
-    style_pairs).
+    колонкам со строкой 0, поэтому её материал - ЗАМЕНА базового (см.
+    style_pairs)
     """
     from src.data.material_filter import is_editable_material, is_user_blacklisted
     from src.services.model_build_service import ModelBuildService
@@ -567,8 +567,8 @@ def texturegroup_extras(qc_path: str, mat_names: list) -> list:
 
 def texturegroup_misc(layout, mat_names: list) -> list:
     """Служебные (блэклист) материалы $texturegroup по ВСЕМ строкам, которых
-    нет в геометрии — eyeball_invun, *_invun, *_zombie у тела персонажа. Для
-    селектора «Прочее»; скрытые пользовательским ЧС не попадают."""
+    нет в геометрии - eyeball_invun, *_invun, *_zombie у тела персонажа. Для
+    селектора «Прочее», скрытые пользовательским ЧС не попадают"""
     from src.data.material_filter import is_editable_material, is_user_blacklisted
     known = {m.lower() for m in mat_names}
     seen: set = set()
@@ -586,12 +586,12 @@ def texturegroup_misc(layout, mat_names: list) -> list:
 
 def style_pairs(layout) -> tuple:
     """
-    Пары «базовый материал → материал стиля» по строкам-стилям QC.
+    Пары «базовый материал -> материал стиля» по строкам-стилям QC
 
     Returns:
         ({индекс скина: {базовый: материал стиля}}, [материалы стилей по порядку]).
-        Одинаковый с базой материал стиль наследует — пары у него нет;
-        служебные и скрытые не редактируются вовсе.
+        Одинаковый с базой материал стиль наследует - пары у него нет;
+        служебные и скрытые не редактируются вовсе
     """
     from src.data.material_filter import is_editable_material, is_user_blacklisted
     rows = layout.all_rows or []

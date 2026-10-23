@@ -17,7 +17,7 @@ class MaterialMapsConfigTests(unittest.TestCase):
             self.assertIn('format', cfg, map_id)
             self.assertIsInstance(cfg['extra_vmt'], dict, map_id)
             if cfg.get('vmt_only'):
-                # Параметрическая карта (rim light) — без своей текстуры.
+                # Параметрическая карта (rim light) - без своей текстуры
                 self.assertIsNone(cfg.get('path_param'), map_id)
                 continue
             self.assertIn('suffix', cfg, map_id)
@@ -25,11 +25,11 @@ class MaterialMapsConfigTests(unittest.TestCase):
             self.assertTrue(cfg['path_param'].startswith('$'), map_id)
 
     def test_phong_uses_alpha_format(self):
-        # phong-exp нельзя в DXT1 — альфа критична
+        # phong-exp нельзя в DXT1 - альфа критична
         self.assertEqual(MATERIAL_MAPS['phongexp']['format'], 'DXT5')
 
     def test_detail_no_clamp_flags(self):
-        # detail тайлится → без CLAMP
+        # detail тайлится -> без CLAMP
         self.assertNotIn('CLAMPS', MATERIAL_MAPS['detail']['flags'])
         self.assertNotIn('CLAMPT', MATERIAL_MAPS['detail']['flags'])
 
@@ -37,8 +37,8 @@ class MaterialMapsConfigTests(unittest.TestCase):
         cfg = MATERIAL_MAPS['envmapmask']
         self.assertEqual(cfg.get('derive_kind'), 'envmapmask')
         self.assertEqual(cfg['path_param'], '$envmapmask')
-        # Маска без $envmap не работает — но родное окружение (золото) не
-        # подменяем: $envmap пишется, только если его нет.
+        # Маска без $envmap не работает - но родное окружение (золото) не
+        # подменяем: $envmap пишется, только если его нет
         self.assertIn('$envmap', cfg['vmt_defaults'])
         self.assertNotIn('$envmap', cfg['extra_vmt'])
 
@@ -123,7 +123,7 @@ class AddMaterialMapParamsTests(unittest.TestCase):
         )
 
     def test_path_param_none_writes_params_only(self):
-        # rim light: path_param=None → пишем только параметры, без пути к текстуре.
+        # rim light: path_param=None -> пишем только параметры, без пути к текстуре
         path = self._write('"VertexLitGeneric"\n{\n\t"$basetexture" "t"\n}\n')
         try:
             changed = VMTService.add_material_map_params(
@@ -230,7 +230,7 @@ class DeriveConfigTests(unittest.TestCase):
 
 
 class NormalizeMapsTests(unittest.TestCase):
-    """Проверка присланного набора карт: мусор до генератора VTF не доходит."""
+    """Проверка присланного набора карт: мусор до генератора VTF не доходит"""
 
     def test_unknown_map_is_dropped(self):
         from src.data.material_maps import normalize_maps
@@ -264,7 +264,7 @@ class NormalizeMapsTests(unittest.TestCase):
         self.assertEqual(got, {'selfillum': {'derive': True, 'threshold': '128'}})
 
     def test_auto_mode_only_where_the_map_supports_it(self):
-        """У detail нет вывода из базы — «авто» для него бессмысленно."""
+        """У detail нет вывода из базы - «авто» для него бессмысленно"""
         from src.data.material_maps import normalize_maps
         self.assertEqual(normalize_maps({'detail': {'derive': True}}), {})
 

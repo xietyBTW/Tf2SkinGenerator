@@ -1,9 +1,9 @@
 /*
- * Превью предмета: что приехало от воркера и как это показано.
+ * Превью предмета: что приехало от воркера и как это показано
  *
  * Модель приходит не ответом на запрос, а потоком событий: сначала прогресс,
  * потом готовая модель, потом материалы. Поэтому здесь только запуск и показ,
- * а разбор событий - в events.js.
+ * а разбор событий - в events.js
  *
  * У ОДНОМАТЕРИАЛЬНОЙ модели текстура приезжает прямо в model_ready и события
  * materials не будет вовсе: один кадр - не особый случай, а тот же альбом
@@ -13,7 +13,7 @@
 
 import * as api from './api.js';
 import { t } from './i18n.js';
-import { say, stage, viewer, withViewer } from './stage.js';
+import { say, sayError, stage, viewer, withViewer } from './stage.js';
 import { work } from './layout.js';
 import { SINGLE_TEX } from './album.js';
 import { modeControls, restoreBadges } from './controls.js';
@@ -32,7 +32,7 @@ import { resetView, forgetSpecialScene, applySpecialTexture } from './preview-sc
 
 // Области превью - свои модули: шапки (preview-hats), карточки альбома
 // (preview-frames), ряды вариантов модели (preview-variants), сцены кадра
-// (preview-scenes). Остальные модули берут всё отсюда, как и раньше.
+// (preview-scenes). Остальные модули берут всё отсюда
 export { hatModels, showHatClasses, hatClasses, showHatStyles, markEditedStyles }
   from './preview-hats.js';
 export { frameNode, addFrame, cardTitles, setCardTitles, cardTitle, showMaterials }
@@ -43,20 +43,18 @@ export { resetView, fpAction, applyFpClip, reloadSceneIfFp, showFpActions, taunt
          specialSceneFailed, showSpecialAnimated, applySpecialTexture, showSkybox,
          showFirstPerson } from './preview-scenes.js';
 
-// ═══════════════════════════════════════════════════════════════════════════
 // Данные из Python
-// ═══════════════════════════════════════════════════════════════════════════
 // Каталог, фильтры и правила видимости приходят из src/app/api.py. Здесь
 // только отрисовка: ни списков предметов, ни условий «что показывать» в
-// представлении быть не должно - иначе они разъедутся с приложением.
+// представлении быть не должно - иначе они разъедутся с приложением
 
-// ── Загрузка превью ──────────────────────────────────────────────────────
+// Загрузка превью
 // Модель приезжает не ответом на запрос, а потоком событий: сначала прогресс,
 // потом готовая модель, потом материалы. Поэтому здесь только запуск, а
-// показывает результат обработчик событий ниже.
+// показывает результат обработчик событий ниже
 
 //: Запросы состояния идут пачками (materials, blu_materials, australium
-//: приходят подряд) - склеиваем их в один, иначе альбом перерисуется трижды.
+//: приходят подряд) - склеиваем их в один, иначе альбом перерисуется трижды
 export let viewTimer = null;
 
 export function refreshView() {
@@ -67,7 +65,7 @@ export function refreshView() {
 }
 
 /**
- * Убирает с экрана всё, что относилось к прошлому предмету.
+ * Убирает с экрана всё, что относилось к прошлому предмету
  *
  * Нужен не только новому предмету, но и смене РАЗДЕЛА: уходя в частицы или
  * шапки, человек уходит от оружия, а его текстура оставалась висеть в альбоме
@@ -80,15 +78,20 @@ export function clearPreview() {
   lastModel = null;       // и кадр превью: вернуться к чужой модели нельзя
   resetView();
   document.getElementById('hatstyles').hidden = true;
+  // Ряды прошлого оружия: версия с гирляндой, стили скина, состояние модели.
+  // Раздел сменили (шапки) - предмета нет, и ряды висели бы ни к чему
+  for (const id of ['festivebar', 'makefestive', 'skinbar', 'bodybar']) {
+    document.getElementById(id).hidden = true;
+  }
   showHatClasses(null);
-  // Части считаны по ПРОШЛОЙ модели: у новой под тем же номером другой кусок.
+  // Части считаны по ПРОШЛОЙ модели: у новой под тем же номером другой кусок
   closeParts();
   hideWarpaint();         // War Paint - про прошлое оружие, у нового свой список
   dropFitSave();          // и подгонка: её отложенная запись - про прошлую
   showMaterials([]);
   // Кнопки работы - про предмет, которого больше нет: «Вернуть правки» над
   // пустым альбомом обещало правки неизвестно чего. Их вернёт restoreBadges
-  // вместе со следующей моделью.
+  // вместе со следующей моделью
   for (const id of ['keep', 'restore', 'forget']) document.getElementById(id).hidden = true;
   withViewer((w) => w.resetViewer());
 }
@@ -96,34 +99,41 @@ export function clearPreview() {
 export async function startPreview(item) {
   clearPreview();
 
-  // У неба нет модели: вьювер ставит его кубмапой, а не мешем.
+  // У неба нет модели: вьювер ставит его кубмапой, а не мешем
   if (item.type === 'skybox') {
     say('Извлечение граней неба…');
     const res = await api.loadSkybox(item.sky || item.key);
-    if (res.error) say(res.error);
+    if (res.error) sayError(res.error);
     return;
   }
 
   say('Загрузка модели…');
+  // Крутилка в самом кадре и сразу: подпись выше появляется только через
+  // 400 мс, а в пустом окне до тех пор стояло «Выберите оружие» - щелчок
+  // выглядел непринятым
+  withViewer((w) => w.showLoading());
   // У шапки своя модель на каждый предмет - ключ передаём явно, из режима
   // «hat» его не вывести.
   // У стилевой шапки покласcовые модели лежат В СТИЛЕ, а не в предмете:
   // берём модели показанного стиля, иначе класс-выбор пуст, а сборка не знает
-  // ни одной модели класса.
+  // ни одной модели класса
   const models = hatModels(item, 0);
   showHatClasses({ per_class: models });
   showHatStyles(item);
   // item.skin - строка скина модели, на которой открыть (Критокола - строка 2
-  // модели Бонка): стиль включится, как только скины модели определятся.
+  // модели Бонка): стиль включится, как только скины модели определятся
   const res = await api.loadPreview(item.mode, null,
                                     item.type === 'hat' ? item.key : null,
                                     models || null, item.skin ?? null, false,
                                     item.type === 'hat' ? item.key : '');
-  if (res.error) say(res.error);
+  if (res.error) {
+    sayError(res.error);
+    withViewer((w) => w.stopLoading());
+  }
 }
 
 /**
- * Открывает сохранённую работу по шапке на том стиле, где её оставили.
+ * Открывает сохранённую работу по шапке на том стиле, где её оставили
  *
  * Без строки каталога у стилевой шапки нет ни списка стилей, ни моделей
  * стиля: работа открывалась без переключателя, и правки соседних стилей
@@ -137,7 +147,7 @@ export async function startHatWork(work) {
   if (!item.key) {
     const res = await api.loadPreview('hat', null, work.item_key || null,
                                       work.per_class || null, null, true);
-    if (res.error) say(res.error);
+    if (res.error) sayError(res.error);
     return;
   }
   const index = work.style || 0;
@@ -147,12 +157,12 @@ export async function startHatWork(work) {
   const first = (models && Object.values(models)[0]) || item.key;
   const res = await api.loadPreview('hat', null, first, models || null,
                                     index, true, item.key);
-  if (res.error) say(res.error);
+  if (res.error) sayError(res.error);
   else markEditedStyles(res.edited_styles);
 }
 
 /**
- * Отдаёт модель вьюверу.
+ * Отдаёт модель вьюверу
  *
  * OBJ он ждёт СОДЕРЖИМЫМ, а не ссылкой (грузит его через Blob), поэтому файл
  * сначала выкачиваем. Центр и масштаб приходят из Python: bbox у Three.js
@@ -160,7 +170,7 @@ export async function startHatWork(work) {
  */
 //: Последнее событие model_ready: им возвращают обычную модель после вида от
 //: первого лица, не пересобирая её воркером (так же делает панель приложения
-//: в _restore_plain_model).
+//: в _restore_plain_model)
 export let lastModel = null;
 
 export async function showModel(ev) {
@@ -177,25 +187,25 @@ export async function showModel(ev) {
     say('');                            // модель на экране - подпись убираем
 
     // Материалы могли приехать раньше, чем OBJ попал в сцену: тогда они легли
-    // бы в пустоту и модель осталась серой. Повторяем после загрузки.
+    // бы в пустоту и модель осталась серой. Повторяем после загрузки
     refreshView();
   } catch (err) {
-    say(`Не удалось показать модель: ${err.message}`);
+    sayError(`Не удалось показать модель: ${err.message}`);
   }
 }
 
-// ── Одна геометрия, много карточек ──────────────────────────────────────
+// Одна геометрия, много карточек
 //: Меши, носящие ВЫБРАННУЮ карточку, и картинки карточек. У масок маскировки
 //: девять текстур на одну голову: какая из них на модели - решает альбом,
-//: положения прокрутки Python не знает (см. PreviewSession.card_mesh).
+//: положения прокрутки Python не знает (см. PreviewSession.card_mesh)
 let cardMesh = [];
 let cardTex = {};
-//: Материал карточки, надетой сейчас. Пусто - обычная модель.
+//: Материал карточки, надетой сейчас. Пусто - обычная модель
 let cardWorn = '';
 
 /** {меш: png} для карточки, на которой стоит альбом. Пусто - красить нечего.
  *  Меши - общий список (маски шпиона) или свои у каждой карточки («Прочее»:
- *  убер и зомби стоят на месте тела, головы, глаз). */
+ *  убер и зомби стоят на месте тела, головы, глаз) */
 function wornCard() {
   const png = cardTex[cardWorn];
   const meshes = Array.isArray(cardMesh) ? cardMesh : (cardMesh[cardWorn] || []);
@@ -204,10 +214,10 @@ function wornCard() {
 }
 
 //: Последняя анимация частей от Python: {mesh, still, frames, fps}. Нужна
-//: после каждой раздачи текстур - вьювер при ней анимацию гасит.
+//: после каждой раздачи текстур - вьювер при ней анимацию гасит
 let partsAnim = null;
 
-/** Гифка на части крутится в 3D: кадры посчитал Python (parts_animated). */
+/** Гифка на части крутится в 3D: кадры посчитал Python (parts_animated) */
 export function showPartsAnimation(ev) {
   partsAnim = ev.frames && ev.frames.length > 1 ? ev : null;
   if (!partsAnim) return;
@@ -216,7 +226,7 @@ export function showPartsAnimation(ev) {
 }
 
 /** Настройку выключили: кадры забываем и перекрашиваем сцену неподвижной
- *  склейкой - раздача текстур во вьювере гасит анимацию сама. */
+ *  склейкой - раздача текстур во вьювере гасит анимацию сама */
 export function stopPartsAnimation() {
   partsAnim = null;
   refreshView();
@@ -225,17 +235,17 @@ export function stopPartsAnimation() {
 function replayPartsAnimation(w, entries) {
   if (!partsAnim) return;
   // Склейку сменил новый мазок - его кадры приедут своим событием, а старые
-  // крутить поверх новой текстуры нельзя.
+  // крутить поверх новой текстуры нельзя
   if (!entries.some(([, png]) => png === partsAnim.still)) { partsAnim = null; return; }
   w.loadAnimatedTexture(partsAnim.frames.map(api.fileUrl), partsAnim.fps, partsAnim.mesh);
 }
 
 //: Меши, на которых сейчас надетая карточка. У «Прочего» карточки носят
 //: разные меши (тело, голова), и мешам прежней возвращают текстуру сцены -
-//: иначе тело оставалось в убере, пока смотрят голову.
+//: иначе тело оставалось в убере, пока смотрят голову
 let wornMeshes = [];
 
-/** Одевает модель в карточку, на которой остановился альбом. */
+/** Одевает модель в карточку, на которой остановился альбом */
 export function wearCard(name) {
   cardWorn = name || '';
   const map = wornCard();
@@ -250,19 +260,19 @@ export function wearCard(name) {
 }
 
 /**
- * Применяет состояние показа, посчитанное Python.
+ * Применяет состояние показа, посчитанное Python
  *
  * Что именно показывать при этой команде, стиле и варианте, решает домен
  * (PreviewTextureState.resolve_card). Здесь только раздача: альбом, вьювер и
  * видимость кнопок команд.
  */
-//: Последнее состояние показа: кнопкам модели нужно знать, что есть.
+//: Последнее состояние показа: кнопкам модели нужно знать, что есть
 export let lastView = null;
 
 export function applyView(st) {
   lastView = st;
   // До перерисовки альбома: showMaterials пересобирает его и синхронизирует на
-  // первую карточку, а та сразу надевается на меш (wearCard из album.js).
+  // первую карточку, а та сразу надевается на меш (wearCard из album.js)
   cardMesh = st.card_mesh || [];
   cardTex = st.textures || {};
 
@@ -279,7 +289,7 @@ export function applyView(st) {
   // Выбранная карточка накрывает то, что Python положил на её меш: он о
   // положении альбома не знает и кладёт первую попавшуюся (см. wearCard).
   // Предпросмотр War Paint - поверх всего, в меши ЭТОЙ сцены (card_scene):
-  // у одноматериальной модели в руках это настоящее имя меша, не служебный ключ.
+  // у одноматериальной модели в руках это настоящее имя меша, не служебный ключ
   const trial = Object.entries(warpaintPreview() || {}).flatMap(
     ([card, png]) => (st.card_scene?.[card] || [card]).map((mesh) => [mesh, png]));
   const worn = wornCard();
@@ -288,36 +298,36 @@ export function applyView(st) {
                                    ...Object.fromEntries(trial) });
   const single = entries.length === 1 && entries[0][0] === SINGLE_TEX;
 
-  // Куски своих материалов частей - до раздачи: текстуры ищут меши по имени.
+  // Куски своих материалов частей - до раздачи: текстуры ищут меши по имени
   withViewer((w) => w.setPartMaterials(st.part_materials || {}));
 
   if (applySpecialTexture(st.textures)) {
     // Сцена сама решила, куда положить картинку: обычная раздача по
-    // материалам здесь только испортила бы её.
+    // материалам здесь только испортила бы её
   } else withViewer((w) => {
     if (single) {
       w.updateTextureFromDataUrl(api.fileUrl(entries[0][1]));
     } else if (entries.length) {
       // applyMaterialMap ждёт ОБЪЕКТ, несмотря на имя параметра texMapJson:
-      // внутри он делает Object.entries. Строка перебиралась бы посимвольно.
+      // внутри он делает Object.entries. Строка перебиралась бы посимвольно
       w.applyMaterialMap(Object.fromEntries(
         entries.map(([mat, png]) => [mat, api.fileUrl(png)])));
     }
-    // Раздача текстур останавливает анимацию во вьювере; если на сцене всё
-    // ещё та склейка, для которой считались кадры, - запускаем их заново.
+    // Раздача текстур останавливает анимацию во вьювере, если на сцене всё
+    // ещё та склейка, для которой считались кадры, - запускаем их заново
     replayPartsAnimation(w, entries);
   });
 
   // Активный стиль подсвечиваем по ответу Python, а не по последнему клику.
   // Сравниваем по СЫРОМУ индексу скина: позиция кнопки в ряду ему не равна -
-  // команда и вариант в ряд не попадают, а их строки индексы занимают.
+  // команда и вариант в ряд не попадают, а их строки индексы занимают
   //
   // Строго по своему ряду (#skinbar): рядом стоит ряд анимаций с тем же
-  // классом, и общий селектор снимал с него подсветку при каждом обновлении.
+  // классом, и общий селектор снимал с него подсветку при каждом обновлении
   //
   // Сам ряд - тоже по ответу Python: у своей модели «со своими материалами»
   // в нём ещё и Australium (PreviewSession.styles), а событие определения
-  // стилей приносит только игровые.
+  // стилей приносит только игровые
   const skinRow = document.getElementById('skinbar');
   if (st.skins !== undefined
       && skinRow.dataset.styles !== JSON.stringify((st.skins && st.skins.styles) || [])) {
@@ -328,12 +338,12 @@ export function applyView(st) {
   });
 
   // Кнопки команд появляются, только если командный вариант ЕСТЬ: иначе
-  // переключатель ничего бы не менял (правило в domain has_team_variant).
+  // переключатель ничего бы не менял (правило в domain has_team_variant)
   const teams = document.querySelector('.teams');
   teams.querySelectorAll('.tag').forEach((b) => {
     const key = b.textContent.trim().toUpperCase();
     if (b.id === 'paint') {
-      // Краска - про шапки: режим решает Python (controls_for).
+      // Краска - про шапки: режим решает Python (controls_for)
       b.hidden = !modeControls.hat_paints;
       return;
     }
@@ -341,10 +351,10 @@ export function applyView(st) {
       b.hidden = !st.has_teams;
       b.classList.toggle('is-active', st.team.toUpperCase() === key);
       // Командный вариант есть, но в стоке он не отличается от RED: без
-      // подсказки кажется, что переключатель сломан.
+      // подсказки кажется, что переключатель сломан
       if (key === 'BLU') {
         // Кнопка уже в документе: атрибут переводим сами (наблюдатель
-        // видит только добавленные узлы).
+        // видит только добавленные узлы)
         b.title = st.blu_matches_red
           ? t('В игре синий вариант этой модели не отличается от красного')
           : '';
@@ -356,20 +366,20 @@ export function applyView(st) {
   });
 
   // «Прочее» - служебные материалы модели: показать можно только то, что у
-  // модели есть, поэтому решает состояние, а не режим.
+  // модели есть, поэтому решает состояние, а не режим
   const misc = document.getElementById('misc');
   misc.hidden = !(modeControls.misc && st.has_misc);
   misc.classList.toggle('is-active', Boolean(st.misc_mode));
 
   // «Сделать командным» предлагается, пока своего командного варианта нет:
-  // после включения его место занимают RED/BLU.
+  // после включения его место занимают RED/BLU
   const make = document.getElementById('maketeam');
   make.hidden = !(modeControls.teams && st.can_force_team);
   syncPaint(st);
 
   // «Редактировать QC» - только при загруженной своей готовой модели: у
   // замены геометрии сборка собирает QC сама. Признак держит Python: смена
-  // предмета забывает свою модель, и страница узнаёт об этом оттуда же.
+  // предмета забывает свою модель, и страница узнаёт об этом оттуда же
   document.querySelector('[data-cond="qc"]').hidden =
     !(modeControls.replace_model && st.custom_keep);
 
@@ -380,7 +390,7 @@ export function applyView(st) {
   // подмену модели: тело класса не подменить, а разделить - можно.
   // На сцене её нет вовсе: карта частей у страницы от обычной модели, и
   // открытый на руках режим красил бы не то, что показано.
-  // В режиме подгонки частей нет: у обоих свой захват мыши в кадре.
+  // В режиме подгонки частей нет: у обоих свой захват мыши в кадре
   document.querySelector('[data-cond="parts"]').hidden =
     !(modeControls.split_parts && st.can_split) || work.dataset.scene !== 'item'
     || isFitOn();
@@ -389,15 +399,15 @@ export function applyView(st) {
   showFestive(st);
 
   // «Убрать свою модель» - только когда своя геометрия (оружия или
-  // гирлянды) и правда стоит. Без неё замена была билетом в один конец.
+  // гирлянды) и правда стоит. Без неё замена была билетом в один конец
   document.getElementById('dropmodel').hidden =
     !(st.has_custom || (st.decor_models || []).length
       || (st.bodygroups || []).some((g) => g.custom));
   // Подгонка - только у импортированной модели и только в кадре предмета:
-  // на руках и в насмешке призрака нет.
+  // на руках и в насмешке призрака нет
   showFit(work.dataset.scene === 'item' ? st.custom_fit : null);
   // Гирлянда: её подгонка и свои картинки идут вьюверу отдельно от
-  // раздачи текстур предмета - её меши он красит своим слоем.
+  // раздачи текстур предмета - её меши он красит своим слоем
   showDecorFit(st.decor_fit || null, Boolean(st.festive) && work.dataset.scene === 'item'
                                      && decorFittable(st));
   showDecorBends(st.decor_bends || []);
@@ -407,36 +417,57 @@ export function applyView(st) {
       blu: (teams.blu || []).map(api.fileUrl),
     }]))));
 
-  // Альбом только что пересобран - вернуть пометки «свои настройки».
+  // Альбом только что пересобран - вернуть пометки «свои настройки»
   restoreBadges();
-  // Сводка внизу зависит от параметров предмета: у нового они свои.
+  // Сводка внизу зависит от параметров предмета: у нового они свои
   updateDockSummary();
-  // Рельеф строится из текстуры: сменилась она или предмет - и он.
+  // Рельеф строится из текстуры: сменилась она или предмет - и он
   refreshNormal();
 }
 
 /**
- * Приём текстуры на кадр: перетаскиванием или двойным щелчком.
+ * Приём текстуры на материал: перетаскиванием на кадр или модель, двойным
+ * щелчком по кадру
  *
  * Файл уезжает на диск, а материалу назначается путь - сборка работает с
  * файлами, а не с содержимым в браузере. Куда именно ляжет текстура (команда,
  * стиль, обе команды у нейтрального материала), решает домен в set_texture.
  */
-export function bindDrop(frame) {
-  const mat = frame.dataset.mat;
+async function acceptTexture(mat, file) {
+  if (!file) return;
+  say('Загрузка текстуры…');
+  try {
+    applyView(await api.setTexture(mat, await api.upload(file)));
+    say('');
+    // Обучение ждёт именно этого: своя картинка легла на материал
+    document.dispatchEvent(new Event('texture:set'));
+  } catch (err) {
+    sayError(`Не удалось загрузить: ${err.message}`);
+  }
+}
 
-  const accept = async (file) => {
-    if (!file) return;
-    say('Загрузка текстуры…');
-    try {
-      applyView(await api.setTexture(mat, await api.upload(file)));
-      say('');
-      // Обучение ждёт именно этого: своя картинка легла на материал.
-      document.dispatchEvent(new Event('texture:set'));
-    } catch (err) {
-      say(`Не удалось загрузить: ${err.message}`);
-    }
-  };
+/**
+ * Картинку бросили прямо на модель во вьювере. Материал под курсором, если
+ * у него есть карточка, иначе главная (первая в альбоме).
+ */
+function acceptModelDrop(material, file) {
+  const frames = [...stage.album.querySelectorAll('.frame')];
+  const frame = frames.find((f) => f.dataset.mat === material) || frames[0];
+  if (frame) acceptTexture(frame.dataset.mat, file);
+}
+
+// Вьювер живёт в своём iframe и перезагружается со сменой сцены: крючок
+// ставим на каждую загрузку, а не только когда приехала модель (у спрея и
+// эффектов смерти её нет)
+function bindModelDrop() {
+  const w = viewer();
+  if (w) w.onTextureDropped = acceptModelDrop;
+}
+stage.frame.addEventListener('load', bindModelDrop);
+bindModelDrop();
+
+export function bindDrop(frame) {
+  const accept = (file) => acceptTexture(frame.dataset.mat, file);
 
   frame.addEventListener('dragover', (e) => {
     e.preventDefault();
@@ -458,13 +489,13 @@ export function bindDrop(frame) {
   });
 }
 
-// ── Раскладка: текстура, модель или обе ─────────────────────────────────
+// Раскладка: текстура, модель или обе
 //
 // Только раскладка. Что показано в кадре, решает ряд у самого кадра (сцены):
 // это разные вопросы, и пока они стояли одним рядом, «Вместе» с насмешкой было
 // недостижимо, а выход из сцены случался ПОБОЧНО - от смены раскладки. Оттуда
 // и брался баг: ветку выхода написали для вида от первого лица, появилась
-// вторая сцена, и выключить её стало нечем.
+// вторая сцена, и выключить её стало нечем
 document.querySelector('.modes').addEventListener('click', (e) => {
   const btn = e.target.closest('.underlined');
   if (!btn) return;
@@ -474,14 +505,14 @@ document.querySelector('.modes').addEventListener('click', (e) => {
   // Половины разъезжаются по своим сторонам, оставшаяся растягивается -
   // это View Transitions: браузер снимает кадр «до», применяет смену и
   // сам ведёт каждую половину к кадру «после» (правила в style.css,
-  // `::view-transition-*`). Без поддержки - просто переключение.
+  // `::view-transition-*`). Без поддержки - просто переключение
   const apply = () => { work.dataset.view = btn.dataset.view; };
   const motion = document.documentElement.dataset.motion !== 'off';
   if (motion && document.startViewTransition) {
     const shift = document.startViewTransition(apply);
     // Переход бросается, когда кадры не рисуются (окно свёрнуто или за
     // другими): смена вида при этом уже применена, а отказ без обработчика
-    // уходил на экран сырым «Transition was aborted…».
+    // уходил на экран сырым «Transition was aborted…»
     shift.ready.catch(() => {});
     shift.finished.catch(() => {});
   } else {
@@ -489,7 +520,7 @@ document.querySelector('.modes').addEventListener('click', (e) => {
   }
 });
 
-// Команды и вариант: решение принимает Python, страница применяет ответ.
+// Команды и вариант: решение принимает Python, страница применяет ответ
 document.querySelector('.teams').addEventListener('click', async (e) => {
   const btn = e.target.closest('.tag');
   if (!btn || btn.id === 'paint') return;      // у краски свой список (paint.js)
@@ -498,12 +529,12 @@ document.querySelector('.teams').addEventListener('click', async (e) => {
     ? await api.setTeam(key)
     : await api.setAustralium(!btn.classList.contains('is-active')));
   // Части красят то, что в кадре: с австралием - его карточку. Полоса
-  // должна показать её покраску, а не главной.
+  // должна показать её покраску, а не главной
   if (!document.getElementById('partsbar').hidden) await refreshParts();
 });
 
 // «Прочее» и «Сделать командным»: состояние меняет Python, страница
-// применяет ответ целиком - как у команд и варианта.
+// применяет ответ целиком - как у команд и варианта
 document.getElementById('misc').addEventListener('click', async () => {
   applyView(await api.toggleMisc());
 });
@@ -513,6 +544,6 @@ document.getElementById('maketeam').addEventListener('click', async () => {
 });
 
 /** Запоминает последний кадр превью: им возвращают обычную модель после
- *  вида от первого лица, не пересобирая её воркером. */
+ *  вида от первого лица, не пересобирая её воркером */
 export function rememberModel(ev) { lastModel = ev; }
 

@@ -1,9 +1,9 @@
 """
-Скачивание и запуск обновления.
+Скачивание и запуск обновления
 
 Проверяем ровно то, из-за чего обновление может испортить установку: битый
-файл не должен доехать до запуска установщика, а недокачанный — остаться на
-диске под именем готового.
+файл не должен доехать до запуска установщика, а недокачанный - остаться на
+диске под именем готового
 """
 
 import hashlib
@@ -62,7 +62,7 @@ class DownloadTests(unittest.TestCase):
         self.assertFalse((self.out_dir / (uc.ASSET_NAME + ".part")).exists())
 
     def test_short_download_rejected(self):
-        """Оборвалась закачка — размер не сойдётся, ставить нельзя."""
+        """Оборвалась закачка - размер не сойдётся, ставить нельзя"""
         with patch("urllib.request.urlopen", return_value=_FakeResponse(PAYLOAD)):
             with self.assertRaises(RuntimeError):
                 uc.download_update("http://example/setup.exe",
@@ -84,12 +84,12 @@ class DownloadTests(unittest.TestCase):
 
     def test_install_passes_command_as_one_string(self):
         """
-        Регресс: команда уходит СТРОКОЙ, а не списком.
+        Регресс: команда уходит СТРОКОЙ, а не списком
 
-        Списком её собирает list2cmdline, и тот экранирует наши кавычки —
+        Списком её собирает list2cmdline, и тот экранирует наши кавычки -
         cmd отвечает «синтаксическая ошибка в имени файла», причём молча:
         Popen отработал, установщик не запустился. Ловится только так,
-        потому что исключения нет.
+        потому что исключения нет
         """
         setup = Path(self._tmp.name) / "путь с пробелом" / uc.ASSET_NAME
         setup.parent.mkdir(parents=True)
@@ -108,7 +108,7 @@ class PortableTests(unittest.TestCase):
     """
     Портативная копия обновляется тем же Setup.exe, но в свою папку и без
     следов: иначе установщик поставил бы программу в Program Files, а
-    портативная осталась бы старой.
+    портативная осталась бы старой
     """
 
     def setUp(self):
@@ -135,11 +135,11 @@ class PortableTests(unittest.TestCase):
     def test_portable_arguments_target_own_folder(self):
         args = uc.setup_arguments(self.root)
         self.assertIn("/PORTABLE=1", args)
-        self.assertIn(f'/DIR="{self.root}"', args, "путь с пробелом — в кавычках")
+        self.assertIn(f'/DIR="{self.root}"', args, "путь с пробелом - в кавычках")
         self.assertIn("/NOICONS", args)
         self.assertIn("/MERGETASKS=!desktopicon,!removedata", args)
         for flag in uc._SETUP_FLAGS:
-            self.assertIn(flag, args, "тихий режим и перезапуск — как у обычной")
+            self.assertIn(flag, args, "тихий режим и перезапуск - как у обычной")
 
     def test_installed_copy_gets_plain_arguments(self):
         args = uc.setup_arguments(None)
@@ -184,7 +184,7 @@ class CheckForUpdateTests(unittest.TestCase):
         self.assertEqual(r["asset_digest"], "a" * 64)   # префикс sha256: снят
 
     def test_cannot_install_from_sources(self):
-        """Из репозитория обновляются через git, а не запуском Setup.exe."""
+        """Из репозитория обновляются через git, а не запуском Setup.exe"""
         with patch("urllib.request.urlopen", return_value=self._release()):
             with patch.object(uc, "is_frozen", return_value=False):
                 r = uc.check_for_update()
@@ -210,10 +210,10 @@ class CheckForUpdateTests(unittest.TestCase):
 
 class ProgressTests(unittest.TestCase):
     """
-    Ход обновления: страница спрашивает его опросом, пока идёт скачивание.
+    Ход обновления: страница спрашивает его опросом, пока идёт скачивание
 
-    Установщик носит приложение внутри себя — это десятки мегабайт, и молча
-    ждать ответа страница не может.
+    Установщик носит приложение внутри себя - это десятки мегабайт, и молча
+    ждать ответа страница не может
     """
 
     def setUp(self):

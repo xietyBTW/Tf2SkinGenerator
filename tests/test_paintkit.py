@@ -1,4 +1,4 @@
-"""War Paint: чтение рецептов proto_defs.vpd и компоновщик (без установленной игры)."""
+"""War Paint: чтение рецептов proto_defs.vpd и компоновщик (без установленной игры)"""
 
 import struct
 import unittest
@@ -11,7 +11,7 @@ from src.services.paintkit_compositor import (
 )
 
 
-# ── Мини-кодировщик protobuf: ровно то, что нужно рецепту ─────────────── #
+# Мини-кодировщик protobuf: ровно то, что нужно рецепту
 
 def _varint(n):
     out = bytearray()
@@ -47,7 +47,7 @@ def def_id(num, defindex, kind):
 
 
 def vpd(blocks):
-    """{тип: [сообщения]} → proto_defs.vpd."""
+    """{тип: [сообщения]} -> proto_defs.vpd"""
     out = b''
     for kind, msgs in blocks.items():
         out += struct.pack('<II', kind, len(msgs))
@@ -61,7 +61,7 @@ def texture_stage(tex_var):
 
 
 def make_defs():
-    # Шаблон: multiply( texture($pattern), texture($albedo) ).
+    # Шаблон: multiply( texture($pattern), texture($albedo) )
     combine = (fld(11, fld(1, texture_stage('pattern')))
                + fld(11, fld(1, texture_stage('albedo'))))
     operation = header(900, 'tmpl', [('pattern', 'patterns/a', True),
@@ -83,7 +83,7 @@ def make_defs():
 class RecipeTests(unittest.TestCase):
 
     def test_variables_resolved_like_game(self):
-        """Шаблон → War Paint → пушка → износ; запертая переменная не меняется."""
+        """Шаблон -> War Paint -> пушка -> износ, запертая переменная не меняется"""
         defs = make_defs()
         kit = defs.kits[7]
         self.assertEqual(kit.loc_token, 'kit_token')
@@ -110,13 +110,13 @@ class CompositorTests(unittest.TestCase):
         return comp.compose(recipe, seed=1), comp
 
     def test_multiply_in_linear_space(self):
-        """Умножение идёт в линейном пространстве, как у sRGB-чтения игры."""
+        """Умножение идёт в линейном пространстве, как у sRGB-чтения игры"""
         half = solid((188, 188, 188, 255))          # ≈ 0.5 в линейном
         recipe = {'type': 'combine_multiply', 'fields': {}, 'nodes': [
             {'type': 'texture_lookup', 'fields': {'texture': 'a'}, 'nodes': []},
             {'type': 'texture_lookup', 'fields': {'texture': 'b'}, 'nodes': []}]}
         img, _ = self.compose(recipe, {'a': half, 'b': half})
-        # 0.5 · 0.5 = 0.25 линейных → ≈ 137 в sRGB (а не 188·188/255 = 139 и не 64).
+        # 0.5 · 0.5 = 0.25 линейных -> ≈ 137 в sRGB (а не 188·188/255 = 139 и не 64)
         self.assertTrue(abs(int(img[0, 0, 0]) - 137) <= 2, img[0, 0])
 
     def test_select_mask_by_group(self):
@@ -130,8 +130,8 @@ class CompositorTests(unittest.TestCase):
         img, _ = self.compose(recipe, {'black': solid((0, 0, 0, 255)),
                                        'white': solid((255, 255, 255, 255)),
                                        'g': groups})
-        self.assertEqual(int(img[4, 1, 0]), 255)     # группа выбрана — белое
-        self.assertEqual(int(img[4, 6, 0]), 0)       # не выбрана — чёрное
+        self.assertEqual(int(img[4, 1, 0]), 255)     # группа выбрана - белое
+        self.assertEqual(int(img[4, 6, 0]), 0)       # не выбрана - чёрное
 
     def test_team_texture(self):
         node = {'type': 'texture_lookup', 'nodes': [],
@@ -149,7 +149,7 @@ class CompositorTests(unittest.TestCase):
         self.assertEqual(img.shape, (8, 8, 4))
 
     def test_levels_zero_range_is_threshold(self):
-        """adjust_offset 0: белая точка = чёрной — порог, а не деление на ноль."""
+        """adjust_offset 0: белая точка = чёрной - порог, а не деление на ноль"""
         rgba = np.full((2, 2, 4), 0.5, np.float32)
         out = adjust_levels(rgba, 0.2, 0.2, 1.0)
         self.assertTrue(np.isfinite(out).all())
@@ -167,7 +167,7 @@ class CompositorTests(unittest.TestCase):
 class RandomStreamTests(unittest.TestCase):
 
     def test_matches_numerical_recipes_ran1(self):
-        """CUniformRandomStream — это ran1: при idum = -1 первое значение 0.415999."""
+        """CUniformRandomStream - это ran1: при idum = -1 первое значение 0.415999"""
         self.assertAlmostEqual(UniformRandomStream(1).random_float(), 0.415999, places=5)
 
 
@@ -178,7 +178,7 @@ if __name__ == '__main__':
 class GroupSeamTests(unittest.TestCase):
 
     def test_seam_between_groups_is_not_a_third_group(self):
-        """Маска вдвое крупнее результата: шов 48|80 не должен дать группу 64."""
+        """Маска вдвое крупнее результата: шов 48|80 не должен дать группу 64"""
         groups = np.zeros((16, 16, 4), np.uint8)
         groups[:, :8, 0] = 48
         groups[:, 8:, 0] = 80
@@ -243,14 +243,14 @@ class GenericModeTests(unittest.TestCase):
     def test_largest_part_gets_base_layer(self):
         from src.services.paintkit_generic import assign_layers
         got = assign_layers([0.5, 0.2, 0.1, 0.05, 0.01], [1, 2, 3, 4], False, 0)
-        self.assertEqual(got[0], 0)                    # основа (слой 1) — без выбора
-        self.assertEqual(got[1:4], [2, 3, 4])          # следующие — по разным слоям
+        self.assertEqual(got[0], 0)                    # основа (слой 1) - без выбора
+        self.assertEqual(got[1:4], [2, 3, 4])          # следующие - по разным слоям
 
     def test_over_albedo_paints_every_part(self):
         from src.services.paintkit_generic import assign_layers
         got = assign_layers([0.5, 0.2, 0.1], [2, 3], True, 0)
         self.assertNotIn(0, got)
-        self.assertNotEqual(got[0], got[1])            # две крупные — разные узоры
+        self.assertNotEqual(got[0], got[1])            # две крупные - разные узоры
 
     def test_shuffle_changes_layout(self):
         from src.services.paintkit_generic import assign_layers
@@ -259,7 +259,7 @@ class GenericModeTests(unittest.TestCase):
         self.assertGreater(len(layouts), 1)
 
     def test_single_part_model_splits_by_islands(self):
-        """Цельная модель (бита) делится по островам развёртки, иначе узор один."""
+        """Цельная модель (бита) делится по островам развёртки, иначе узор один"""
         from types import SimpleNamespace
         from src.services.paintkit_generic import units_for
         tri = lambda x: ((x, 0.0), (x + 0.2, 0.0), (x, 0.2))  # noqa: E731
@@ -284,7 +284,7 @@ class GenericModeTests(unittest.TestCase):
 
 
 class LayoutTests(unittest.TestCase):
-    """Раскладка по деталям человеком (paintkit_layout)."""
+    """Раскладка по деталям человеком (paintkit_layout)"""
 
     def test_manual_layer_wins_and_bad_layer_ignored(self):
         from types import SimpleNamespace as NS
@@ -293,7 +293,7 @@ class LayoutTests(unittest.TestCase):
         auto = layout_for(units, [1, 2, 3], False, 0)
         got = layout_for(units, [1, 2, 3], False, 0, {'p0': 3, 'p1': 9})
         self.assertEqual(got[0], 3)
-        self.assertEqual(got[1:], auto[1:])            # слоя 9 нет — остаётся автомат
+        self.assertEqual(got[1:], auto[1:])            # слоя 9 нет - остаётся автомат
 
     def test_own_groups_regrouped_by_selects(self):
         from src.services.paintkit_layout import own_forced, own_groups
@@ -304,27 +304,27 @@ class LayoutTests(unittest.TestCase):
         self.assertEqual(own_forced(original, {}, [1, 2, 3], False), {})
         forced = own_forced(original, {'g6': 2, 'g4': 0}, [1, 2, 3], False)
         self.assertEqual(forced['texture_layer_2_select_1'], '96')
-        self.assertEqual(forced['texture_layer_3_select_1'], '0')  # группа 4 — в основу
+        self.assertEqual(forced['texture_layer_3_select_1'], '0')  # группа 4 - в основу
         self.assertNotIn('texture_layer_1_select_1', forced)       # основа не выбирает
 
     def test_valve_units_by_triangle_centre(self):
         from types import SimpleNamespace as NS
         from src.services.paintkit_generic import valve_units
         mask = np.zeros((4, 4, 4), np.uint8)
-        mask[:, :2, 0] = 32                            # левая половина — группа 2
-        mask[:, 2:, 0] = 48                            # правая — группа 3
+        mask[:, :2, 0] = 32                            # левая половина - группа 2
+        mask[:, 2:, 0] = 48                            # правая - группа 3
         left = ((0.0, 0.0), (0.4, 0.0), (0.0, 0.4))
         right = ((0.6, 0.0), (1.0, 0.0), (1.0, 0.4))
         units = valve_units(NS(uv={'m': [left, right, left]}), 'm', mask)
         self.assertEqual({u.key: u.tris for u in units}, {'g2': [0, 2], 'g3': [1]})
 
     def test_cut_moves_manual_layout_with_triangles(self):
-        """Разрез сдвигает номера частей — ручная раскладка едет за треугольниками."""
+        """Разрез сдвигает номера частей - ручная раскладка едет за треугольниками"""
         from types import SimpleNamespace as NS
         from src.app.parts_editor import PartsEditor
         host = NS(preview=NS(paintkit_layouts={'7': {'p1': 3, 'p2': 0, 'i4': 2}}),
                   _parts_model=lambda material='': (None, 'm', 'card'))
-        # Было: p1 = треугольники 0..3, p2 = 4..5. Разрезали p1 надвое — p2 стала p3.
+        # Было: p1 = треугольники 0..3, p2 = 4..5. Разрезали p1 надвое - p2 стала p3
         model = NS(parts_of=lambda m: [NS(index=1, triangles=[0, 1]), NS(index=2, triangles=[2, 3]),
                                        NS(index=3, triangles=[4, 5])])
         PartsEditor._move_paintkit_layouts(host, model, 'm', {0: 1, 1: 1, 2: 1, 3: 1, 4: 2, 5: 2})

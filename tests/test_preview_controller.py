@@ -1,7 +1,7 @@
-"""Тесты Preview3DController: сигналы воркера → состояние сессии → события.
+"""Тесты Preview3DController: сигналы воркера -> состояние сессии -> события
 
 Проверяют ровно ту границу, ради которой контроллер появился: к моменту, когда
-подписчик получает событие, сессия уже обновлена. Qt здесь не нужен.
+подписчик получает событие, сессия уже обновлена. Qt здесь не нужен
 """
 
 import unittest
@@ -9,6 +9,9 @@ from unittest.mock import Mock, patch
 
 from src.app.preview_controller import (
     Preview3DController,
+    SkyboxController,
+    ViewmodelController,
+    VpkModController,
     split_blu_multi_material,
 )
 from src.domain.preview.session import PreviewSession
@@ -17,7 +20,7 @@ from src.shared.constants import Team
 
 
 class _FakeWorker(BaseWorker):
-    """Подставной Preview3DWorker: те же сигналы, но ничего не делает."""
+    """Подставной Preview3DWorker: те же сигналы, но ничего не делает"""
 
     progress = Signal(str)
     ready = Signal(str, str)
@@ -45,6 +48,10 @@ class _FakeWorker(BaseWorker):
         self.stopped = True
         return True
 
+    def cancel(self):
+        super().cancel()
+        self.stopped = True
+
     def isRunning(self):
         return self.started and not self.stopped
 
@@ -54,7 +61,7 @@ def _controller():
 
 
 class SplitBluPayloadTests(unittest.TestCase):
-    """Воркер шлёт то пару, то один словарь — разбор должен пережить оба."""
+    """Воркер шлёт то пару, то один словарь - разбор должен пережить оба"""
 
     def test_pair(self):
         tex, names = split_blu_multi_material(({"a": "a.png"}, {"a": "a_blue"}))
@@ -71,7 +78,7 @@ class SplitBluPayloadTests(unittest.TestCase):
             self.assertEqual(split_blu_multi_material(payload), ({}, {}))
 
     def test_result_is_a_copy(self):
-        """Словари воркера не должны утечь в сессию по ссылке."""
+        """Словари воркера не должны утечь в сессию по ссылке"""
         src = {"a": "a.png"}
         tex, _ = split_blu_multi_material((src, {}))
         tex["b"] = "b.png"
@@ -80,7 +87,7 @@ class SplitBluPayloadTests(unittest.TestCase):
 
 class ReadyTests(unittest.TestCase):
     def test_session_updated_before_event(self):
-        """Подписчик обязан увидеть уже обновлённую сессию, а не гонку."""
+        """Подписчик обязан увидеть уже обновлённую сессию, а не гонку"""
         c = _controller()
         seen = {}
         c.model_ready.connect(
@@ -127,7 +134,7 @@ class AnimatedTests(unittest.TestCase):
 
 class BluTests(unittest.TestCase):
     def test_zero_framerate_does_not_clobber_rate_from_red(self):
-        """Нулевая частота у BLU значит «кадр один», а не «сбрось скорость»."""
+        """Нулевая частота у BLU значит «кадр один», а не «сбрось скорость»"""
         c = _controller()
         c._session.team_framerate = 15.0
         c._on_blu_ready(["b.png"], 0.0)
@@ -146,7 +153,7 @@ class BluTests(unittest.TestCase):
         self.assertTrue(c._session.blu_matches_red)
 
     def test_name_map_recorded_without_textures(self):
-        """Подписи карточек нужны даже когда синих VTF в VPK не нашлось."""
+        """Подписи карточек нужны даже когда синих VTF в VPK не нашлось"""
         c = _controller()
         c._on_blu_multi_material(({}, {"hands": "hands_blue"}))
         self.assertEqual(c._session.textures.blu_name_map, {"hands": "hands_blue"})
@@ -154,11 +161,11 @@ class BluTests(unittest.TestCase):
 
 
 class AustraliumTests(unittest.TestCase):
-    """Вариантный кадр (Australium/Festive) должен попасть В СЕССИЮ.
+    """Вариантный кадр (Australium/Festive) должен попасть В СЕССИЮ
 
     Кнопка варианта показывается по australium_frame. Пока сигнал воркера
-    просто пересылался дальше, состояние о нём не знало — и кнопки не было
-    ни у одного оружия, хотя золотой кадр приезжал.
+    просто пересылался дальше, состояние о нём не знало - и кнопки не было
+    ни у одного оружия, хотя золотой кадр приезжал
     """
 
     def test_frame_and_material_are_stored(self):
@@ -196,11 +203,11 @@ class AustraliumTests(unittest.TestCase):
 class MultiMaterialTests(unittest.TestCase):
     def test_real_names_replace_the_single_texture_placeholder(self):
         """
-        Порядок как у воркера: сначала ready с текстурой, потом материалы.
+        Порядок как у воркера: сначала ready с текстурой, потом материалы
 
-        В ready ставится служебный ключ на случай одноматериальной модели —
+        В ready ставится служебный ключ на случай одноматериальной модели -
         он ОБЯЗАН уступить настоящим именам, иначе у многоматериальной модели
-        в превью осталась бы одна текстура из нескольких.
+        в превью осталась бы одна текстура из нескольких
         """
         from src.domain.preview.texture_state import SINGLE_TEX_KEY
 
@@ -213,7 +220,7 @@ class MultiMaterialTests(unittest.TestCase):
         self.assertNotIn(SINGLE_TEX_KEY, c._session.textures.vpk_red_tex_map)
 
     def test_single_texture_placeholder_only_when_nothing_else(self):
-        """Если материалы уже известны, ready их не подменяет."""
+        """Если материалы уже известны, ready их не подменяет"""
         from src.domain.preview.texture_state import SINGLE_TEX_KEY
 
         c = _controller()
@@ -230,7 +237,7 @@ class MultiMaterialTests(unittest.TestCase):
         self.assertEqual(c._session.textures.vpk_red_tex_map, {"a": "first.png"})
 
     def test_does_not_record_while_on_blu(self):
-        """На BLU сюда приходят синие текстуры — они затёрли бы красные."""
+        """На BLU сюда приходят синие текстуры - они затёрли бы красные"""
         c = _controller()
         c._session.textures.active_team = Team.BLU
         c._on_multi_material({"a": "blue.png"})
@@ -252,12 +259,24 @@ class WorkerLifecycleTests(unittest.TestCase):
         self.assertEqual(w.kwargs["lang"], "ru")
 
     def test_second_load_stops_the_first(self):
-        """Две загрузки разом смешали бы свои сигналы в одной сессии."""
+        """Две загрузки разом смешали бы свои сигналы в одной сессии"""
         c = _controller()
         first = self._load(c)
         second = self._load(c)
         self.assertTrue(first.stopped)
         self.assertIsNot(first, second)
+
+    def test_replaced_worker_cannot_reach_the_page(self):
+        """Сменённый воркер дорабатывает шаг, но его модель в кадр не
+        попадает: иначе на экран возвращался прошлый предмет"""
+        c = _controller()
+        got = Mock()
+        c.model_ready.connect(got)
+        first = self._load(c)
+        self._load(c)
+        first.ready.emit("old.obj", "old.png")
+        got.assert_not_called()
+        self.assertTrue(first.isInterruptionRequested())
 
     def test_stop_is_safe_without_a_worker(self):
         c = _controller()
@@ -273,13 +292,73 @@ class WorkerLifecycleTests(unittest.TestCase):
         got.assert_called_once_with("нет модели")
 
     def test_render_hints_none_becomes_empty(self):
-        """Пустой набор тоже доезжает: он сбрасывает свойства прошлой модели."""
+        """Пустой набор тоже доезжает: он сбрасывает свойства прошлой модели"""
         c = _controller()
         w = self._load(c)
         got = Mock()
         c.render_hints.connect(got)
         w.render_hints.emit(None)
         got.assert_called_once_with({})
+
+
+class _SceneWorker(BaseWorker):
+    """Подставной воркер сцен: сигналы мода, насмешки и неба разом"""
+
+    progress = Signal(str)
+    ready = Signal(object)
+    animated = Signal(object, float)
+    cards_ready = Signal(object)
+    materials_ready = Signal(object)
+    skins_ready = Signal(object)
+    weapon_found = Signal(str, str)
+    animated_ready = Signal(object)
+    multi_material = Signal(object)
+    editable_materials = Signal(object)
+    classes_available = Signal(object)
+    render_hints = Signal(object)
+    failed = Signal(str)
+
+    def __init__(self, **kwargs):
+        super().__init__()
+
+    def start(self):
+        pass
+
+    def stop(self, timeout_ms=5000):
+        raise AssertionError("смена предмета не должна ждать воркер")
+
+
+class SceneControllersDoNotWaitTests(unittest.TestCase):
+    """Смена предмета посреди сборки сцены отвечает сразу, а сменённый
+    воркер не возвращает в кадр прошлую сцену"""
+
+    def _check(self, c, load, event, emit):
+        load()
+        first = c._worker
+        load()
+        got = Mock()
+        getattr(c, event).connect(got)
+        emit(first)
+        got.assert_not_called()
+        self.assertTrue(first.isInterruptionRequested())
+
+    def test_vpk_mod(self):
+        c = VpkModController(PreviewSession())
+        with patch("src.services.preview_vpk_mod_worker.PreviewVpkModWorker", _SceneWorker):
+            self._check(c, lambda: c.load("mod.vpk", "misc.vpk", "tex.vpk"),
+                        "failed", lambda w: w.failed.emit("old"))
+
+    def test_taunt(self):
+        c = ViewmodelController(PreviewSession())
+        with patch("src.services.taunt_worker.TauntPreviewWorker", _SceneWorker):
+            self._check(c, lambda: c.load_taunt("prop", "p.mdl", "misc.vpk", "tex.vpk", "tf"),
+                        "animated", lambda w: w.animated_ready.emit({"old": 1}))
+
+    def test_skybox(self):
+        c = SkyboxController(PreviewSession())
+        with patch("src.services.skybox_preview_worker.SkyboxFacesWorker", _SceneWorker):
+            self._check(c, lambda: c.load("sky", ["misc.vpk"]),
+                        "ready", lambda w: w.ready.emit({"up": "old.png"}))
 
 
 if __name__ == "__main__":

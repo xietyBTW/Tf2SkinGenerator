@@ -1,15 +1,15 @@
 """
-Сборка анимированной вьюмодели (viewer_skinned.js) через Node.
+Сборка анимированной вьюмодели (viewer_skinned.js) через Node
 
 Проверяется то, что ломает сцену целиком и не видно в Python-тестах: порядок
 создания костей (родитель должен существовать раньше ребёнка), нарезка
-атрибутов по материалам и имена дорожек — ошибка в любом из трёх даёт либо
-пустой экран, либо неподвижный меш.
+атрибутов по материалам и имена дорожек - ошибка в любом из трёх даёт либо
+пустой экран, либо неподвижный меш
 
 THREE подменяется заглушкой: модуль принимает библиотеку параметром именно
-ради этого (тот же приём, что в viewer_materials.js).
+ради этого (тот же приём, что в viewer_materials.js)
 
-Тест пропускается, если node недоступен.
+Тест пропускается, если node недоступен
 """
 
 import json
@@ -78,7 +78,7 @@ function rootOf(o) { return o.parent ? rootOf(o.parent) : o; }
 const makeMaterial = name => ({ name });
 """
 
-# Две кости и две части по одному материалу — минимум, на котором видно всё.
+# Две кости и две части по одному материалу - минимум, на котором видно всё
 DATA = {
     "rootRotationX": -1.5707963,
     "bones": [
@@ -121,7 +121,7 @@ console.log(JSON.stringify(out));
     return json.loads(proc.stdout.strip().splitlines()[-1])
 
 
-# ── Скелет ────────────────────────────────────────────────────────────────── #
+# Скелет
 
 def test_bones_form_a_hierarchy():
     out = _run("""const bones = createBones(THREE, DATA.bones);
@@ -133,10 +133,10 @@ def test_bones_form_a_hierarchy():
 
 
 def test_skeleton_is_created_after_world_matrices_are_ready():
-    """THREE.Skeleton берёт обратные матрицы из мировых.
+    """THREE.Skeleton берёт обратные матрицы из мировых
 
-    Создать его раньше updateMatrixWorld — значит получить единичные обратные
-    матрицы и меш, вывернутый наизнанку при первом же кадре.
+    Создать его раньше updateMatrixWorld - значит получить единичные обратные
+    матрицы и меш, вывернутый наизнанку при первом же кадре
     """
     out = _run("""const s = buildSkinnedScene(THREE, DATA, makeMaterial);
         return s.skeleton.builtAfterWorldUpdate;""")
@@ -149,10 +149,10 @@ def test_root_rotation_converts_the_axes():
     assert out == -1.571
 
 
-# ── Меши ──────────────────────────────────────────────────────────────────── #
+# Меши
 
 def test_one_mesh_per_material_named_by_it():
-    """По этим именам вьювер потом кладёт текстуры — как в обычном превью."""
+    """По этим именам вьювер потом кладёт текстуры - как в обычном превью"""
     out = _run("""const s = buildSkinnedScene(THREE, DATA, makeMaterial);
         return s.meshes.map(m => [m.name, m.kind, m.mesh.material.name]);""")
     assert out == [["c_scattergun", "weapon", "c_scattergun"],
@@ -160,10 +160,10 @@ def test_one_mesh_per_material_named_by_it():
 
 
 def test_mesh_is_bound_only_after_it_is_placed_in_the_scene():
-    """Привязка до добавления в группу берёт единичную bindMatrix.
+    """Привязка до добавления в группу берёт единичную bindMatrix
 
-    Тогда поворот корня (оси Source → оси Three.js) применяется дважды, и
-    руки с оружием растягивает в шипы — ровно то, что и было видно на экране.
+    Тогда поворот корня (оси Source -> оси Three.js) применяется дважды, и
+    руки с оружием растягивает в шипы - ровно то, что и было видно на экране
     """
     out = _run("""const s = buildSkinnedScene(THREE, DATA, makeMaterial);
         return s.meshes.map(m => [m.mesh.boundInsideGroup,
@@ -172,7 +172,7 @@ def test_mesh_is_bound_only_after_it_is_placed_in_the_scene():
 
 
 def test_every_mesh_is_bound_to_the_shared_skeleton():
-    """Скелет один: оружие подвешено к костям руки, своего у него нет."""
+    """Скелет один: оружие подвешено к костям руки, своего у него нет"""
     out = _run("""const s = buildSkinnedScene(THREE, DATA, makeMaterial);
         return s.meshes.every(m => m.mesh.bound === s.skeleton);""")
     assert out is True
@@ -188,7 +188,7 @@ def test_attributes_are_sliced_per_material_group():
 
 
 def test_second_group_takes_its_own_slice():
-    """Смещение групп считается по вершинам, а не по числам в массиве."""
+    """Смещение групп считается по вершинам, а не по числам в массиве"""
     data = json.loads(json.dumps(DATA))
     part = data["parts"][0]
     part["positions"] += [5, 0, 0, 6, 0, 0, 5, 1, 0]
@@ -205,7 +205,7 @@ def test_second_group_takes_its_own_slice():
     assert out["second"] == [5, 0, 0, 6, 0, 0, 5, 1, 0]
 
 
-# ── Клип ──────────────────────────────────────────────────────────────────── #
+# Клип
 
 def test_clip_has_a_track_pair_per_animated_bone():
     out = _run("""const bones = createBones(THREE, DATA.bones);
@@ -218,10 +218,10 @@ def test_clip_has_a_track_pair_per_animated_bone():
 
 
 def test_every_animation_repeats_even_a_one_shot_one():
-    """В игре «достать оружие» играется один раз, в превью — по кругу.
+    """В игре «достать оружие» играется один раз, в превью - по кругу
 
     Однократный показ не даёт рассмотреть движение, а именно за этим сюда и
-    приходят.
+    приходят
     """
     out = _run("""const once = JSON.parse(JSON.stringify(DATA));
         once.clip.loop = false;
@@ -236,7 +236,7 @@ def test_animation_starts_playing():
 
 
 def test_scene_without_a_clip_is_still_shown():
-    """Одна поза без движения — тоже нормальный результат, не повод падать."""
+    """Одна поза без движения - тоже нормальный результат, не повод падать"""
     data = json.loads(json.dumps(DATA))
     data["clip"] = {"times": [], "tracks": []}
     out = _run("""const s = buildSkinnedScene(THREE, DATA, makeMaterial);
@@ -254,13 +254,13 @@ def test_track_for_a_missing_bone_is_skipped():
     assert out == 2
 
 
-# ── Смена анимации на готовой сцене ───────────────────────────────────────── #
+# Смена анимации на готовой сцене
 
 def test_new_clip_replaces_the_old_one_without_rebuilding():
-    """Меш, скелет и текстуры не зависят от выбора анимации.
+    """Меш, скелет и текстуры не зависят от выбора анимации
 
     Пересборка сцены ради дорожек означала бы распаковку тех же самых текстур
-    заново — около секунды на каждое нажатие.
+    заново - около секунды на каждое нажатие
     """
     out = _run("""const s = buildSkinnedScene(THREE, DATA, makeMaterial);
         const meshes = s.meshes.map(m => m.mesh);
@@ -277,7 +277,7 @@ def test_new_clip_replaces_the_old_one_without_rebuilding():
 
 
 def test_tracks_find_their_bone_by_name():
-    """Клип приходит отдельно от сцены — совпадение порядка костей не гарантия."""
+    """Клип приходит отдельно от сцены - совпадение порядка костей не гарантия"""
     out = _run("""const bones = createBones(THREE, DATA.bones);
         const clip = JSON.parse(JSON.stringify(DATA.clip));
         clip.tracks[0].bone = 999;             // индекс мимо
@@ -293,13 +293,13 @@ def test_clip_without_tracks_leaves_the_scene_alone():
     assert out == {"result": None, "meshes": 2, "action": None}
 
 
-# ── Показ реквизита по событиям насмешки ──────────────────────────────────── #
+# Показ реквизита по событиям насмешки
 
 def test_prop_is_hidden_only_within_its_ranges():
-    """Медик лезет за снимком за пазуху и убирает его в конце.
+    """Медик лезет за снимком за пазуху и убирает его в конце
 
     Секунды приходят из Python (`taunt_worker.hidden_ranges`) по событиям
-    AE_WPN_HIDE/UNHIDE из QC. Конец `null` — «до конца клипа».
+    AE_WPN_HIDE/UNHIDE из QC. Конец `null` - «до конца клипа»
     """
     data = json.loads(json.dumps(DATA))
     data["weaponHidden"] = [[0, 0.77], [5.53, None]]
@@ -309,13 +309,13 @@ def test_prop_is_hidden_only_within_its_ranges():
         const at = t => { s.action.time = t; updateHidden(s);
                           return [prop.visible, arm.visible]; };
         return { start: at(0.1), middle: at(3), tail: at(6) };""", data)
-    # Рука видна всегда: события про то, что персонаж держит, а не про него.
+    # Рука видна всегда: события про то, что персонаж держит, а не про него
     assert out == {"start": [False, None], "middle": [True, None],
                    "tail": [False, None]}
 
 
 def test_without_events_the_prop_is_always_visible():
-    """У обычной насмешки скрывать нечего — и трогать меши незачем."""
+    """У обычной насмешки скрывать нечего - и трогать меши незачем"""
     out = _run("""const s = buildSkinnedScene(THREE, DATA, makeMaterial);
         s.action.time = 0;
         updateHidden(s);
@@ -325,10 +325,10 @@ def test_without_events_the_prop_is_always_visible():
 
 
 def test_hold_lengthens_the_clip_so_the_pose_stays():
-    """Замороженная смерть: тело доигрывает удар и застывает в этой позе.
+    """Замороженная смерть: тело доигрывает удар и застывает в этой позе
 
-    Отдельной логики это не требует — за концом дорожки three.js отдаёт её
-    последнее значение, поэтому пауза это просто более длинный клип.
+    Отдельной логики это не требует - за концом дорожки three.js отдаёт её
+    последнее значение, поэтому пауза это просто более длинный клип
     """
     data = json.loads(json.dumps(DATA))
     data["clip"]["duration"] = 1.23

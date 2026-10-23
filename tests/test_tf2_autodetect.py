@@ -1,13 +1,13 @@
 """
-Автопоиск установленной TF2.
+Автопоиск установленной TF2
 
 Ищем так, как игру находит сам Steam: реестр -> папка клиента ->
 `libraryfolders.vdf` -> `appmanifest_440.acf`. Обхода диска здесь нет
 намеренно: это минуты работы и десятки тысяч папок, а ответ всё равно лежит
-в двух файлах.
+в двух файлах
 
-Реестр в тестах не читаем — подменяем `_steam_from_registry`: на машине
-сборки Steam может не стоять вовсе, а проверять надо разбор путей.
+Реестр в тестах не читаем - подменяем `_steam_from_registry`: на машине
+сборки Steam может не стоять вовсе, а проверять надо разбор путей
 """
 
 import io
@@ -21,7 +21,7 @@ from src.services import tf2_paths as mod
 
 
 def _fake_game(root: Path) -> None:
-    """Минимальная установка: ровно то, что проверяет `is_valid`."""
+    """Минимальная установка: ровно то, что проверяет `is_valid`"""
     (root / "bin").mkdir(parents=True, exist_ok=True)
     (root / "bin" / "studiomdl.exe").write_bytes(b"")
     (root / "tf").mkdir(parents=True, exist_ok=True)
@@ -30,7 +30,7 @@ def _fake_game(root: Path) -> None:
 
 class AutodetectTests(unittest.TestCase):
     def _run(self, steam_dirs):
-        """Автопоиск с подменёнными реестром и догадками по диску."""
+        """Автопоиск с подменёнными реестром и догадками по диску"""
         with mock.patch.object(mod, '_steam_from_registry',
                                return_value=list(steam_dirs)), \
              mock.patch.object(mod, '_steam_guesses', return_value=[]):
@@ -45,10 +45,10 @@ class AutodetectTests(unittest.TestCase):
                              [os.path.normpath(str(game))])
 
     def test_game_in_another_library(self):
-        """Игру ставят на второй диск, и в реестре этого пути нет.
+        """Игру ставят на второй диск, и в реестре этого пути нет
 
-        Единственный источник — список библиотек рядом с клиентом. Формат VDF
-        здесь новый: путь лежит ключом "path" внутри блока.
+        Единственный источник - список библиотек рядом с клиентом. Формат VDF
+        здесь новый: путь лежит ключом "path" внутри блока
         """
         with tempfile.TemporaryDirectory() as tmp:
             steam = Path(tmp) / "Steam"
@@ -66,9 +66,9 @@ class AutodetectTests(unittest.TestCase):
                              [os.path.normpath(str(game))])
 
     def test_old_vdf_format(self):
-        """До 2021 путь стоял значением номера: «"1" "D:\\\\Games"».
+        """До 2021 путь стоял значением номера: «"1" "D:\\\\Games"»
 
-        Такие файлы живы на машинах, где Steam давно не переустанавливали.
+        Такие файлы живы на машинах, где Steam давно не переустанавливали
         """
         with tempfile.TemporaryDirectory() as tmp:
             steam = Path(tmp) / "Steam"
@@ -84,10 +84,10 @@ class AutodetectTests(unittest.TestCase):
                              [os.path.normpath(str(game))])
 
     def test_folder_name_from_the_manifest(self):
-        """Папка игры называется так, как записано в installdir.
+        """Папка игры называется так, как записано в installdir
 
         У перенесённой вручную установки это не «Team Fortress 2», и вписанное
-        жёстко имя такую копию не находит.
+        жёстко имя такую копию не находит
         """
         with tempfile.TemporaryDirectory() as tmp:
             steam = Path(tmp) / "Steam"
@@ -101,11 +101,11 @@ class AutodetectTests(unittest.TestCase):
                              [os.path.normpath(str(game))])
 
     def test_broken_install_is_not_offered(self):
-        """Папка есть, игры в ней нет — предлагать нечего.
+        """Папка есть, игры в ней нет - предлагать нечего
 
         Проверка та же, по которой работает приложение: без studiomdl.exe и
         tf2_misc_dir.vpk путь бесполезен, и «нашёл» здесь означало бы ошибку
-        на первой же сборке.
+        на первой же сборке
         """
         with tempfile.TemporaryDirectory() as tmp:
             steam = Path(tmp) / "Steam"
@@ -114,10 +114,10 @@ class AutodetectTests(unittest.TestCase):
             self.assertEqual(self._run([str(steam)]), [])
 
     def test_same_game_reported_once(self):
-        """Реестр и догадки дают ту же папку разным регистром.
+        """Реестр и догадки дают ту же папку разным регистром
 
         Для файловой системы Windows это один путь, и показывать человеку две
-        одинаковые строки незачем.
+        одинаковые строки незачем
         """
         with tempfile.TemporaryDirectory() as tmp:
             steam = Path(tmp) / "Steam"
@@ -126,7 +126,7 @@ class AutodetectTests(unittest.TestCase):
             self.assertEqual(len(found), 1)
 
     def test_no_steam_no_crash(self):
-        """Steam не стоит: пустой ответ, а не исключение."""
+        """Steam не стоит: пустой ответ, а не исключение"""
         self.assertEqual(self._run([]), [])
 
 

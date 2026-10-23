@@ -3,9 +3,9 @@
 
 Игра такой таблицы не хранит. Она собрана скриптом
 scripts/particle_sources_build.py из скриптов оружия, кода игры и дерева
-PCF и лежит в particle_sources_table.py; здесь — подписи видов и перевод
+PCF и лежит в particle_sources_table.py; здесь - подписи видов и перевод
 токена в слова на языке интерфейса. Файлы, которых при сборке таблицы ещё
-не было (новые сезонные анюжуалы), получают вид по имени файла.
+не было (новые сезонные анюжуалы), получают вид по имени файла
 """
 
 from __future__ import annotations
@@ -15,8 +15,8 @@ from typing import Dict, List, Optional, Tuple
 from src.data.particle_sources_table import SOURCES, WEAPON_NAMES
 from src.data.sound_catalog import BUILDING_TOKENS
 
-#: Вид источника → подпись. Порядок — порядок фасета и приоритет: система,
-#: которую зовёт и оружие, и правила игры, показывается как оружейная.
+#: Вид источника -> подпись. Порядок - порядок фасета и приоритет: система,
+#: которую зовёт и оружие, и правила игры, показывается как оружейная
 KIND_NAMES: Dict[str, str] = {
     'weapon': 'Оружие',
     'building': 'Постройки',
@@ -30,15 +30,15 @@ KIND_NAMES: Dict[str, str] = {
     'world': 'Карты и окружение',
 }
 
-#: Имя файла PCF → вид, когда системы нет в таблице (файл новее таблицы).
+#: Имя файла PCF -> вид, когда системы нет в таблице (файл новее таблицы)
 _FILE_KINDS: Tuple[Tuple[str, str], ...] = (
     ('unusual', 'unusual'), ('taunt', 'taunt'), ('halloween', 'halloween'),
     ('mvm', 'mvm'), ('killstreak', 'unusual'),
 )
 
 #: Скрипты, чей `printname` в локализации не значится (остатки у Valve):
-#: имя предмета по-английски, как в каталоге оружия — по нему находится
-#: перевод.
+#: имя предмета по-английски, как в каталоге оружия - по нему находится
+#: перевод
 _STEM_NAMES: Dict[str, str] = {
     'buff_item': 'Buff Banner', 'raygun': 'Righteous Bison',
     'flaregun_revenge': 'Manmelter', 'drg_pomson': 'Pomson 6000',
@@ -51,12 +51,12 @@ _STEM_NAMES: Dict[str, str] = {
     'passtime_gun': 'PASS Time',
 }
 
-#: Ключ таблицы — как в файле игры; ищем без учёта регистра.
+#: Ключ таблицы - как в файле игры, ищем без учёта регистра
 _LOWER: Dict[str, Tuple[str, ...]] = {k.lower(): v for k, v in SOURCES.items()}
 
 
 def tokens_of(system: str, pcf: str = '') -> Tuple[str, ...]:
-    """Токены `вид:метка` системы. Пусто — ничего не известно."""
+    """Токены `вид:метка` системы. Пусто - ничего не известно"""
     found = _LOWER.get((system or '').lower())
     if found:
         return found
@@ -68,7 +68,7 @@ def tokens_of(system: str, pcf: str = '') -> Tuple[str, ...]:
 
 
 def kinds_of(system: str, pcf: str = '') -> List[str]:
-    """Виды источников в порядке `KIND_NAMES`."""
+    """Виды источников в порядке `KIND_NAMES`"""
     have = {t.partition(':')[0] for t in tokens_of(system, pcf)}
     return [k for k in KIND_NAMES if k in have]
 
@@ -76,10 +76,10 @@ def kinds_of(system: str, pcf: str = '') -> List[str]:
 def labels_of(system: str, pcf: str, loc: Dict[str, str],
               unusual_names: Optional[Dict[str, str]] = None,
               lang: str = 'ru') -> List[str]:
-    """Кто зовёт систему, словами: «Огнемёт», «Турель», «Язычки пламени».
+    """Кто зовёт систему, словами: «Огнемёт», «Турель», «Язычки пламени»
 
     Вид без метки словом не становится: «Оружие» как подпись у строки не
-    говорит ничего сверх фасета.
+    говорит ничего сверх фасета
     """
     out: List[str] = []
     for token in tokens_of(system, pcf):
@@ -101,7 +101,7 @@ def labels_of(system: str, pcf: str, loc: Dict[str, str],
 
 
 def _catalog_name(english: str, lang: str) -> str:
-    """Имя предмета на языке интерфейса по его английскому имени в каталоге."""
+    """Имя предмета на языке интерфейса по его английскому имени в каталоге"""
     if not english:
         return ''
     from src.data.weapons import TF2_WEAPONS

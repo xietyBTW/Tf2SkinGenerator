@@ -1,22 +1,22 @@
 """
-Экран модели — vgui-панель на attachment'ах ``controlpanelN_ll`` / ``_ur``.
+Экран модели - vgui-панель на attachment'ах ``controlpanelN_ll`` / ``_ur``
 
 Циферблат Звона смерти в игре не геометрия: движок рисует на модели
 vgui-панель (``scripts/screens/pda_spy_invis_pocket.res``) в прямоугольнике
-между двумя attachment'ами, а её картинки — ``pocket_watch_bg`` (фон) и
+между двумя attachment'ами, а её картинки - ``pocket_watch_bg`` (фон) и
 ``pocket_watch_fg`` (заполнение круглой шкалы). В меше их нет, и превью
-показывало пустой циферблат — положенная на карточку картинка не
-появлялась ни в кадре, ни от первого лица.
+показывало пустой циферблат - положенная на карточку картинка не
+появлялась ни в кадре, ни от первого лица
 
 Здесь панель становится обычной геометрией: отдельный SMD с квадом фона и
 веером заполнения, привязанный к кости нижнего левого угла. Дальше он идёт
-как любая бодигруппа — скиннинг, поза, вид от первого лица, раскладка
-текстур по имени материала, — и ничего специального о нём знать не нужно.
+как любая бодигруппа - скиннинг, поза, вид от первого лица, раскладка
+текстур по имени материала, - и ничего специального о нём знать не нужно
 
 Геометрия по конвенции Source: панель лежит в плоскости XY attachment'а
-нижнего левого угла, X — ширина, Y — высота, Z — нормаль; ``pixels`` — размер
-панели в vgui-пикселях (``vgui_screens.txt``), ``rect`` — где в ней лежит
-шкала с картинками (``.res``).
+нижнего левого угла, X - ширина, Y - высота, Z - нормаль; ``pixels`` - размер
+панели в vgui-пикселях (``vgui_screens.txt``), ``rect`` - где в ней лежит
+шкала с картинками (``.res``)
 """
 
 from __future__ import annotations
@@ -31,10 +31,10 @@ from src.shared.logging_config import get_logger
 
 logger = get_logger(__name__)
 
-#: Экраны известных моделей — по стему ``$modelname`` в QC.
-#: pixels — размер панели (vgui_screens.txt), rect — (x, y, w, h) шкалы в
-#: ней (.res), bg/fg — имена материалов картинок, progress — какую долю
-#: круга закрывает fg: половина показывает и фон, и заполнение разом.
+#: Экраны известных моделей - по стему ``$modelname`` в QC.
+#: pixels - размер панели (vgui_screens.txt), rect - (x, y, w, h) шкалы в
+#: ней (.res), bg/fg - имена материалов картинок, progress - какую долю
+#: круга закрывает fg: половина показывает и фон, и заполнение разом
 SCREENS: Dict[str, dict] = {
     'v_watch_pocket_spy': {
         'pixels': (280, 100),
@@ -54,7 +54,7 @@ _RE_ATTACH = re.compile(
 
 
 def screen_spec(qc_path: str) -> Optional[dict]:
-    """Описание экрана модели по её ``$modelname``, если он известен."""
+    """Описание экрана модели по её ``$modelname``, если он известен"""
     try:
         with open(qc_path, 'r', encoding='utf-8', errors='replace') as f:
             text = f.read()
@@ -68,7 +68,7 @@ def screen_spec(qc_path: str) -> Optional[dict]:
 
 
 def _attachments(qc_path: str) -> Dict[Tuple[int, str], Tuple[str, tuple, tuple]]:
-    """{(номер, 'll'|'ur'): (кость, смещение, поворот в градусах)}."""
+    """{(номер, 'll'|'ur'): (кость, смещение, поворот в градусах)}"""
     try:
         with open(qc_path, 'r', encoding='utf-8', errors='replace') as f:
             text = f.read()
@@ -83,7 +83,7 @@ def _attachments(qc_path: str) -> Dict[Tuple[int, str], Tuple[str, tuple, tuple]
 
 
 def _frame(world: smd_pose.Mat, offset: Sequence[float], rotate: Sequence[float]) -> smd_pose.Mat:
-    """Матрица attachment'а: кость, затем его собственные смещение и поворот."""
+    """Матрица attachment'а: кость, затем его собственные смещение и поворот"""
     local = smd_pose.local_matrix(offset, tuple(math.radians(a) for a in rotate))
     return smd_pose.mul(world, local)
 
@@ -99,7 +99,7 @@ def _axis(m: smd_pose.Mat, c: int) -> Tuple[float, float, float]:
 def _quad(reference_smd: str, qc_path: str, index: int = 0):
     """
     Углы экрана в пространстве reference-SMD и кость, к которой он привязан:
-    (origin, ширина-вектор, высота-вектор, нормаль, кость) либо None.
+    (origin, ширина-вектор, высота-вектор, нормаль, кость) либо None
     """
     found = _attachments(qc_path)
     ll = found.get((index, 'll'))
@@ -128,7 +128,7 @@ def _quad(reference_smd: str, qc_path: str, index: int = 0):
 
 
 def _rect_points(spec: dict) -> Tuple[Tuple[float, float], Tuple[float, float]]:
-    """Прямоугольник шкалы в долях панели: (u0, v0), (u1, v1); v — сверху."""
+    """Прямоугольник шкалы в долях панели: (u0, v0), (u1, v1); v - сверху"""
     pw, ph = spec['pixels']
     x, y, w, h = spec['rect']
     return (x / pw, y / ph), ((x + w) / pw, (y + h) / ph)
@@ -136,7 +136,7 @@ def _rect_points(spec: dict) -> Tuple[Tuple[float, float], Tuple[float, float]]:
 
 def _ray_to_rect(cx: float, cy: float, angle: float,
                  u0: float, v0: float, u1: float, v1: float) -> Tuple[float, float]:
-    """Точка на границе прямоугольника по лучу из центра под углом (v — вниз)."""
+    """Точка на границе прямоугольника по лучу из центра под углом (v - вниз)"""
     dx, dy = math.cos(angle), math.sin(angle)
     best = float('inf')
     for edge, d in (((u0 - cx), dx), ((u1 - cx), dx), ((v0 - cy), dy), ((v1 - cy), dy)):
@@ -149,11 +149,11 @@ def _ray_to_rect(cx: float, cy: float, angle: float,
 
 def _triangles(spec: dict) -> Tuple[List[Tuple[tuple, tuple, tuple]], List[Tuple[tuple, tuple, tuple]]]:
     """
-    Треугольники фона и заполнения в долях ПАНЕЛИ (u вправо, v вниз).
+    Треугольники фона и заполнения в долях ПАНЕЛИ (u вправо, v вниз)
 
-    Фон — квад шкалы. Заполнение — веер от центра по часовой стрелке от
+    Фон - квад шкалы. Заполнение - веер от центра по часовой стрелке от
     12 часов на долю ``progress`` (так рисует CircularProgressBar), обрезанный
-    по прямоугольнику шкалы.
+    по прямоугольнику шкалы
     """
     (u0, v0), (u1, v1) = _rect_points(spec)
     bg = [((u0, v0), (u0, v1), (u1, v1)), ((u0, v0), (u1, v1), (u1, v0))]
@@ -162,13 +162,13 @@ def _triangles(spec: dict) -> Tuple[List[Tuple[tuple, tuple, tuple]], List[Tuple
     progress = max(0.0, min(1.0, float(spec.get('progress', 0.5))))
     if progress > 0:
         cx, cy = (u0 + u1) / 2, (v0 + v1) / 2
-        start = -math.pi / 2                      # 12 часов; v вниз → по часовой
+        start = -math.pi / 2                      # 12 часов; v вниз -> по часовой
         steps = max(1, int(round(72 * progress)))
         prev = _ray_to_rect(cx, cy, start, u0, v0, u1, v1)
         for i in range(1, steps + 1):
             angle = start + 2 * math.pi * progress * i / steps
             point = _ray_to_rect(cx, cy, angle, u0, v0, u1, v1)
-            fg.append(((cx, cy), point, prev))     # против часовой в Y-вверх — лицом наружу
+            fg.append(((cx, cy), point, prev))     # против часовой в Y-вверх - лицом наружу
             prev = point
     return bg, fg
 
@@ -176,11 +176,11 @@ def _triangles(spec: dict) -> Tuple[List[Tuple[tuple, tuple, tuple]], List[Tuple
 def write_screen_smd(reference_smd: str, qc_path: str, out_path: str,
                      spec: Optional[dict] = None) -> Optional[str]:
     """
-    Пишет SMD с экраном модели. None — экрана нет (неизвестная модель или
-    в QC нет attachment'ов controlpanel0).
+    Пишет SMD с экраном модели. None - экрана нет (неизвестная модель или
+    в QC нет attachment'ов controlpanel0)
 
     Скелет копируется из reference-SMD целиком: SMD экрана обязан говорить о
-    тех же костях, чтобы конвертер и скиннинг считали его частью модели.
+    тех же костях, чтобы конвертер и скиннинг считали его частью модели
     """
     spec = spec or screen_spec(qc_path)
     if not spec:
@@ -192,9 +192,9 @@ def write_screen_smd(reference_smd: str, qc_path: str, out_path: str,
     (u0, v0), (u1, v1) = _rect_points(spec)
 
     def vertex(u: float, v: float, lift: float = 0.0) -> str:
-        # Панель: u вправо, v вниз от верхнего края; SMD-UV — от нижнего.
-        # `lift` — отступ по нормали: заполнение лежит НАД фоном, а не в той же
-        # плоскости, иначе они мерцают друг сквозь друга.
+        # Панель: u вправо, v вниз от верхнего края; SMD-UV - от нижнего.
+        # `lift` - отступ по нормали: заполнение лежит НАД фоном, а не в той же
+        # плоскости, иначе они мерцают друг сквозь друга
         pos = tuple(origin[i] + wide[i] * u + tall[i] * (1.0 - v) + normal[i] * lift
                     for i in range(3))
         tu = (u - u0) / (u1 - u0)
@@ -227,11 +227,11 @@ def write_screen_smd(reference_smd: str, qc_path: str, out_path: str,
 
 def screen_hints(decomp_dir: str) -> Dict[str, dict]:
     """
-    Как рисовать материалы экрана: с альфой и с двух сторон.
+    Как рисовать материалы экрана: с альфой и с двух сторон
 
-    Картинки панели — vgui-материалы (UnlitGeneric, $translucent), их VMT
+    Картинки панели - vgui-материалы (UnlitGeneric, $translucent), их VMT
     лежат не в $cdmaterials модели, и обычный разбор их не находит. Без альфы
-    вокруг круглой шкалы был бы чёрный квадрат.
+    вокруг круглой шкалы был бы чёрный квадрат
     """
     try:
         qcs = [os.path.join(decomp_dir, f) for f in os.listdir(decomp_dir)
@@ -248,10 +248,10 @@ def screen_hints(decomp_dir: str) -> Dict[str, dict]:
 
 def screen_smds(decomp_dir: str, reference_smd: str) -> List[str]:
     """
-    SMD экрана модели из папки декомпиляции — как ещё одна часть модели.
+    SMD экрана модели из папки декомпиляции - как ещё одна часть модели
 
     Файл кладётся рядом с reference, чтобы жить столько же, сколько кэш
-    декомпиляции; перезаписывается при каждом обращении — он дешёвый.
+    декомпиляции, перезаписывается при каждом обращении - он дешёвый
     """
     if not reference_smd or not os.path.isfile(reference_smd):
         return []

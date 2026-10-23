@@ -1,4 +1,4 @@
-"""Обновление приложения из самого приложения."""
+"""Обновление приложения из самого приложения"""
 
 from __future__ import annotations
 
@@ -8,23 +8,21 @@ from typing import Dict
 from src.app.api._common import endpoint, logger
 
 
-# ═══════════════════════════════════════════════════════════════════════════ #
 # Обновление приложения
-# ═══════════════════════════════════════════════════════════════════════════ #
 
 #: Ответ последней проверки. Спрашивать GitHub на каждое открытие настроек
-#: незачем: релизы выходят не чаще, чем человек перезапускает приложение.
+#: незачем: релизы выходят не чаще, чем человек перезапускает приложение
 _update_cache: Dict[str, object] = {}
 
 
 @endpoint
 def update_status(force: bool = False) -> Dict[str, object]:
     """
-    Есть ли новая версия и можно ли поставить её отсюда.
+    Есть ли новая версия и можно ли поставить её отсюда
 
     Ходит в сеть (одна ссылка на GitHub API), поэтому страница зовёт это уже
     после отрисовки, а не на старте. Ответ запоминается на сеанс; `force`
-    заставляет спросить заново — это кнопка «проверить» в настройках.
+    заставляет спросить заново - это кнопка «проверить» в настройках
     """
     from src.services.update_checker import check_for_update
 
@@ -36,26 +34,26 @@ def update_status(force: bool = False) -> Dict[str, object]:
 
 #: Ход обновления. Читается страницей опросом (`update_progress`), пишется
 #: фоновым потоком. Ключи: state (idle|downloading|launching|done|error),
-#: done, total, error, version.
+#: done, total, error, version
 _update_run: Dict[str, object] = {'state': 'idle'}
 _update_lock = threading.Lock()
 
-#: Состояния, в которых второй запуск обновления не нужен.
+#: Состояния, в которых второй запуск обновления не нужен
 _UPDATE_BUSY = ('downloading', 'launching', 'done')
 
 
 @endpoint
 def install_update() -> Dict[str, object]:
     """
-    Запускает обновление и СРАЗУ возвращается.
+    Запускает обновление и СРАЗУ возвращается
 
     Установщик носит приложение внутри себя (installer/*-bundle.iss), это
-    десятки мегабайт — качать их молча, пока страница ждёт ответа, нельзя.
+    десятки мегабайт - качать их молча, пока страница ждёт ответа, нельзя.
     Поэтому работа уходит в фоновый поток, а страница спрашивает ход дела
-    через `update_progress`.
+    через `update_progress`
 
     После запуска установщика приложение обязано закрыться: Windows не даст
-    заменить его .exe и .dll, пока процесс жив.
+    заменить его .exe и .dll, пока процесс жив
     """
     with _update_lock:
         if _update_run.get('state') in _UPDATE_BUSY:
@@ -78,19 +76,19 @@ def install_update() -> Dict[str, object]:
 
 @endpoint
 def update_progress() -> Dict[str, object]:
-    """Ход обновления для страницы. Опрос дешёвый — это чтение словаря."""
+    """Ход обновления для страницы. Опрос дешёвый - это чтение словаря"""
     with _update_lock:
         return dict(_update_run)
 
 
 def _run_update(info: Dict[str, object]) -> None:
-    """Скачивает, проверяет и запускает установщик. Работает в своём потоке."""
+    """Скачивает, проверяет и запускает установщик. Работает в своём потоке"""
     from src.services.update_checker import download_update, install_update as launch
 
     def tick(done: int, total: int) -> None:
         with _update_lock:
             _update_run['done'] = done
-            # Content-Length надёжнее того, что записано в релизе.
+            # Content-Length надёжнее того, что записано в релизе
             if total:
                 _update_run['total'] = total
 
@@ -118,12 +116,12 @@ def _run_update(info: Dict[str, object]) -> None:
 
 def _quit_soon(delay: float = 2.0) -> None:
     """
-    Закрывает приложение через пару секунд.
+    Закрывает приложение через пару секунд
 
-    Пауза — чтобы страница успела опросить `update_progress`, увидеть 'done' и
+    Пауза - чтобы страница успела опросить `update_progress`, увидеть 'done' и
     показать «закрываюсь». Опрос идёт раз в полсекунды, поэтому две.
     Выходим через os._exit: обычный выход ждёт потоки воркеров, а установщик
-    ждать не будет, и любой задержавшийся поток означал бы занятый .exe.
+    ждать не будет, и любой задержавшийся поток означал бы занятый .exe
     """
     import logging
     import os

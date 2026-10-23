@@ -1,9 +1,9 @@
-"""Предупреждение о модулях, которые движок превью не исполняет.
+"""Предупреждение о модулях, которые движок превью не исполняет
 
 Незнакомый модуль движок молча выбрасывает: эффект в превью ведёт себя
 иначе, чем в игре, и понять почему невозможно. Проверка должна поймать это
-до сборки — и не шуметь, пока страница ещё не отчиталась о своих
-возможностях.
+до сборки - и не шуметь, пока страница ещё не отчиталась о своих
+возможностях
 """
 
 from src.services.particle_lint import check_preview_support
@@ -25,7 +25,7 @@ def _sys(**groups):
 
 
 def test_silent_until_engine_reports():
-    """Пустой supported — страница ещё грузится, обвинять не в чем."""
+    """Пустой supported - страница ещё грузится, обвинять не в чем"""
     systems = {"a": _sys(operators=["Position on Model Random"])}
     assert check_preview_support(systems, {}, {}) == []
 
@@ -40,7 +40,7 @@ def test_reports_unknown_operator():
 
 
 def test_alias_counts_as_supported():
-    """basic_movement — то же, что Movement Basic: жаловаться не на что."""
+    """basic_movement - то же, что Movement Basic: жаловаться не на что"""
     systems = {"a": _sys(operators=["basic_movement"])}
     assert check_preview_support(systems, SUPPORTED, ALIASES) == []
 
@@ -59,7 +59,7 @@ def test_duplicates_collapse_and_sort():
 
 
 def test_groups_the_engine_never_mentioned_are_not_checked():
-    """Движок не отчитался про forces — значит и судить о них не можем."""
+    """Движок не отчитался про forces - значит и судить о них не можем"""
     systems = {"a": _sys(forces=["Some Exotic Force"])}
     assert check_preview_support(systems, SUPPORTED, ALIASES) == []
 

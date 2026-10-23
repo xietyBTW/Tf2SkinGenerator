@@ -1,16 +1,16 @@
 """
-Воркер для загрузки пользовательского VPK мода в 3D Preview.
+Воркер для загрузки пользовательского VPK мода в 3D Preview
 
 Шаги:
   1. Открываем VPK пользователя.
   2. Сканируем: MDL файлы, VMT файлы ($basetexture), VTF файлы.
-  3. Если MDL есть  → извлекаем + декомпилируем → SMD → OBJ.
-  4. Если MDL нет   → по имени VTF / $basetexture определяем ключ оружия
-                      → берём оригинальную модель из игровых VPK.
+  3. Если MDL есть  -> извлекаем + декомпилируем -> SMD -> OBJ.
+  4. Если MDL нет   -> по имени VTF / $basetexture определяем ключ оружия
+                      -> берём оригинальную модель из игровых VPK.
   5. Извлекаем основную текстуру из мода (по $basetexture).
      Игнорируем lightwarp, phongwarp, bumpmap и т.п.
-     Если текстуры в моде нет — берём из игры.
-  6. Эмитируем ready(obj_path, texture_path).
+     Если текстуры в моде нет - берём из игры.
+  6. Эмитируем ready(obj_path, texture_path)
 """
 
 import glob
@@ -24,31 +24,31 @@ from src.services.base_worker import Signal
 
 from src.services.base_worker import BaseWorker
 from src.services.game_vpk_reader import GameVpkReader
-from src.services.smd_service import NON_REFERENCE_SMD_KEYWORDS
+from src.services import smd_service
 from src.shared.logging_config import get_logger
 
 logger = get_logger(__name__)
 
-# Правило «основная или служебная» одно на приложение — mod_textures.
-# Имя оставлено здесь: его импортирует библиотека модов.
+# Правило «основная или служебная» одно на приложение - mod_textures.
+# Имя оставлено здесь: его импортирует библиотека модов
 from src.services.mod_textures import is_base_vtf, vmt_references  # noqa: E402,F401
 
 
-# ── Утилиты ──────────────────────────────────────────────────────────────── #
+# Утилиты
 
 def _weapon_key_from_path(path: str) -> Optional[str]:
     """
     Пытается извлечь ключ оружия (c_xxxx) из пути к файлу.
-    Сверяет кандидатов с таблицей WEAPON_MDL_PATHS.
+    Сверяет кандидатов с таблицей WEAPON_MDL_PATHS
 
     Пример:
       'materials/models/weapons/c_models/c_scattergun/c_scattergun.vtf'
-      → 'c_scattergun'
+      -> 'c_scattergun'
     """
     from src.data.weapons import WEAPON_MDL_PATHS
 
     candidates = re.findall(r"(c_[a-z0-9_]+)", path.lower())
-    # Перебираем с конца — ключ оружия обычно в самом конце пути
+    # Перебираем с конца - ключ оружия обычно в самом конце пути
     for part in reversed(candidates):
         if part in WEAPON_MDL_PATHS:
             return part
@@ -56,10 +56,10 @@ def _weapon_key_from_path(path: str) -> Optional[str]:
 
 
 def _weapon_mdl(mdl_files: List[str], weapon_key: Optional[str]) -> str:
-    """Модель самого оружия среди моделей мода.
+    """Модель самого оружия среди моделей мода
 
     Ключ одинаков у пушки и её гирлянды (c_ambassador_festivizer лежит в
-    папке c_ambassador) — пушку отличает имя файла, равное ключу.
+    папке c_ambassador) - пушку отличает имя файла, равное ключу
     """
     for mdl in mdl_files:
         if weapon_key and os.path.splitext(os.path.basename(mdl))[0].lower() == weapon_key:
@@ -67,21 +67,21 @@ def _weapon_mdl(mdl_files: List[str], weapon_key: Optional[str]) -> str:
     return mdl_files[0]
 
 
-# ── Воркер ───────────────────────────────────────────────────────────────── #
+# Воркер
 
 class PreviewVpkModWorker(BaseWorker):
-    """Готовит OBJ + текстуру из пользовательского VPK мода для 3D Preview."""
+    """Готовит OBJ + текстуру из пользовательского VPK мода для 3D Preview"""
 
     ready     = Signal(str, str)      # (obj_path, first_frame_path)
-    animated  = Signal(object, float) # ([frame_paths], framerate) — только если кадров > 1
-    blu_ready = Signal(object, float) # BLU командная раскраска — если найдена
-    cards_ready = Signal(object)      # [card_dict] — 2D-карточки всех текстур мода
-    materials_ready = Signal(object)  # [material_name] — имена материалов модели (для наложения по мешам)
-    skins_ready = Signal(object)      # skin_info — стили модели (skinfamilies) из QC
-    #: (ключ оружия, reference SMD мода, своя ли в моде модель) — что именно
+    animated  = Signal(object, float) # ([frame_paths], framerate) - только если кадров > 1
+    blu_ready = Signal(object, float) # BLU командная раскраска - если найдена
+    cards_ready = Signal(object)      # [card_dict] - 2D-карточки всех текстур мода
+    materials_ready = Signal(object)  # [material_name] - имена материалов модели (для наложения по мешам)
+    skins_ready = Signal(object)      # skin_info - стили модели (skinfamilies) из QC
+    #: (ключ оружия, reference SMD мода, своя ли в моде модель) - что именно
     #: мод заменяет. По этому приложение показывает мод в руках: скелет и
-    #: анимации берутся у игрового оружия, геометрия — из мода. Приходит
-    #: ПОСЛЕ ready: всё, что спрошено по модели раньше, перепрашивается.
+    #: анимации берутся у игрового оружия, геометрия - из мода. Приходит
+    #: ПОСЛЕ ready: всё, что спрошено по модели раньше, перепрашивается
     weapon_found = Signal(str, str, bool)
     failed    = Signal(str)
     progress  = Signal(str)
@@ -133,18 +133,18 @@ class PreviewVpkModWorker(BaseWorker):
         self._model_materials: List[str] = []
         self._vmt_texts: dict = {}
         self._refs = None
-        # Игровой tf2_textures_dir.vpk открываем один раз за прогон (fallback-пути).
+        # Игровой tf2_textures_dir.vpk открываем один раз за прогон (fallback-пути)
         self._game_reader: Optional[GameVpkReader] = None
         self._p = self._PROGRESS.get(lang, self._PROGRESS['en'])
 
     def _game_textures_pak(self):
-        """Хэндл игрового tf2_textures_dir.vpk (открыт один раз, кэш). None если нет."""
+        """Хэндл игрового tf2_textures_dir.vpk (открыт один раз, кэш). None если нет"""
         if self._game_reader is None:
             self._game_reader = GameVpkReader([self.textures_vpk_path])
         paks = self._game_reader.paks
         return paks[0] if paks else None
 
-    # ── Точка входа ───────────────────────────────────────────────────────── #
+    # Точка входа
 
     def run(self) -> None:
         try:
@@ -162,7 +162,7 @@ class PreviewVpkModWorker(BaseWorker):
             if self.isInterruptionRequested():
                 return
 
-            # ── 1. Сканируем содержимое ───────────────────────────────────── #
+            # 1. Сканируем содержимое
             self.progress.emit(self._p['scanning'])
 
             mdl_files: List[str] = []
@@ -183,8 +183,8 @@ class PreviewVpkModWorker(BaseWorker):
                 f"{len(mdl_files)} MDL, {len(vmt_files)} VMT, {len(vtf_files)} VTF"
             )
 
-            # Тексты VMT — один раз: по ним решается, какая текстура основная
-            # (на что смотрит $basetexture), и какие карты у материала уже есть.
+            # Тексты VMT - один раз: по ним решается, какая текстура основная
+            # (на что смотрит $basetexture), и какие карты у материала уже есть
             self._vmt_texts = {}
             for vmt_rel in vmt_files:
                 try:
@@ -193,11 +193,11 @@ class PreviewVpkModWorker(BaseWorker):
                     continue
             self._refs = vmt_references(self._vmt_texts.values())
 
-            # ── 2D-карточки всех текстур мода (РАНО) ──────────────────────── #
+            # 2D-карточки всех текстур мода (РАНО)
             # Эмитим карточки сразу после сканирования VTF, ДО тяжёлой/прерываемой
-            # работы по модели — иначе перезапуск воркера (смена категории) мог
+            # работы по модели - иначе перезапуск воркера (смена категории) мог
             # прервать run() до их формирования, и в 2D оставалась лишь одна
-            # карточка (от обычной фильтрации материалов модели).
+            # карточка (от обычной фильтрации материалов модели)
             try:
                 cards = self._build_cards_from_pak(pak, vtf_files, vmt_files)
                 if cards:
@@ -209,7 +209,7 @@ class PreviewVpkModWorker(BaseWorker):
             if self.isInterruptionRequested():
                 return
 
-            # ── 2. Парсим VMT → $basetexture ─────────────────────────────── #
+            # 2. Парсим VMT -> $basetexture
             basetexture_path: Optional[str] = None
             for vmt_rel in vmt_files:
                 try:
@@ -223,10 +223,10 @@ class PreviewVpkModWorker(BaseWorker):
                 except Exception:
                     continue
 
-            # ── 3. Определяем ключ оружия ─────────────────────────────────── #
+            # 3. Определяем ключ оружия
             weapon_key: Optional[str] = None
 
-            # Приоритет: MDL → basetexture → VTF
+            # Приоритет: MDL -> basetexture -> VTF
             for mdl_rel in mdl_files:
                 weapon_key = _weapon_key_from_path(mdl_rel)
                 if weapon_key:
@@ -247,7 +247,7 @@ class PreviewVpkModWorker(BaseWorker):
             if self.isInterruptionRequested():
                 return
 
-            # ── 4. Получаем OBJ ───────────────────────────────────────────── #
+            # 4. Получаем OBJ
             obj_path: Optional[str] = None
             decomp_dir: Optional[str] = None
 
@@ -257,12 +257,12 @@ class PreviewVpkModWorker(BaseWorker):
                 self.progress.emit(self._p['decompiling_mod'])
                 mdl = _weapon_mdl(mdl_files, weapon_key)
                 obj_path, decomp_dir = self._decompile_mdl_from_pak(pak, mdl, weapon_key)
-                # Своя модель ОРУЖИЯ, а не одна гирлянда поверх стоковой пушки.
+                # Своя модель ОРУЖИЯ, а не одна гирлянда поверх стоковой пушки
                 stem = os.path.splitext(os.path.basename(mdl))[0].lower()
                 own_model = bool(obj_path) and stem == (weapon_key or stem)
 
             if not obj_path and weapon_key and self.misc_vpk_path:
-                # Нет MDL в моде — берём оригинальную TF2 модель
+                # Нет MDL в моде - берём оригинальную TF2 модель
                 self.progress.emit(self._p['loading_original'])
                 orig_obj, orig_decomp = self._load_original_model(weapon_key)
                 if not obj_path:
@@ -277,7 +277,7 @@ class PreviewVpkModWorker(BaseWorker):
             if self.isInterruptionRequested():
                 return
 
-            # ── 5. Получаем текстуру ──────────────────────────────────────── #
+            # 5. Получаем текстуру
             self.progress.emit(self._p['extracting_tex'])
             frame_paths, framerate = self._extract_texture_frames_from_pak(
                 pak, vtf_files, basetexture_path, vmt_files,
@@ -293,15 +293,13 @@ class PreviewVpkModWorker(BaseWorker):
 
             # Что мод заменяет и чем. Без reference SMD показать его в руках
             # нечем: анимацию играет скелет ИГРОВОГО оружия, а меш берётся
-            # отсюда (см. ViewmodelPreviewWorker._weapon_smd).
+            # отсюда (см. ViewmodelPreviewWorker._weapon_smd)
             if weapon_key:
-                from src.services import smd_service
-
                 ref = (smd_service.find_reference_smd(decomp_dir, weapon_key)
                        if decomp_dir else '')
                 self.weapon_found.emit(weapon_key, ref or '', own_model)
 
-            # Имена материалов модели → панель наложит текстуры мода по мешам.
+            # Имена материалов модели -> панель наложит текстуры мода по мешам
             if self._model_materials:
                 logger.info(f"VPK мод: материалы модели: {self._model_materials}")
                 self.materials_ready.emit(list(self._model_materials))
@@ -312,7 +310,7 @@ class PreviewVpkModWorker(BaseWorker):
             if self.isInterruptionRequested():
                 return
 
-            # ── 6. BLU-вариант текстуры ───────────────────────────────────── #
+            # 6. BLU-вариант текстуры
             blu_paths, blu_fps = self._extract_blu_texture(
                 pak, vtf_files, basetexture_path, weapon_key, framerate,
                 decomp_dir=decomp_dir,
@@ -320,7 +318,7 @@ class PreviewVpkModWorker(BaseWorker):
             if blu_paths:
                 self.blu_ready.emit(blu_paths, blu_fps)
 
-            # ── 7. Стили модели (skinfamilies) из QC ──────────────────────── #
+            # 7. Стили модели (skinfamilies) из QC
             try:
                 if decomp_dir:
                     qc_path = self._find_qc_in_dir(decomp_dir)
@@ -329,8 +327,8 @@ class PreviewVpkModWorker(BaseWorker):
                         info = ModelBuildService.extract_skin_info(qc_path)
                         skins = (info or {}).get('skins') or []
                         if len(skins) >= 2:
-                            # Превью УЖЕ существующих текстур каждого стиля — чтобы
-                            # при переключении стиля карточки были не пустыми.
+                            # Превью УЖЕ существующих текстур каждого стиля - чтобы
+                            # при переключении стиля карточки были не пустыми
                             info['skin_textures'] = self._build_skin_textures(pak, info, vtf_files)
                             logger.info(f"VPK мод: стилей определено: {len(skins)} ({info.get('roles')})")
                             self.skins_ready.emit(info)
@@ -344,20 +342,20 @@ class PreviewVpkModWorker(BaseWorker):
             if self._game_reader is not None:
                 self._game_reader.close()
 
-    # ── 2D-карточки: все основные текстуры мода из открытого pak ──────────── #
+    # 2D-карточки: все основные текстуры мода из открытого pak
 
     def _build_cards_from_pak(self, pak, vtf_files: List[str], vmt_files: List[str]) -> list:
-        """Строит карточки для ВСЕХ основных VTF мода прямо из открытого pak.
+        """Строит карточки для ВСЕХ основных VTF мода прямо из открытого pak
 
         Служебные VTF (lightwarp/bump/normal/…) отброшены через is_base_vtf.
-        Имя карточки = стебель VTF; при коллизии добавляется папка. Превью —
-        первый кадр VTF. vmt_path привязывается по совпадению стебля.
+        Имя карточки = стебель VTF; при коллизии добавляется папка. Превью -
+        первый кадр VTF. vmt_path привязывается по совпадению стебля
         """
         from src.services import vmt_parse
         from src.services.mod_textures import texture_key
 
         # VMT для текстуры: тот, чей $basetexture на неё смотрит (так её
-        # находит игра), иначе — по совпадению стебля.
+        # находит игра), иначе - по совпадению стебля
         vmt_by_stem = {}
         vmt_by_base = {}
         for vmt_rel in vmt_files:
@@ -369,7 +367,7 @@ class PreviewVpkModWorker(BaseWorker):
         vtf_by_key = {texture_key(v): v for v in vtf_files}
 
         base = sorted(v for v in vtf_files if is_base_vtf(v, self._refs))
-        # Подсчёт коллизий стеблей для дизамбигуации.
+        # Подсчёт коллизий стеблей для дизамбигуации
         stems = [os.path.splitext(os.path.basename(v))[0] for v in base]
         counts: dict = {}
         for s in stems:
@@ -402,16 +400,16 @@ class PreviewVpkModWorker(BaseWorker):
                 'maps': self._mod_maps(pak, name, self._vmt_texts.get(vmt_rel, ''), vtf_by_key),
             })
 
-        # RED-материалы первыми, затем BLU (как в обычной раскладке карточек).
+        # RED-материалы первыми, затем BLU (как в обычной раскладке карточек)
         return [c for c in cards if not c['is_blue']] + [c for c in cards if c['is_blue']]
 
     def _build_skin_textures(self, pak, info: dict, vtf_files: List[str]) -> dict:
-        """Для каждого стиля (skinfamilies) — превью существующих текстур по
-        базовому материалу: {raw_skin_idx: {base_material: preview_png}}.
+        """Для каждого стиля (skinfamilies) - превью существующих текстур по
+        базовому материалу: {raw_skin_idx: {base_material: preview_png}}
 
-        Строки $texturegroup: строка 0 — базовые материалы (колонки = меш-слоты),
-        строка K — материалы стиля K в тех же колонках. Текстуру стиля берём по
-        совпадению стебля материала с VTF-файлом мода.
+        Строки $texturegroup: строка 0 - базовые материалы (колонки = меш-слоты),
+        строка K - материалы стиля K в тех же колонках. Текстуру стиля берём по
+        совпадению стебля материала с VTF-файлом мода
         """
         rows = info.get('rows') or []
         skins = info.get('skins') or []
@@ -433,8 +431,8 @@ class PreviewVpkModWorker(BaseWorker):
                     continue
                 variant_mat = row[col]
                 # В стиль включаем ТОЛЬКО материалы, которые отличаются от базовой
-                # строки. Одинаковый материал (eyes/mouth и т.п.) наследует базу —
-                # его не показываем как отдельную карточку стиля.
+                # строки. Одинаковый материал (eyes/mouth и т.п.) наследует базу -
+                # его не показываем как отдельную карточку стиля
                 if variant_mat.strip().lower() == base_mat.strip().lower():
                     continue
                 stem = os.path.splitext(os.path.basename(variant_mat))[0].lower()
@@ -453,8 +451,8 @@ class PreviewVpkModWorker(BaseWorker):
         return out
 
     def _mod_maps(self, pak, card: str, vmt_text: str, vtf_by_key: dict) -> dict:
-        """Карты материала, что уже стоят в VMT мода, — с превью их текстуры
-        (диалог карт показывает их отмеченными)."""
+        """Карты материала, что уже стоят в VMT мода, - с превью их текстуры
+        (диалог карт показывает их отмеченными)"""
         from src.data.material_maps import detect_maps
         from src.services.mod_textures import texture_key
 
@@ -466,7 +464,7 @@ class PreviewVpkModWorker(BaseWorker):
             vtf_rel = vtf_by_key.get(texture_key(texture))
             try:
                 # Своя текстура мода, иначе игровая (lightwarp модов часто
-                # смотрит на полоску самой игры).
+                # смотрит на полоску самой игры)
                 if vtf_rel:
                     data = pak[vtf_rel].read()
                 else:
@@ -479,17 +477,17 @@ class PreviewVpkModWorker(BaseWorker):
         return maps
 
     def _vtf_bytes_first_frame_png(self, vtf_data: bytes, key: str) -> Optional[str]:
-        """Сохраняет первый кадр VTF в уникальный PNG (для превью карточки).
+        """Сохраняет первый кадр VTF в уникальный PNG (для превью карточки)
 
-        Тонкая обёртка над общим vtf_preview_service.vtf_bytes_to_png — лишь
-        санитайзит ключ в безопасное имя файла.
+        Тонкая обёртка над общим vtf_preview_service.vtf_bytes_to_png - лишь
+        санитайзит ключ в безопасное имя файла
         """
         from src.services import vtf_preview_service as _vps
         safe = re.sub(r'[^A-Za-z0-9_.-]', '_', key)
         return _vps.vtf_bytes_to_png(
             vtf_data, os.path.join(self._preview_dir, f"_card_{safe}.png"), self._preview_dir)
 
-    # ── MDL: декомпиляция из пользовательского VPK ───────────────────────── #
+    # MDL: декомпиляция из пользовательского VPK
 
     def _decompile_mdl_from_pak(
         self,
@@ -499,10 +497,10 @@ class PreviewVpkModWorker(BaseWorker):
     ) -> tuple:
         """
         Извлекает MDL + сопутствующие файлы (.vvd, .vtx, .phy) из VPK
-        и декомпилирует через Crowbar.
+        и декомпилирует через Crowbar
 
         Returns:
-            (obj_path, decomp_dir) — оба None если что-то пошло не так.
+            (obj_path, decomp_dir) - оба None если что-то пошло не так
         """
         from src.services.model_build_service import ModelBuildService
         from src.services.tf2_paths import TF2Paths
@@ -529,7 +527,7 @@ class PreviewVpkModWorker(BaseWorker):
                     with open(local_path, "wb") as f:
                         f.write(data)
                     # Именно запрошенная модель: рядом может лежать гирлянда
-                    # (c_ambassador_festivizer.mdl в папке c_ambassador).
+                    # (c_ambassador_festivizer.mdl в папке c_ambassador)
                     if fp_low.replace("\\", "/") == mdl_rel.replace("\\", "/").lower():
                         mdl_file_local = local_path
                 except Exception as exc:
@@ -546,10 +544,10 @@ class PreviewVpkModWorker(BaseWorker):
             decomp_dir = tempfile.mkdtemp(prefix="tf2sg_decomp_mod_")
             ModelBuildService.decompile(mdl_file_local, decomp_dir, crowbar)
 
-            smd_path = self._find_reference_smd(decomp_dir, weapon_key)
+            smd_path = smd_service.find_reference_smd(decomp_dir, weapon_key)
             if not smd_path:
                 logger.warning(f"Reference SMD не найден в {decomp_dir}")
-                return None, decomp_dir   # dir есть, SMD нет — всё равно вернём dir для текстуры
+                return None, decomp_dir   # dir есть, SMD нет - всё равно вернём dir для текстуры
 
             self.progress.emit(self._p['converting'])
             obj_path = os.path.join(self._preview_dir, "model.obj")
@@ -565,20 +563,20 @@ class PreviewVpkModWorker(BaseWorker):
         finally:
             shutil.rmtree(extract_dir, ignore_errors=True)
 
-    # ── Оригинальная TF2 модель ───────────────────────────────────────────── #
+    # Оригинальная TF2 модель
 
     def _load_original_model(self, weapon_key: str) -> tuple:
         """
         Берёт оригинальную модель оружия из tf2_misc_dir.vpk,
         декомпилирует, конвертирует в OBJ.
-        Использует кэш декомпиляции если есть.
+        Использует кэш декомпиляции если есть
 
         Returns:
-            (obj_path, decomp_dir) — оба None если что-то пошло не так.
+            (obj_path, decomp_dir) - оба None если что-то пошло не так
         """
         if not self.misc_vpk_path:
             logger.warning(
-                "misc_vpk_path не задан — невозможно загрузить оригинальную TF2 модель. "
+                "misc_vpk_path не задан - невозможно загрузить оригинальную TF2 модель. "
                 "Укажите путь к TF2 в настройках."
             )
             return None, None
@@ -587,7 +585,7 @@ class PreviewVpkModWorker(BaseWorker):
         from src.services import model_decompile_service as mds
         from src.services.extract_model_service import ExtractModelService
 
-        # Класс в fake_mode не важен — _build_paths_to_try смотрит на weapon_key.
+        # Класс в fake_mode не важен - _build_paths_to_try смотрит на weapon_key
         candidates = ExtractModelService._build_paths_to_try(
             f"scout_{weapon_key}", weapon_key,
             tf2_root_from_misc_vpk(self.misc_vpk_path),
@@ -610,7 +608,7 @@ class PreviewVpkModWorker(BaseWorker):
             return None, None
 
         decomp_dir: Optional[str] = result.directory
-        smd_path = self._find_reference_smd(decomp_dir, weapon_key)
+        smd_path = smd_service.find_reference_smd(decomp_dir, weapon_key)
 
         if not smd_path:
             # decomp_dir всё равно может помочь с определением текстуры
@@ -624,10 +622,10 @@ class PreviewVpkModWorker(BaseWorker):
             self._model_materials = list(mat_names or [])
         return (obj_path if ok else None), decomp_dir
 
-    # ── Текстура из пользовательского VPK ────────────────────────────────── #
+    # Текстура из пользовательского VPK
 
     def _find_qc_in_dir(self, directory: str) -> Optional[str]:
-        """Находит первый .qc файл в директории декомпиляции."""
+        """Находит первый .qc файл в директории декомпиляции"""
         matches = glob.glob(os.path.join(directory, "**", "*.qc"), recursive=True)
         return matches[0] if matches else None
 
@@ -641,18 +639,18 @@ class PreviewVpkModWorker(BaseWorker):
         decomp_dir: Optional[str] = None,
     ) -> tuple:
         """
-        Ищет основную текстуру в VPK мода и возвращает все кадры.
+        Ищет основную текстуру в VPK мода и возвращает все кадры
 
         Возвращает (frame_paths: list[str], framerate: float).
         Приоритет выбора VTF:
-          1. QC $texturegroup — строка 0, столбец 0 (авторитетная основная текстура)
+          1. QC $texturegroup - строка 0, столбец 0 (авторитетная основная текстура)
           2. Файл с именем совпадающим с basename($basetexture)
           3. Файл с именем совпадающим с weapon_key (прямое совпадение стебля)
           4. Первый VTF без служебных слов в пути
         """
         vtf_data: Optional[bytes] = None
 
-        # ── Приоритет 1: QC $texturegroup ────────────────────────────────────
+        # Приоритет 1: QC $texturegroup
         qc_main_stem: Optional[str] = None
         if decomp_dir:
             qc_path = self._find_qc_in_dir(decomp_dir)
@@ -678,7 +676,7 @@ class PreviewVpkModWorker(BaseWorker):
                     except Exception:
                         continue
 
-        # ── Приоритет 2: $basetexture из VMT ─────────────────────────────────
+        # Приоритет 2: $basetexture из VMT
         if not vtf_data and basetexture_path:
             bt_stem = os.path.splitext(os.path.basename(basetexture_path))[0].lower()
             for vtf_rel in vtf_files:
@@ -691,7 +689,7 @@ class PreviewVpkModWorker(BaseWorker):
                     except Exception:
                         continue
 
-        # ── Приоритет 3: точное совпадение стебля с weapon_key ───────────────
+        # Приоритет 3: точное совпадение стебля с weapon_key
         if not vtf_data and weapon_key:
             wk_stem = weapon_key.lower()
             for vtf_rel in vtf_files:
@@ -704,7 +702,7 @@ class PreviewVpkModWorker(BaseWorker):
                     except Exception:
                         continue
 
-        # ── Приоритет 4: первый не-служебный VTF ─────────────────────────────
+        # Приоритет 4: первый не-служебный VTF
         if not vtf_data:
             for vtf_rel in vtf_files:
                 if not is_base_vtf(vtf_rel, self._refs):
@@ -724,7 +722,7 @@ class PreviewVpkModWorker(BaseWorker):
         return self._vtf_bytes_to_frame_pngs(vtf_data, framerate)
 
     def _extract_game_texture_frames(self, weapon_key: str) -> tuple:
-        """Извлекает текстуру оружия из игровых VPK (fallback). Возвращает (frames, fps)."""
+        """Извлекает текстуру оружия из игровых VPK (fallback). Возвращает (frames, fps)"""
         try:
             from src.data.weapon_quirks import WEAPON_TEXTURE_PATHS
 
@@ -763,7 +761,7 @@ class PreviewVpkModWorker(BaseWorker):
         decomp_dir: Optional[str] = None,
     ) -> tuple:
         """
-        Ищет BLU-вариант текстуры.
+        Ищет BLU-вариант текстуры
 
         Стратегия (в моде):
           1. QC $texturegroup строка 0 столбец 0 + суффикс _blue
@@ -771,13 +769,13 @@ class PreviewVpkModWorker(BaseWorker):
           3. weapon_key + суффикс _blue (точное совпадение стебля)
           4. Любой VTF у которого стебель ЗАКАНЧИВАЕТСЯ на _blue (не служебный)
         Затем:
-          5. Игровой VPK — {weapon_key}_blue.vtf
+          5. Игровой VPK - {weapon_key}_blue.vtf
 
-        Возвращает (frame_paths, framerate) или ([], 0.0).
+        Возвращает (frame_paths, framerate) или ([], 0.0)
         """
         vtf_data: Optional[bytes] = None
 
-        # ── Приоритет 1: QC $texturegroup ─────────────────────────────────────
+        # Приоритет 1: QC $texturegroup
         qc_blu_stem: Optional[str] = None
         if decomp_dir:
             qc_path = self._find_qc_in_dir(decomp_dir)
@@ -804,7 +802,7 @@ class PreviewVpkModWorker(BaseWorker):
                     except Exception:
                         continue
 
-        # ── Приоритет 2: $basetexture + _blue ─────────────────────────────────
+        # Приоритет 2: $basetexture + _blue
         if not vtf_data and basetexture_path:
             base_stem = os.path.splitext(os.path.basename(basetexture_path))[0]
             blu_bt_stem = (base_stem + "_blue").lower()
@@ -818,7 +816,7 @@ class PreviewVpkModWorker(BaseWorker):
                     except Exception:
                         continue
 
-        # ── Приоритет 3: weapon_key + _blue (точное совпадение стебля) ─────────
+        # Приоритет 3: weapon_key + _blue (точное совпадение стебля)
         if not vtf_data and weapon_key:
             wk_blu_stem = (weapon_key + "_blue").lower()
             for vtf_rel in vtf_files:
@@ -831,7 +829,7 @@ class PreviewVpkModWorker(BaseWorker):
                     except Exception:
                         continue
 
-        # ── Приоритет 4: стебель заканчивается на _blue (не служебный) ─────────
+        # Приоритет 4: стебель заканчивается на _blue (не служебный)
         if not vtf_data:
             for vtf_rel in vtf_files:
                 stem = os.path.splitext(os.path.basename(vtf_rel))[0].lower()
@@ -843,7 +841,7 @@ class PreviewVpkModWorker(BaseWorker):
                     except Exception:
                         continue
 
-        # ── Приоритет 5: игровой VPK ──────────────────────────────────────────
+        # Приоритет 5: игровой VPK
         if not vtf_data and weapon_key and self.textures_vpk_path:
             try:
                 from src.data.weapon_quirks import WEAPON_TEXTURE_PATHS
@@ -875,7 +873,7 @@ class PreviewVpkModWorker(BaseWorker):
         if not vtf_data:
             return [], 0.0
 
-        # Уникальное имя 'texture_blu', чтобы не конфликтовать с RED кадрами.
+        # Уникальное имя 'texture_blu', чтобы не конфликтовать с RED кадрами
         from src.services import vtf_preview_service as _vps
         frame_paths = _vps.vtf_bytes_to_frame_pngs(
             vtf_data, self._preview_dir, "texture_blu", self._preview_dir)
@@ -884,7 +882,7 @@ class PreviewVpkModWorker(BaseWorker):
         fps = red_framerate if len(frame_paths) > 1 else 0.0
         return frame_paths, fps
 
-    # ── VTF → PNG (все кадры) ─────────────────────────────────────────────── #
+    # VTF -> PNG (все кадры)
 
     def _vtf_bytes_to_frame_pngs(
         self, vtf_data: bytes, framerate: float = 15.0
@@ -892,9 +890,9 @@ class PreviewVpkModWorker(BaseWorker):
         """
         Конвертирует VTF байты в PNG файлы (по одному на кадр) через общий
         vtf_preview_service. Возвращает (frame_paths: list[str], framerate: float);
-        ([], 0.0) при ошибке/пустом VTF.
+        ([], 0.0) при ошибке/пустом VTF
 
-        Имена кадров совпадают со сервисом: один кадр → texture.png, несколько →
+        Имена кадров совпадают со сервисом: один кадр -> texture.png, несколько ->
         texture_000.png, texture_001.png, …
         """
         from src.services import vtf_preview_service as _vps
@@ -908,45 +906,6 @@ class PreviewVpkModWorker(BaseWorker):
         return frame_paths, framerate
 
     def _read_vmt_framerate_from_pak(self, pak, vmt_files: List[str]) -> float:
-        """Ищет animatedtextureframerate в VMT файлах из пака мода (общий парсер)."""
+        """Ищет animatedtextureframerate в VMT файлах из пака мода (общий парсер)"""
         from src.services import vtf_preview_service as _vps
         return _vps.read_vmt_framerate(pak, vmt_files)
-
-    # ── Поиск reference SMD ───────────────────────────────────────────────── #
-
-    def _find_reference_smd(
-        self, directory: str, weapon_key: Optional[str] = None
-    ) -> Optional[str]:
-        """Находит reference SMD, исключая physics/anim файлы."""
-        def skip(p: str) -> bool:
-            return any(kw in os.path.basename(p).lower() for kw in NON_REFERENCE_SMD_KEYWORDS)
-
-        # *_reference.smd
-        refs = [
-            p for p in glob.glob(
-                os.path.join(directory, "**", "*_reference.smd"), recursive=True
-            )
-            if not skip(p)
-        ]
-        if refs:
-            return refs[0]
-
-        # SMD с именем оружия
-        if weapon_key:
-            wk_smds = [
-                p for p in glob.glob(
-                    os.path.join(directory, "**", f"*{weapon_key}*.smd"), recursive=True
-                )
-                if not skip(p)
-            ]
-            if wk_smds:
-                return wk_smds[0]
-
-        # Любой SMD не physics
-        all_smds = [
-            p for p in glob.glob(
-                os.path.join(directory, "**", "*.smd"), recursive=True
-            )
-            if not skip(p)
-        ]
-        return all_smds[0] if all_smds else None

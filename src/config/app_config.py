@@ -18,10 +18,10 @@ logger = get_logger(__name__)
 
 class AppConfig:
     """
-    Класс для работы с конфигурацией приложения.
+    Класс для работы с конфигурацией приложения
 
     Конфиг кэшируется в памяти: get()/load_config() не читают диск, пока
-    файл не изменился (проверка по mtime) или не было save_config().
+    файл не изменился (проверка по mtime) или не было save_config()
     """
 
     CONFIG_DIR = Path(DirectoryPaths.CONFIG_DIR)
@@ -38,23 +38,23 @@ class AppConfig:
         "debug_mode": False,
         "window_geometry": None,
         # Пользовательские паттерны материалов-исключений (доп. к дефолтным
-        # из material_filter): не показываются в 2D и не пишутся в мод.
+        # из material_filter): не показываются в 2D и не пишутся в мод
         "material_blacklist": [],
     }
 
-    # ── Кэш в памяти ───────────────────────────────────────────────────── #
+    # Кэш в памяти
     _cache: Optional[Dict[str, Any]] = None
-    # Ключ кэша: (путь файла, mtime) — путь нужен, потому что CONFIG_FILE
+    # Ключ кэша: (путь файла, mtime) - путь нужен, потому что CONFIG_FILE
     # подменяется в тестах
     _cache_key: Optional[tuple] = None
     #: Файл есть, но последнее чтение не удалось (его держат антивирус или
-    #: редактор). Писать поверх нельзя: на его месте окажутся умолчания.
+    #: редактор). Писать поверх нельзя: на его месте окажутся умолчания
     _unreadable = False
 
     #: Вызовы API идут из разных потоков. Без замка два set() подряд теряли
     #: одно из значений (оба читали старый конфиг), а чтение файла посреди
-    #: os.replace на Windows давало WinError 32 — настройка не сохранялась.
-    #: RLock: set() зовёт load_config() и save_config() под тем же замком.
+    #: os.replace на Windows давало WinError 32 - настройка не сохранялась.
+    #: RLock: set() зовёт load_config() и save_config() под тем же замком
     lock = threading.RLock()
 
     @staticmethod
@@ -75,7 +75,7 @@ class AppConfig:
 
     @staticmethod
     def invalidate_cache() -> None:
-        """Сбрасывает кэш (для тестов и при внешнем изменении файла)."""
+        """Сбрасывает кэш (для тестов и при внешнем изменении файла)"""
         AppConfig._cache = None
         AppConfig._cache_key = None
         AppConfig._unreadable = False
@@ -83,11 +83,11 @@ class AppConfig:
     @staticmethod
     def load_config() -> Dict[str, Any]:
         """
-        Загружает конфигурацию (из кэша, если файл не менялся).
+        Загружает конфигурацию (из кэша, если файл не менялся)
 
         Returns:
-            Глубокая копия словаря с настройками — мутации результата
-            не влияют ни на кэш, ни на DEFAULT_CONFIG.
+            Глубокая копия словаря с настройками - мутации результата
+            не влияют ни на кэш, ни на DEFAULT_CONFIG
         """
         with AppConfig.lock:
             return AppConfig._load_config()
@@ -110,7 +110,7 @@ class AppConfig:
             config = AppConfig._read_file()
         except OSError as e:
             # Сбой разовый: умолчания не кэшируем, и запись их поверх файла
-            # запрещена (_save_config), пока он снова не прочитается.
+            # запрещена (_save_config), пока он снова не прочитается
             logger.error(f"Конфиг сейчас не читается: {e}. Настройки по умолчанию, файл не трогаем.",
                          exc_info=True)
             AppConfig._unreadable = True
@@ -119,8 +119,8 @@ class AppConfig:
             logger.error(f"Ошибка при загрузке конфига: {e}. Используются настройки по умолчанию.", exc_info=True)
             AppConfig._unreadable = False
             AppConfig._keep_broken_copy()
-            # Умолчания — до правки файла: иначе каждый вызов читал бы его
-            # заново и сыпал в лог ту же ошибку.
+            # Умолчания - до правки файла: иначе каждый вызов читал бы его
+            # заново и сыпал в лог ту же ошибку
             AppConfig._cache = copy.deepcopy(AppConfig.DEFAULT_CONFIG)
             AppConfig._cache_key = current_key
             return copy.deepcopy(AppConfig.DEFAULT_CONFIG)
@@ -137,12 +137,12 @@ class AppConfig:
     @staticmethod
     def _read_file() -> Dict[str, Any]:
         """Содержимое файла конфига. OSError: файл держат дольше нескольких
-        попыток (как у записи); ValueError: файл битый."""
+        попыток (как у записи); ValueError: файл битый"""
         for attempt in range(5):
             try:
                 # utf-8-sig: файл, сохранённый Блокнотом или PowerShell,
-                # начинается с BOM, и на нём обычный utf-8 падал — все
-                # настройки (папка TF2, язык, тема) молча сбрасывались.
+                # начинается с BOM, и на нём обычный utf-8 падал - все
+                # настройки (папка TF2, язык, тема) молча сбрасывались
                 with open(AppConfig.CONFIG_FILE, 'r', encoding='utf-8-sig') as f:
                     config = json.load(f)
                 break
@@ -156,9 +156,9 @@ class AppConfig:
 
     @staticmethod
     def _keep_broken_copy() -> None:
-        """Нечитаемый конфиг — копией рядом (`app_config.broken.json`): первая
+        """Нечитаемый конфиг - копией рядом (`app_config.broken.json`): первая
         же запись настроек положит на его место умолчания, а в нём путь к игре
-        и всё, что человек настраивал, — восстановить можно только из копии."""
+        и всё, что человек настраивал, - восстановить можно только из копии"""
         broken = AppConfig.CONFIG_FILE.with_name(
             AppConfig.CONFIG_FILE.stem + '.broken' + AppConfig.CONFIG_FILE.suffix)
         try:
@@ -170,7 +170,7 @@ class AppConfig:
     @staticmethod
     def save_config(config: Dict[str, Any]) -> bool:
         """
-        Сохраняет конфигурацию в файл (атомарно: temp-файл + os.replace).
+        Сохраняет конфигурацию в файл (атомарно: temp-файл + os.replace)
 
         Args:
             config: Словарь с настройками
@@ -185,7 +185,7 @@ class AppConfig:
     def _save_config(config: Dict[str, Any]) -> bool:
         if AppConfig._unreadable and AppConfig.CONFIG_FILE.exists():
             # В `config` умолчания вместо непрочитанного файла: запись
-            # стёрла бы путь к игре и всё, что человек настраивал.
+            # стёрла бы путь к игре и всё, что человек настраивал
             logger.error("Конфиг не записан: прежний файл не прочитался")
             return False
         AppConfig._ensure_config_dir()
@@ -195,7 +195,7 @@ class AppConfig:
             with open(tmp_path, 'w', encoding='utf-8') as f:
                 json.dump(config, f, indent=4, ensure_ascii=False)
             # Файл мог держать кто-то вне процесса (антивирус, редактор):
-            # несколько коротких попыток вместо потерянной настройки.
+            # несколько коротких попыток вместо потерянной настройки
             for attempt in range(5):
                 try:
                     os.replace(tmp_path, AppConfig.CONFIG_FILE)

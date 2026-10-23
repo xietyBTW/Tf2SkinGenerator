@@ -1,4 +1,4 @@
-"""Sheet-данные (спрайт-лист частиц) из ресурса VTF 0x10."""
+"""Sheet-данные (спрайт-лист частиц) из ресурса VTF 0x10"""
 
 import struct
 from typing import Dict, Optional
@@ -10,18 +10,18 @@ logger = get_logger(__name__)
 
 def parse_vtf_sheet(raw: bytes) -> Optional[dict]:
     """
-    Извлекает sheet-данные (спрайт-лист частиц) из ресурса VTF 0x10.
+    Извлекает sheet-данные (спрайт-лист частиц) из ресурса VTF 0x10
 
     Формат VTF 7.3+: numResources по смещению 0x44, записи ресурсов с 0x50
-    по 8 байт: тег (3 байта + флаг) и смещение данных. Тег 0x10 — sheet.
-    Формат sheet: version(u32 0|1), sequenceCount(u32); на секвенцию:
-    seqNo, clamp, frameCount (u32×3), totalDuration(f32); на кадр:
-    duration(f32) + N×(u0,v0,u1,v1) f32, где N=4 при version=1 иначе 1.
+    по 8 байт: тег (3 байта + флаг) и смещение данных. Тег 0x10 - sheet.
+    Формат sheet: version(u32 0|1), sequenceCount(u32), на секвенцию:
+    seqNo, clamp, frameCount (u32×3), totalDuration(f32), на кадр:
+    duration(f32) + N×(u0,v0,u1,v1) f32, где N=4 при version=1 иначе 1
 
     Returns:
         {"sequences": {seqNo: {"clamp": bool, "duration": float,
          "frames": [{"duration": float, "coords": [[u0,v0,u1,v1], ...]}]}}}
-        либо None (нет ресурса / старая версия VTF / битые данные).
+        либо None (нет ресурса / старая версия VTF / битые данные)
     """
     try:
         if len(raw) < 0x50 or raw[:4] != b"VTF\x00":

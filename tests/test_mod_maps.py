@@ -1,5 +1,5 @@
 """Карты материала у мода из VPK: что служебное, что распознано, что снимается,
-и конструктор полоски lightwarp."""
+и конструктор полоски lightwarp"""
 import tempfile
 import unittest
 from pathlib import Path
@@ -34,14 +34,14 @@ class ServiceTextureTests(unittest.TestCase):
             self.assertTrue(is_service_name(f'materials/x/{stem}.vtf'), stem)
 
     def test_mask_word_inside_name_is_not_service(self):
-        # Старый фильтр искал «mask» где угодно и прятал маску шпиона.
+        # Старый фильтр искал «mask» где угодно и прятал маску шпиона
         self.assertFalse(is_service_name('materials/models/player/spy/mask_scout.vtf'))
         self.assertFalse(is_service_name('materials/models/x/spectre_gun.vtf'))
 
     def test_vmt_decides_before_name(self):
         refs = vmt_references([VMT])
         self.assertTrue(is_base_vtf('materials/models/w/m9.vtf', refs))
-        # «grain» по имени основная, но VMT кладёт её в $detail.
+        # «grain» по имени основная, но VMT кладёт её в $detail
         self.assertFalse(is_base_vtf('materials/models/w/grain.vtf', refs))
         self.assertFalse(is_base_vtf('materials/models/w/m9_exp.vtf', refs))
 
@@ -95,7 +95,7 @@ class RemoveMapTests(unittest.TestCase):
 
 
 class ModBuildMapsTests(unittest.TestCase):
-    """Сборка мода: запись карт против карт, что уже стоят в VMT."""
+    """Сборка мода: запись карт против карт, что уже стоят в VMT"""
 
     BLUE = ('"VertexLitGeneric"\n{\n\t"$basetexture" "models/w/m9_blue"\n'
             '\t"$detail" "models/w/grain"\n\t"$selfillummask" "models/w/blue_glow"\n}\n')
@@ -138,7 +138,7 @@ class ModBuildMapsTests(unittest.TestCase):
                                'detail': {'mod': True, '$detailscale': '9'},
                                'rimlight': {'off': True}})
         found = detect_maps(text)
-        # Без записи (lightwarp) — как в моде; off — снят.
+        # Без записи (lightwarp) - как в моде; off - снят
         self.assertEqual(set(found), {'phongexp', 'detail', 'lightwarp'})
         self.assertEqual(found['detail']['$detailscale'], '9')
         self.assertTrue((self.folder / 'grain.vtf').exists())
@@ -196,14 +196,14 @@ class LightwarpTests(unittest.TestCase):
         self.assertGreater(warm[230, 0], warm[230, 2])
 
     def test_neutral_fallback_is_half_brightness(self):
-        # Игра: результат = 2 · полоска, значит «как без lightwarp» на свету — 128.
+        # Игра: результат = 2 · полоска, значит «как без lightwarp» на свету - 128
         self.assertEqual(int(lightwarp.ramp({'preset': 'neutral'})[-1, 0]), 128)
 
     def test_custom_stops_and_round_trip(self):
         own = lightwarp.ramp({'preset': 'custom', 'stops': [[0, '#ff0000'], [1, '#0000ff']]})
         self.assertEqual(tuple(own[0]), (255, 0, 0))
         self.assertEqual(tuple(own[-1]), (0, 0, 255))
-        # Резкая ступень, как у weapon_lightwarp, переживает «Сделать точками».
+        # Резкая ступень, как у weapon_lightwarp, переживает «Сделать точками»
         step = lightwarp.ramp({'preset': 'custom', 'stops': [
             [0, '#1f1f1f'], [0.6, '#1f1f1f'], [0.6, '#808080'], [1, '#808080']]})
         again = lightwarp.ramp({'preset': 'custom', 'stops': lightwarp.to_stops(step)})

@@ -2,6 +2,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from src.services import smd_service
 from src.services.smd_service import SMDService
 
 
@@ -76,7 +77,7 @@ class SMDServiceTests(unittest.TestCase):
 
     def test_replace_model_sections_keep_user_materials_lowercases(self):
         # keep_user_materials: имя материала меша сохраняется, но в нижнем
-        # регистре (иначе фиолетовые текстуры из-за рассинхрона с группой/файлами).
+        # регистре (иначе фиолетовые текстуры из-за рассинхрона с группой/файлами)
         user_content = "\n".join([
             "version 1", "nodes", "0 \"user\" -1", "end",
             "skeleton", "time 0", "0 0 0 0 0 0 0", "end",
@@ -106,7 +107,7 @@ class SMDServiceTests(unittest.TestCase):
                 keep_user_materials=True,
             )
             output = out_path.read_text(encoding="utf-8")
-            # lowercase + точка→'_' (studiomdl обрезает имя после точки)
+            # lowercase + точка->'_' (studiomdl обрезает имя после точки)
             self.assertIn("material_001", output)
             self.assertNotIn("Material.001", output)     # верхнего регистра нет
             self.assertNotIn("material.001", output)     # точки нет
@@ -155,7 +156,7 @@ class SMDServiceTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             base = Path(tmp)
             (base / "weapon_reference.smd").write_text("x", encoding="utf-8")
-            found = SMDService.find_reference_smd(str(base), "weapon")
+            found = smd_service.find_reference_smd(str(base), "weapon")
             self.assertTrue(found.endswith("weapon_reference.smd"))
     
     def test_find_reference_smd_fallbacks(self):
@@ -163,7 +164,7 @@ class SMDServiceTests(unittest.TestCase):
             base = Path(tmp)
             (base / "weapon_anim.smd").write_text("x", encoding="utf-8")
             (base / "weapon_reference_custom.smd").write_text("x", encoding="utf-8")
-            found = SMDService.find_reference_smd(str(base), "weapon")
+            found = smd_service.find_reference_smd(str(base), "weapon")
             self.assertTrue(found.endswith("weapon_reference_custom.smd"))
     
     def test_find_reference_smd_non_reference(self):
@@ -172,7 +173,7 @@ class SMDServiceTests(unittest.TestCase):
             (base / "weapon_physics.smd").write_text("x", encoding="utf-8")
             (base / "weapon_anim.smd").write_text("x", encoding="utf-8")
             (base / "weapon_mesh.smd").write_text("x", encoding="utf-8")
-            found = SMDService.find_reference_smd(str(base), "weapon")
+            found = smd_service.find_reference_smd(str(base), "weapon")
             self.assertTrue(found.endswith("weapon_mesh.smd"))
     
     def test_merge_triangles_without_original_names(self):
@@ -188,13 +189,13 @@ if __name__ == "__main__":
     unittest.main()
 
 
-# ── Сопоставление костей по имени ────────────────────────────────────────── #
+# Сопоставление костей по имени
 #
 # Сборка берёт таблицу костей из ИГРОВОЙ модели, а из пользовательского SMD
 # переносит треугольники. Номера костей у риггера свои, и совпасть с игровыми
 # они не могут: порядок в декомпиляции произвольный (у Детонатора weapon_bone,
 # weapon_bone_3, weapon_bone_4, weapon_bone_2). Пока переносились номера,
-# модель, зарриганная под игровые ИМЕНА, садилась на чужие кости.
+# модель, зарриганная под игровые ИМЕНА, садилась на чужие кости
 
 def _smd(nodes, tris) -> str:
     lines = ["version 1", "nodes"]
@@ -210,14 +211,14 @@ def _smd(nodes, tris) -> str:
     return "\n".join(lines)
 
 
-#: Порядок как у Детонатора: угадать его риггер не может.
+#: Порядок как у Детонатора: угадать его риггер не может
 GAME = _smd([(0, "weapon_bone", -1), (1, "weapon_bone_3", 0),
              (2, "weapon_bone_2", 0)],
             [("c_game", [0, 0, 2])])
 
 
 def _merge(tmp, user_smd: str) -> list:
-    """Строки вершин после слияния."""
+    """Строки вершин после слияния"""
     base = Path(tmp)
     (base / "user.smd").write_text(user_smd, encoding="utf-8")
     (base / "game.smd").write_text(GAME, encoding="utf-8")
@@ -230,7 +231,7 @@ def _merge(tmp, user_smd: str) -> list:
 
 
 def test_bones_are_matched_by_name_not_by_number():
-    """Кость `weapon_bone_2` у пользователя вторая, а в игре — третья."""
+    """Кость `weapon_bone_2` у пользователя вторая, а в игре - третья"""
     user = _smd([(0, "weapon_bone", -1), (1, "weapon_bone_2", 0)],
                 [("my", [0, 0, 1])])
     with tempfile.TemporaryDirectory() as tmp:
@@ -238,11 +239,10 @@ def test_bones_are_matched_by_name_not_by_number():
 
 
 def test_unknown_bone_falls_back_to_the_one_carrying_the_mesh():
-    """«Только геометрия» из Blender приходит с единственной костью `root`.
+    """«Только геометрия» из Blender приходит с единственной костью `root`
 
-    В игровой таблице такой нет, и раньше вершины садились на кость номер
-    ноль — а это не всегда хват: у медигана там `weapon_bone_L`, у
-    Фалломорфера узел по имени модели, который к руке не крепится.
+    В игровой таблице такой нет, а кость номер ноль - не всегда хват: у медигана там `weapon_bone_L`, у
+    Фалломорфера узел по имени модели, который к руке не крепится
     """
     user = _smd([(0, "root", -1)], [("my", [0, 0, 0])])
     with tempfile.TemporaryDirectory() as tmp:
@@ -256,34 +256,34 @@ def _grip(nodes, used_bones):
 
 
 def test_grip_is_the_topmost_grip_named_bone_the_mesh_uses():
-    """У минигана больше всего вершин несёт вращающийся `barrel`.
+    """У минигана больше всего вершин несёт вращающийся `barrel`
 
-    Приварить к нему «только геометрию» значило бы раскрутить всю модель.
+    Приварить к нему «только геометрию» значило бы раскрутить всю модель
     """
     assert _grip([(0, "weapon_bone", -1), (1, "barrel", 0)],
                  [0, 1, 1, 1, 1, 1]) == "weapon_bone"
 
 
 def test_grip_may_be_a_left_hand_bone():
-    """У медигана корень — `weapon_bone_L`, и весь меш висит на нём."""
+    """У медигана корень - `weapon_bone_L`, и весь меш висит на нём"""
     assert _grip([(0, "weapon_bone_L", -1), (1, "weapon_bone", 0)],
                  [0, 0, 0]) == "weapon_bone_L"
 
 
 def test_model_named_root_is_not_a_grip():
-    """У Фалломорфера корень зовётся по имени модели и к руке не крепится."""
+    """У Фалломорфера корень зовётся по имени модели и к руке не крепится"""
     assert _grip([(0, "c_drg_phlogistinator", -1), (1, "weapon_bone", 0)],
                  [0, 1, 1]) == "weapon_bone"
 
 
 def test_without_grip_names_the_topmost_used_bone_wins():
-    """У Ганслингера костей-хватов нет вовсе, есть только рука."""
+    """У Ганслингера костей-хватов нет вовсе, есть только рука"""
     assert _grip([(0, "bip_lowerArm_R", -1), (1, "arm_attach_R", 0)],
                  [1, 1, 1]) == "arm_attach_R"
 
 
 def test_every_link_of_a_blended_vertex_is_remapped():
-    """Вершина может висеть на нескольких костях сразу."""
+    """Вершина может висеть на нескольких костях сразу"""
     mapping = {0: 0, 1: 2}
     line = "1 0 0 0 0 0 1 0.5 0.5 2 1 0.7 0 0.3\n"
     out = SMDService._remap_vertex_line(line, mapping, fallback=0)
@@ -295,7 +295,7 @@ def test_line_that_is_not_a_vertex_is_left_alone():
 
 
 # «Со своими материалами и костями»: свои кости модели (джигл-кости, крышка)
-# раньше молча садились на хват — после сборки у модели их не было.
+# не должны садиться на хват
 
 def _merge_text(tmp, user_smd: str, keep: bool) -> str:
     base = Path(tmp)
@@ -328,7 +328,7 @@ def test_own_bones_stay_with_their_vertices():
 
 
 def test_root_of_own_bones_hangs_on_the_grip():
-    """Своя иерархия без игровых костей держится рукой, а не началом координат."""
+    """Своя иерархия без игровых костей держится рукой, а не началом координат"""
     user = _smd([(0, "my_root", -1), (1, "lid", 0)], [("my", [0, 1, 1])])
     with tempfile.TemporaryDirectory() as tmp:
         text = _merge_text(tmp, user, keep=True)
@@ -337,7 +337,7 @@ def test_root_of_own_bones_hangs_on_the_grip():
 
 
 def test_geometry_only_model_still_sits_on_the_grip():
-    """OBJ/GLB из конвертера: одна кость `root` — как и раньше, на хват."""
+    """OBJ/GLB из конвертера: одна кость `root` - как и раньше, на хват"""
     user = _smd([(0, "root", -1)], [("my", [0, 0, 0])])
     with tempfile.TemporaryDirectory() as tmp:
         text = _merge_text(tmp, user, keep=True)
@@ -354,7 +354,7 @@ def test_shape_only_mode_keeps_the_game_skeleton():
 
 
 def test_own_bones_are_described_in_the_qc():
-    """Кость без анимации studiomdl сворачивает в родителя — описанная остаётся."""
+    """Кость без анимации studiomdl сворачивает в родителя - описанная остаётся"""
     import math
     from src.services.model_build_service import ModelBuildService
 
@@ -373,14 +373,14 @@ def test_own_bones_are_described_in_the_qc():
         assert ModelBuildService.define_missing_bones(str(base / "m.qc"), str(base / "ref.smd")) == []
     line = lines[2]
     assert line.startswith('$definebone "jiggle" "weapon_bone" 1.000000 2.000000 3.000000')
-    # Углы — в градусах и в порядке Y, Z, X, как их пишет Crowbar.
+    # Углы - в градусах и в порядке Y, Z, X, как их пишет Crowbar
     angles = [float(v) for v in line.split()[6:9]]
     assert [round(a, 3) for a in angles] == [round(math.degrees(r), 3) for r in (0.2, 0.3, 0.1)]
     assert lines[3].startswith('$sequence')
 
 
 def test_flat_skeleton_from_the_converter_adds_no_bones():
-    """Суставы glTF без иерархии: десятки бесполезных костей и предел в 128."""
+    """Суставы glTF без иерархии: десятки бесполезных костей и предел в 128"""
     user = _smd([(0, "weapon_bone", -1), (1, "Joint_1", -1), (2, "Joint_2", -1)],
                 [("my", [0, 1, 2])])
     with tempfile.TemporaryDirectory() as tmp:

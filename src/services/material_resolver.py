@@ -1,25 +1,21 @@
 """
-Единственная точка «имя материала → картинка»: VMT → $basetexture → VTF → PNG.
+Единственная точка «имя материала -> картинка»: VMT -> $basetexture -> VTF -> PNG
 
 Эта цепочка нужна всем: превью оружия, шапок, персонажей, рук, редактору
-частиц, экспорту текстур. Раньше она была переписана в каждом из них своими
-руками — только в одном воркере превью насчитывалось двадцать циклов «перебрать
-паки», одиннадцать повторных `glob(*.qc)` и пять почти одинаковых стратегий
-поиска. Копии расходились: одна применяла командную краску, другая нет; одна
-знала про поколоночные скины, другая брала первую попавшуюся текстуру.
+частиц, экспорту текстур. Она одна, потому что копии расходятся: одна
+применяет командную краску, другая нет, одна знает про поколоночные скины,
+другая берёт первую попавшуюся текстуру
 
-Здесь цепочка одна, и у неё три свойства, которых у копий не было:
+Свойства цепочки:
 
 * КЭШ на прогон. Один и тот же материал в модели встречается по несколько раз
-  (RED-строка, BLU-строка, карточки, 3D) — VPK читается один раз.
+  (RED-строка, BLU-строка, карточки, 3D) - VPK читается один раз.
 * КРАСКА применяется здесь же. У двух третей шапок цвет команды лежит не в
-  текстуре, а в VMT ($blendtintbybasealpha) — забыть её означает показать
+  текстуре, а в VMT ($blendtintbybasealpha) - забыть её означает показать
   чёрные пятна, и именно так и забывали.
 * ПРОЗРАЧНОСТЬ решения. Результат несёт, откуда он взялся (какой VMT, какая
-  текстура, какая краска) — по нему сравнивают материалы между собой,
-  например чтобы понять, отличается ли BLU-скин от RED вообще.
-
-Модуль без Qt.
+  текстура, какая краска) - по нему сравнивают материалы между собой,
+  например чтобы понять, отличается ли BLU-скин от RED вообще
 """
 
 from __future__ import annotations
@@ -37,7 +33,7 @@ logger = get_logger(__name__)
 
 @dataclass(frozen=True)
 class ResolvedMaterial:
-    """Что удалось узнать о материале и во что он превратился."""
+    """Что удалось узнать о материале и во что он превратился"""
 
     name: str                          # имя материала как в модели
     vmt_path: Optional[str] = None     # путь VMT внутри VPK
@@ -46,7 +42,7 @@ class ResolvedMaterial:
     tint: Optional[vmt_tint.TintSpec] = None
     shader: str = ""
     #: Как материал рисуется: прозрачность, смешивание, блик (см. vmt_render).
-    #: Без этого превью рисует стекло банки серым пластиком.
+    #: Без этого превью рисует стекло банки серым пластиком
     render: vmt_render.RenderSpec = field(default_factory=vmt_render.RenderSpec)
 
     @property
@@ -55,10 +51,10 @@ class ResolvedMaterial:
 
     @property
     def look(self) -> tuple:
-        """Из чего складывается вид материала: текстура + краска.
+        """Из чего складывается вид материала: текстура + краска
 
         По этой паре материалы сравнивают между собой (`same_look`): у 46
-        стоковых шапок BLU-скин отличается от RED только именем.
+        стоковых шапок BLU-скин отличается от RED только именем
         """
         return (self.basetexture, self.tint)
 
@@ -70,13 +66,13 @@ class ResolvedMaterial:
 
 class MaterialResolver:
     """
-    Резолвер материалов поверх открытых VPK. Один экземпляр на прогон.
+    Резолвер материалов поверх открытых VPK. Один экземпляр на прогон
 
     Args:
         reader: GameVpkReader с уже открытыми архивами.
         out_dir: куда класть PNG.
-        apply_tint: впечатывать ли командную краску из VMT (для превью — да;
-            для экспорта исходной текстуры — нет, в игре её накладывает движок).
+        apply_tint: впечатывать ли командную краску из VMT (для превью - да;
+            для экспорта исходной текстуры - нет, в игре её накладывает движок)
     """
 
     def __init__(self, reader: GameVpkReader, out_dir: str,
@@ -87,11 +83,11 @@ class MaterialResolver:
         self._cache: Dict[tuple, ResolvedMaterial] = {}
         self._described: Dict[tuple, ResolvedMaterial] = {}
 
-    # ── Публичное ────────────────────────────────────────────────────────── #
+    # Публичное
 
     def resolve(self, mat_name: str, cdmaterials: List[str],
                 out_name: Optional[str] = None) -> ResolvedMaterial:
-        """Материал → ResolvedMaterial (всегда объект, даже если ничего нет)."""
+        """Материал -> ResolvedMaterial (всегда объект, даже если ничего нет)"""
         key = (mat_name.strip().lower(), tuple(cdmaterials or ()), out_name)
         cached = self._cache.get(key)
         if cached is not None:
@@ -102,7 +98,7 @@ class MaterialResolver:
 
     def resolve_many(self, mat_names: List[str],
                      cdmaterials: List[str]) -> Dict[str, ResolvedMaterial]:
-        """{имя в нижнем регистре: результат} только для найденных картинок."""
+        """{имя в нижнем регистре: результат} только для найденных картинок"""
         out: Dict[str, ResolvedMaterial] = {}
         for name in mat_names or []:
             res = self.resolve(name, cdmaterials)
@@ -112,10 +108,10 @@ class MaterialResolver:
 
     def describe(self, mat_name: str,
                  cdmaterials: List[str]) -> ResolvedMaterial:
-        """Что за материал — без превращения в картинку.
+        """Что за материал - без превращения в картинку
 
         Отдельно от resolve(), потому что не всем нужен PNG: экспорт отдаёт
-        сырой VTF, а покраску оружия достаточно знать по VMT.
+        сырой VTF, а покраску оружия достаточно знать по VMT
         """
         key = (mat_name.strip().lower(), tuple(cdmaterials or ()))
         cached = self._described.get(key)
@@ -126,19 +122,19 @@ class MaterialResolver:
 
     def tint_for(self, mat_name: str,
                  cdmaterials: List[str]) -> Optional[vmt_tint.TintSpec]:
-        """Только краска материала — без картинки.
+        """Только краска материала - без картинки
 
         Нужна там, где текстуру нашли своим путём (у оружия она часто лежит
-        по угадываемому пути, минуя VMT), а покрасить всё равно надо.
+        по угадываемому пути, минуя VMT), а покрасить всё равно надо
         """
         return self.describe(mat_name, cdmaterials).tint
 
     def vtf_bytes(self, mat_name: str,
                   cdmaterials: List[str]) -> Optional[bytes]:
-        """Сырые байты VTF материала (для экспорта — без краски и без PNG).
+        """Сырые байты VTF материала (для экспорта - без краски и без PNG)
 
         Сами байты не кэшируются: это мегабайты на материал, а нужны они
-        обычно один раз. Кэшируется разбор VMT, который к ним ведёт.
+        обычно один раз. Кэшируется разбор VMT, который к ним ведёт
         """
         info = self.describe(mat_name, cdmaterials)
         if not info.basetexture:
@@ -147,11 +143,11 @@ class MaterialResolver:
 
     def texture_map(self, mat_names: List[str],
                     cdmaterials: List[str]) -> Dict[str, str]:
-        """{имя материала: путь PNG} — то, что ждут превью и карточки.
+        """{имя материала: путь PNG} - то, что ждут превью и карточки
 
-        Ключ — имя КАК ПЕРЕДАЛИ, а не в нижнем регистре: вьювер находит меш по
+        Ключ - имя КАК ПЕРЕДАЛИ, а не в нижнем регистре: вьювер находит меш по
         точному имени материала, и у `sniper_handL_red` ключ `sniper_handl_red`
-        не совпадал — левая кисть снайпера и инженера оставалась без текстуры.
+        не совпадал - левая кисть снайпера и инженера оставалась без текстуры
         """
         found = self.resolve_many(mat_names, cdmaterials)
         return {name: found[name.strip().lower()].png_path
@@ -160,11 +156,11 @@ class MaterialResolver:
 
     def render_map(self, mat_names: List[str],
                    cdmaterials: List[str]) -> Dict[str, dict]:
-        """{имя материала: как его рисовать} — для 3D-превью.
+        """{имя материала: как его рисовать} - для 3D-превью
 
         Отдаём только материалы с особенностями: у остальных вьювер и так
-        построит обычный непрозрачный материал. Ключ — имя КАК В МОДЕЛИ, по
-        нему вьювер находит меш.
+        построит обычный непрозрачный материал. Ключ - имя КАК В МОДЕЛИ, по
+        нему вьювер находит меш
         """
         out: Dict[str, dict] = {}
         for name in mat_names or []:
@@ -173,7 +169,7 @@ class MaterialResolver:
                 out[name] = spec.as_dict()
         return out
 
-    # ── Внутреннее ───────────────────────────────────────────────────────── #
+    # Внутреннее
 
     def _describe_uncached(self, mat_name: str,
                            cdmaterials: List[str]) -> ResolvedMaterial:
@@ -215,10 +211,10 @@ class MaterialResolver:
             tint=info.tint, shader=info.shader, render=info.render)
 
     def _find_vmt(self, mat_lower: str, cdmaterials: List[str]):
-        """VMT материала: сначала по $cdmaterials, потом по пути внутри имени.
+        """VMT материала: сначала по $cdmaterials, потом по пути внутри имени
 
-        Второй случай — материалы, у которых в модели записан полный путь
-        (`models/workshop/.../hat`), а не голое имя.
+        Второй случай - материалы, у которых в модели записан полный путь
+        (`models/workshop/.../hat`), а не голое имя
         """
         found = self._reader.find_vmt(cdmaterials or [], mat_lower)
         if found:

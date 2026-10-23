@@ -1,10 +1,10 @@
 """
-Поиск SMD и текстур для 3D-превью: какие файлы и в каком порядке берутся.
+Поиск SMD и текстур для 3D-превью: какие файлы и в каком порядке берутся
 
 Характеризующие тесты: сняты с поведения воркера до того, как поиск уехал в
 чистые функции. Архивы поддельные (tests/fake_vpk), порядок обращений к ним
 проверяется дословно - именно он решает, какая из двух версий текстуры
-(c_items или workshop) попадёт в кадр.
+(c_items или workshop) попадёт в кадр
 """
 
 import os
@@ -20,7 +20,7 @@ from tests.fake_vpk import FakePak, fake_reader, vmt
 
 @pytest.fixture(autouse=True)
 def _stub_vtf_decoder(monkeypatch):
-    """«VTF-байты» здесь - уже готовая картинка: пишем их как есть."""
+    """«VTF-байты» здесь - уже готовая картинка: пишем их как есть"""
     from src.services import vtf_preview_service as vps
 
     def fake(data, out_png_path, tmp_dir=None):
@@ -65,7 +65,7 @@ def _content(paths):
     return {k: Path(v).read_bytes() for k, v in paths.items()}
 
 
-# ── Адаптеры: единственное место, которое знает, где живёт поиск ─────────── #
+# Адаптеры: единственное место, которое знает, где живёт поиск
 
 def reference_smd(w, directory):
     return smd_locator.find_reference_smd(directory, w.mode, w.weapon_key, w._model)
@@ -75,7 +75,7 @@ def vtf_for_mat(w, pak, mat, arm_folder, cdmaterials=None):
     return texture_locator.find_vtf_for_mat(pak, mat, arm_folder, cdmaterials)
 
 
-# ── Reference SMD ──────────────────────────────────────────────────────────── #
+# Reference SMD
 
 def test_spy_mask_mode_takes_spy_mask_smd():
     with TemporaryDirectory() as tmp:
@@ -121,7 +121,7 @@ def test_weapon_reference_then_key_then_anything():
         assert reference_smd(_worker(tmp), tmp) is None
 
 
-# ── Где ищется VTF материала ──────────────────────────────────────────────── #
+# Где ищется VTF материала
 
 def test_vtf_candidates_order_for_player_material():
     with TemporaryDirectory() as tmp:
@@ -154,7 +154,7 @@ def test_vtf_candidates_strip_overlay_suffix():
         ]
 
 
-# ── Несколько материалов ──────────────────────────────────────────────────── #
+# Несколько материалов
 
 QC_CD = '$modelname "x.mdl"\n$cdmaterials "models\\weapons\\c_items\\"\n'
 CD = "materials/models/weapons/c_items"
@@ -196,7 +196,7 @@ def test_blu_multi_textures_by_cdmaterials_player_folder_and_names_only():
         assert raw["scout_eyes"] == (None, "scout_eyes_b")
 
 
-# ── Одна текстура оружия ──────────────────────────────────────────────────── #
+# Одна текстура оружия
 
 def test_weapon_texture_from_standard_paths_and_blu_by_suffix():
     files = {
@@ -212,7 +212,7 @@ def test_weapon_texture_from_standard_paths_and_blu_by_suffix():
 
 
 def test_weapon_texture_prefers_qc_folder_over_older_version():
-    """Две версии модели в игре: текстура - по $cdmaterials показываемой."""
+    """Две версии модели в игре: текстура - по $cdmaterials показываемой"""
     qc = '$modelname "x.mdl"\n$cdmaterials "models\\workshop\\weapons\\c_models\\c_gun\\"\n'
     files = {
         "materials/models/weapons/c_items/c_gun.vtf": _png("old"),
@@ -254,7 +254,7 @@ def test_hat_texture_guess_tries_class_and_workshop_paths():
         assert Path(frames[0]).read_bytes() == _png("cap")
 
 
-# ── Добавки: фиксированные пути и $texturegroup ───────────────────────────── #
+# Добавки: фиксированные пути и $texturegroup
 
 def test_fixed_extra_textures_game_path_vmt_and_blank():
     files = {

@@ -1,7 +1,7 @@
-"""Тесты PreviewTextureState — единого источника правды о текстурах превью.
+"""Тесты PreviewTextureState - единого источника правды о текстурах превью
 
-Фиксируют правила маршрутизации и разрешения, из-за нарушения которых раньше
-случались рассинхроны 2D↔3D (затирание команды, потеря стиля, австралий).
+Фиксируют правила маршрутизации и разрешения, нарушение которых даёт
+рассинхроны 2D↔3D (затирание команды, потеря стиля, австралий)
 """
 
 import tempfile
@@ -26,7 +26,7 @@ class TextureStateBase(unittest.TestCase):
         self._tmp.cleanup()
 
     def png(self, name: str) -> str:
-        """Создаёт файл-заглушку и возвращает путь (resolve проверяет exists)."""
+        """Создаёт файл-заглушку и возвращает путь (resolve проверяет exists)"""
         p = self.dir / f"{name}.png"
         p.write_bytes(b"x")
         return str(p)
@@ -49,12 +49,12 @@ class NeutralityTests(TextureStateBase):
         self.assertTrue(self.state.is_neutral("sniper_lens"))
 
     def test_self_mapped_material_is_neutral(self):
-        """Материал, который на BLU остаётся собой, — общий для команд.
+        """Материал, который на BLU остаётся собой, - общий для команд
 
         У многоматериальных шапок (hwn2022_alcoholic_automaton) синее имя
         одной колонки одновременно является обычным материалом другой: линза
         там синяя всегда и по команде не меняется. По правилу «имя есть среди
-        значений» её карточка считалась командной и пропадала на BLU.
+        значений» её карточка считалась командной и пропадала на BLU
         """
         self.state.blu_name_map = {
             "auto_1": "auto_1_blue",          # переключается
@@ -68,10 +68,10 @@ class NeutralityTests(TextureStateBase):
         self.assertTrue(self.state.is_neutral("auto_blue"))
 
     def test_shared_material_edit_survives_team_switch(self):
-        """Правка общего материала видна обеим командам.
+        """Правка общего материала видна обеим командам
 
         Сценарий шапки с четырьмя столбцами: линза одинаковая у RED и BLU,
-        и загруженная на неё текстура не должна исчезать при переключении.
+        и загруженная на неё текстура не должна исчезать при переключении
         """
         self.state.material_names = ["auto", "auto_blue"]
         self.state.blu_name_map = {"auto": "auto_blue", "auto_blue": "auto_blue"}
@@ -88,14 +88,14 @@ class NeutralityTests(TextureStateBase):
         self.assertNotIn("auto", self.state.textures[Team.BLU])
 
     def test_blu_only_name_stays_team_specific(self):
-        """Имя, встречающееся ТОЛЬКО как значение, — чисто синий материал."""
+        """Имя, встречающееся ТОЛЬКО как значение, - чисто синий материал"""
         self.state.blu_name_map = {"medic_hands_red": "medic_hands_blue"}
         self.assertFalse(self.state.is_neutral("medic_hands_blue"))
         self.assertFalse(self.state.is_neutral("MEDIC_HANDS_BLUE"))
         self.assertTrue(self.state.is_neutral("sniper_lens"))
 
     def test_single_blu_frame_makes_main_team_specific(self):
-        # Одно-текстурное командное оружие: BLU одним кадром, маппинга нет.
+        # Одно-текстурное командное оружие: BLU одним кадром, маппинга нет
         self.state.material_names = ["c_gun"]
         self.state.blu_frames = [self.png("blu_frame")]
         self.assertFalse(self.state.is_neutral("c_gun"))
@@ -109,7 +109,7 @@ class NeutralityTests(TextureStateBase):
         self.assertFalse(self.state.is_team_material("no_map_mat"))
 
     def test_is_team_material_via_blu_frames(self):
-        # Без маппинга: главный материал командный, если есть BLU-кадр.
+        # Без маппинга: главный материал командный, если есть BLU-кадр
         self.state.material_names = ["balloon", "strap"]
         self.assertFalse(self.state.is_team_material("balloon"))
         self.state.blu_frames = [self.png("blu_frame")]
@@ -134,7 +134,7 @@ class SetTextureTests(TextureStateBase):
 
     def test_teams_do_not_stomp_each_other_with_blu_frames(self):
         # Регресс-кейс: одно-текстурное командное оружие, загрузка на BLU
-        # не должна затирать RED.
+        # не должна затирать RED
         self.state.material_names = ["c_gun"]
         self.state.blu_frames = [self.png("blu_frame")]
         red = self.png("red")
@@ -213,8 +213,8 @@ class ResolveTests(TextureStateBase):
     def test_multimaterial_hat_blu_frame_beats_red_original(self):
         # Регресс-кейс «A head full of hot air»: мульти-материальная шапка,
         # per-material RED-оригиналы в vpk_red_tex_map, BLU одним кадром.
-        # Раньше на BLU главный материал показывал RED-оригинал (fallback для
-        # «нейтральных»), хотя 3D показывал синий кадр.
+        # На BLU главный материал не должен показывать RED-оригинал (fallback
+        # для «нейтральных»), когда 3D показывает синий кадр
         self.state.material_names = ["balloon", "strap"]
         red_balloon = self.png("red_balloon")
         red_strap = self.png("red_strap")
@@ -224,15 +224,15 @@ class ResolveTests(TextureStateBase):
 
         self.state.active_team = Team.BLU
         self.assertEqual(self.state.resolve_base("balloon"), blu_f)
-        # Доп. материал нейтрален — RED-оригинал (единственный) остаётся.
+        # Доп. материал нейтрален - RED-оригинал (единственный) остаётся
         self.assertEqual(self.state.resolve_base("strap"), red_strap)
-        # На RED — свои оригиналы, как раньше.
+        # На RED - свои оригиналы
         self.state.active_team = Team.RED
         self.assertEqual(self.state.resolve_base("balloon"), red_balloon)
 
     def test_user_red_does_not_leak_to_blu_with_blu_frame(self):
         # Пользовательская RED-текстура главного материала не должна
-        # показываться на BLU (материал командный из-за blu_frames).
+        # показываться на BLU (материал командный из-за blu_frames)
         self.state.material_names = ["balloon"]
         blu_f = self.png("blu_frame")
         self.state.blu_frames = [blu_f]
@@ -291,21 +291,21 @@ class BuildOutputsTests(TextureStateBase):
         self.assertEqual(self.state.uploaded_for_mat("medic_blue"), blu)
 
     def test_uploaded_for_mat_force_team_blue_suffix(self):
-        # Force-team: сборка спрашивает '{mat}_blue', BLU хранится под 'mat'.
+        # Force-team: сборка спрашивает '{mat}_blue', BLU хранится под 'mat'
         blu = self.png("blu")
         self.state.textures[Team.BLU]["shell"] = blu
         self.assertEqual(self.state.uploaded_for_mat("shell_blue"), blu)
 
     def test_uploaded_for_mat_blue_suffix_direct_base_hit(self):
-        # '{mat}_blue' → прямой хит по базе textures[BLU][mat].
+        # '{mat}_blue' -> прямой хит по базе textures[BLU][mat]
         self.state.material_names = ["c_gun"]
         main_blu = self.png("main_blu")
         self.state.textures[Team.BLU]["c_gun"] = main_blu
         self.assertEqual(self.state.uploaded_for_mat("c_gun_blue"), main_blu)
 
     def test_uploaded_for_mat_blue_suffix_falls_back_to_main_blu(self):
-        # Базы под именем нет → fallback на главную BLU (одноматериальный
-        # случай: BLU хранится под SINGLE_TEX_KEY).
+        # Базы под именем нет -> fallback на главную BLU (одноматериальный
+        # случай: BLU хранится под SINGLE_TEX_KEY)
         main_blu = self.png("main_blu")
         self.state.textures[Team.BLU][SINGLE_TEX_KEY] = main_blu
         self.assertEqual(self.state.uploaded_for_mat("somemat_blue"), main_blu)
@@ -327,7 +327,7 @@ class BuildOutputsTests(TextureStateBase):
 
     def test_neutral_texture_in_both_teams_is_not_an_own_blue(self):
         # Руки скаута нейтральны: картинка ложится в обе команды, и сборка
-        # не должна делать их командными.
+        # не должна делать их командными
         self.state.set_texture("scout_hands", self.png("hands"))
         self.assertIn("scout_hands", self.state.textures[Team.BLU])
         self.assertEqual(self.state.blu_uploaded_paths(), {})
@@ -390,7 +390,7 @@ class SnapshotTests(TextureStateBase):
         self.assertEqual(fresh.australium_frame, s.australium_frame)
         self.assertEqual(fresh.australium_mat_name, s.australium_mat_name)
         self.assertEqual(fresh.australium_user_tex, s.australium_user_tex)
-        # Австралий после восстановления всегда выключен.
+        # Австралий после восстановления всегда выключен
         self.assertFalse(fresh.australium_active)
 
     def test_snapshot_is_deep_copy(self):
@@ -409,8 +409,8 @@ class SnapshotTests(TextureStateBase):
         self.assertFalse(self.state.australium_active)
 
     def test_restore_resets_stale_skin_state(self):
-        # Залипший вариантный стиль не должен пережить восстановление —
-        # иначе карточки оружия резолвились бы в чужие override'ы.
+        # Залипший вариантный стиль не должен пережить восстановление -
+        # иначе карточки оружия резолвились бы в чужие override'ы
         self.state.skin_info = {"num_skins": 2}
         self.state.active_skin = 1
         self.state.skin_overrides = {1: {"mat": "p"}}
@@ -470,11 +470,11 @@ class ResetTests(TextureStateBase):
 
 
 class ForceTeamTests(TextureStateBase):
-    """«Сделать командным» (+ Команда) для оружия без нативной команды.
+    """«Сделать командным» (+ Команда) для оружия без нативной команды
 
-    Регрессия: у такого оружия нет blu_name_map/blu_frames → материал считается
+    Регрессия: у такого оружия нет blu_name_map/blu_frames -> материал считается
     нейтральным, и set_texture дублировал загрузку в ОБЕ команды. Из-за этого
-    загрузка BLU затирала RED, и 2D/3D показывали одинаковые текстуры.
+    загрузка BLU затирала RED, и 2D/3D показывали одинаковые текстуры
     """
 
     def setUp(self):
@@ -485,22 +485,22 @@ class ForceTeamTests(TextureStateBase):
     def test_blu_upload_does_not_overwrite_red(self):
         red = self.png("red")
         blu = self.png("blu")
-        # Загружаем RED, затем переключаемся на BLU и загружаем ДРУГУЮ текстуру.
+        # Загружаем RED, затем переключаемся на BLU и загружаем ДРУГУЮ текстуру
         self.state.active_team = Team.RED
         self.state.set_texture("c_gun", red)
         self.state.active_team = Team.BLU
         self.state.set_texture("c_gun", blu)
-        # Ключевая проверка: команды РАЗНЫЕ (раньше обе были = blu).
+        # Ключевая проверка: команды РАЗНЫЕ, а не обе = blu
         self.assertEqual(self.state.textures[Team.RED].get("c_gun"), red)
         self.assertEqual(self.state.textures[Team.BLU].get("c_gun"), blu)
-        # Резолв каждой команды возвращает свою текстуру.
+        # Резолв каждой команды возвращает свою текстуру
         self.state.active_team = Team.RED
         self.assertEqual(self.state.resolve_base("c_gun"), red)
         self.state.active_team = Team.BLU
         self.assertEqual(self.state.resolve_base("c_gun"), blu)
 
     def test_red_only_blu_defaults_to_red(self):
-        # Пока своя синяя не задана, BLU наследует RED (дефолт «как RED»).
+        # Пока своя синяя не задана, BLU наследует RED (дефолт «как RED»)
         red = self.png("red")
         self.state.active_team = Team.RED
         self.state.set_texture("c_gun", red)
@@ -509,11 +509,10 @@ class ForceTeamTests(TextureStateBase):
         self.assertEqual(self.state.resolve_base("c_gun"), red)   # но показывается RED
 
     def test_red_card_does_not_borrow_the_blue_texture(self):
-        """Загрузка на BLU не должна ВЫГЛЯДЕТЬ как замена красной.
+        """Загрузка на BLU не должна ВЫГЛЯДЕТЬ как замена красной
 
-        Хранение чинили раньше, а показ — нет: красная карточка брала синюю
-        текстуру «как нейтральную», и человек видел ровно то, от чего
-        избавлялись, — «положил на синюю, заменилось у обеих».
+        Красная карточка не должна брать синюю текстуру «как нейтральную»:
+        человек увидел бы «положил на синюю, заменилось у обеих»
         """
         blu = self.png("blu")
         self.state.active_team = Team.BLU
@@ -522,16 +521,16 @@ class ForceTeamTests(TextureStateBase):
         self.assertNotEqual(self.state.resolve_base("c_gun"), blu)
 
     def test_the_build_does_not_put_the_blue_texture_on_red(self):
-        """То же правило в сборке: иначе синий файл уехал бы на красный скин."""
+        """То же правило в сборке: иначе синий файл уехал бы на красный скин"""
         blu = self.png("blu")
         self.state.active_team = Team.BLU
         self.state.set_texture("c_gun", blu)
         self.assertIsNone(self.state.uploaded_for_mat("c_gun"))
-        # А синему слоту он достаётся — за ним и приходят по имени с суффиксом.
+        # А синему слоту он достаётся - за ним и приходят по имени с суффиксом
         self.assertEqual(self.state.uploaded_for_mat("c_gun_blue"), blu)
 
     def test_without_force_team_dual_write_preserved(self):
-        # Контроль: без force_team нейтральная по-прежнему пишется в обе команды.
+        # Контроль: без force_team нейтральная по-прежнему пишется в обе команды
         self.state.force_team = False
         tex = self.png("t")
         self.state.active_team = Team.RED
@@ -539,8 +538,8 @@ class ForceTeamTests(TextureStateBase):
         self.assertEqual(self.state.textures[Team.BLU].get("c_gun"), tex)
 
     def test_uploaded_for_mat_blue_defaults_to_red_under_force_team(self):
-        # Сборка синего скина: своей синей нет → берём базовую RED («как RED»),
-        # иначе {mat}_blue остался бы без VTF (фиолетовый в игре).
+        # Сборка синего скина: своей синей нет -> берём базовую RED («как RED»),
+        # иначе {mat}_blue остался бы без VTF (фиолетовый в игре)
         red = self.png("red")
         self.state.active_team = Team.RED
         self.state.set_texture("c_gun", red)
@@ -552,7 +551,7 @@ class ForceTeamTests(TextureStateBase):
         self.state.set_texture("c_gun", red)
         self.state.active_team = Team.BLU
         self.state.set_texture("c_gun", blu)
-        # Своя синяя задана → она приоритетнее RED-дефолта.
+        # Своя синяя задана -> она приоритетнее RED-дефолта
         self.assertEqual(self.state.uploaded_for_mat("c_gun_blue"), blu)
 
     def test_reset_team_data_clears_force_team(self):
@@ -612,7 +611,7 @@ class SkyboxStateTests(TextureStateBase):
         self.state.reset_skybox()
         self.assertEqual(self.state.skybox_stock_faces, {})
         self.assertEqual(self.state.skybox_split_faces, {})
-        # Пользовательская грань живёт в textures — её чистит общий сброс.
+        # Пользовательская грань живёт в textures - её чистит общий сброс
         self.assertEqual(self.state.resolve_skybox_face("up"), face)
 
 

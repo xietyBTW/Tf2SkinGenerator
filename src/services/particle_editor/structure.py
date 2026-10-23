@@ -1,4 +1,4 @@
-"""Правка структуры: модули, системы, слои и дочерние ссылки."""
+"""Правка структуры: модули, системы, слои и дочерние ссылки"""
 
 from typing import Dict, Optional
 
@@ -7,7 +7,7 @@ from src.services.particle_editor.pcf_format import (
     module_fn)
 
 
-#: Кэш шаблонов модулей из стоковых PCF: {(group, fn_lower): Element}.
+#: Кэш шаблонов модулей из стоковых PCF: {(group, fn_lower): Element}
 _module_templates: Dict[tuple, "Element"] = {}
 
 
@@ -17,12 +17,12 @@ def _find_module_template(
     """
     Шаблон модуля с реалистичными атрибутами: ищем модуль с таким
     functionName в текущем PCF, затем по стоковым PCF игры (первое
-    совпадение кэшируется на весь запуск).
+    совпадение кэшируется на весь запуск)
     """
     key = (group, function_name.lower())
     if key in _module_templates:
         cached = _module_templates[key]
-        # None — закэшированный промах (не сканировать 134 PCF повторно)
+        # None - закэшированный промах (не сканировать 134 PCF повторно)
         return copy_module(cached) if cached is not None else None
 
     def _scan(svc) -> Optional["Element"]:
@@ -62,9 +62,9 @@ def add_module(
 ) -> bool:
     """
     Добавляет модуль в группу системы. Атрибуты берутся из шаблона
-    (первый такой же модуль в текущем/стоковых PCF); если шаблона нет —
+    (первый такой же модуль в текущем/стоковых PCF), если шаблона нет -
     создаётся элемент с одним functionName (движок игры и превью
-    подставляют дефолты).
+    подставляют дефолты)
     """
     d = pcf._find_definition(system_name)
     if d is None or group not in MODULE_GROUPS:
@@ -83,15 +83,45 @@ def add_module(
     return True
 
 
+def apply_gizmo_edits(pcf, system_name: str, edits: list,
+                      tf2_root_dir: str = "") -> Optional[str]:
+    """
+    Итог перетаскивания ручек гизмо: [{group, index, fn, attr, type, value}]
+
+    Модуль ищется по номеру, а если там другой - по имени функции. Модуля
+    может не быть вовсе: превью само дописывает Position Modify Offset Random
+    в начале перетаскивания сферы, и здесь он создаётся так же. Возвращает
+    текст ошибки или None
+    """
+    for edit in edits:
+        group, fn = edit.get("group"), str(edit.get("fn") or "")
+        d = pcf._find_definition(system_name)
+        if d is None:
+            return f"система не найдена: {system_name}"
+        mods = list(d[group].iter_elem()) if group in d else []
+        index = int(edit.get("index", -1))
+        if not (0 <= index < len(mods) and module_fn(mods[index]) == fn.lower()):
+            index = next((i for i, m in enumerate(mods)
+                          if module_fn(m) == fn.lower()), -1)
+        if index < 0:
+            if not pcf.add_module(system_name, group, fn, tf2_root_dir):
+                return f"не удалось добавить {fn}"
+            index = len(mods)
+        if not pcf.ensure_attr(system_name, group, index, edit.get("attr"),
+                               edit.get("type"), edit.get("value")):
+            return f"не удалось записать {edit.get('attr')}"
+    return None
+
+
 def seed_spawn_area(definition, mod) -> bool:
     """
-    Даёт вырожденной области спавна видимый размер, соразмерный эффекту.
+    Даёт вырожденной области спавна видимый размер, соразмерный эффекту
 
     Шаблоны стоковых PCF часто приходят с нулевой областью (у бокса
-    min == max) — добавленный модуль спавнит всё в одну точку, каркас
+    min == max) - добавленный модуль спавнит всё в одну точку, каркас
     в превью не рисуется и тянуть нечего. Размер берём от радиуса
     частиц системы, чтобы область была соразмерна тому, что видно.
-    Осмысленные значения из шаблона не трогаем.
+    Осмысленные значения из шаблона не трогаем
     """
     fn = module_fn(mod)
     if fn not in ("position within box random",
@@ -137,7 +167,7 @@ def seed_spawn_area(definition, mod) -> bool:
 
 
 def remove_module(pcf, system_name: str, group: str, index: int) -> bool:
-    """Удаляет модуль по индексу из группы системы."""
+    """Удаляет модуль по индексу из группы системы"""
     d = pcf._find_definition(system_name)
     if d is None or group not in d:
         return False
@@ -155,17 +185,17 @@ def remove_module(pcf, system_name: str, group: str, index: int) -> bool:
 
 def duplicate_system(pcf, system_name: str, new_name: str) -> bool:
     """
-    Дублирует систему под новым именем (в корневой список определений).
+    Дублирует систему под новым именем (в корневой список определений)
 
     Модули копируются по значению (правки копии не трогают оригинал);
-    ссылки children остаются на те же дочерние системы.
+    ссылки children остаются на те же дочерние системы
     """
     d = pcf._find_definition(system_name)
     if d is None or pcf._find_definition(new_name) is not None:
         return False
     new = Element(new_name, d.type)
     for attr in d.values():
-        key = attr.name          # оригинальный регистр — уходит в файл
+        key = attr.name          # оригинальный регистр - уходит в файл
         kl = key.casefold()
         if kl in MODULE_GROUPS:
             mods = [copy_module(m) for m in attr.iter_elem()]
@@ -174,7 +204,7 @@ def duplicate_system(pcf, system_name: str, new_name: str) -> bool:
             else:
                 new[key] = Attribute.array(key, ValueType.ELEMENT)
         elif kl == "children":
-            # Копируем элементы-ссылки, сами дочерние системы — общие
+            # Копируем элементы-ссылки, сами дочерние системы - общие
             refs = [copy_module(ch) for ch in attr.iter_elem()]
             if refs:
                 new[key] = refs
@@ -190,12 +220,12 @@ def duplicate_system(pcf, system_name: str, new_name: str) -> bool:
 
 def rename_system(pcf, old_name: str, new_name: str) -> bool:
     """
-    Переименовывает систему вместе со всеми ссылками на неё.
+    Переименовывает систему вместе со всеми ссылками на неё
 
     Дети ссылаются на объект-определение, а не на имя, поэтому связь
-    не рвётся; но у элемента-ссылки (DmeParticleChild) собственное имя
-    совпадает с именем ребёнка — приводим и его, иначе файл выглядит
-    рассогласованным.
+    не рвётся, но у элемента-ссылки (DmeParticleChild) собственное имя
+    совпадает с именем ребёнка - приводим и его, иначе файл выглядит
+    рассогласованным
     """
     new_name = (new_name or "").strip()
     target = pcf._find_definition(old_name)
@@ -227,8 +257,8 @@ def rename_system(pcf, old_name: str, new_name: str) -> bool:
 
 def remove_system(pcf, system_name: str) -> bool:
     """Удаляет систему совсем: из корневого списка И из children всех
-    родителей (иначе она оставалась «призраком» — играла у родителя и
-    держала имя занятым)."""
+    родителей (иначе она оставалась «призраком» - играла у родителя и
+    держала имя занятым)"""
     target = pcf._find_definition(system_name)
     if target is None:
         return False
@@ -271,11 +301,11 @@ def remove_system(pcf, system_name: str) -> bool:
 def add_layer(pcf, parent_name: str,
               layer_name: Optional[str] = None) -> Optional[str]:
     """
-    Создаёт новый слой-подэффект и цепляет его ребёнком к parent_name.
+    Создаёт новый слой-подэффект и цепляет его ребёнком к parent_name
 
-    Слой — готовый «залп спрайтов» с разумными настройками (50 частиц
+    Слой - готовый «залп спрайтов» с разумными настройками (50 частиц
     разлетаются из центра, крутятся, гаснут и падают): пользователю
-    остаётся дать текстуру и крутить параметры. Возвращает имя слоя.
+    остаётся дать текстуру и крутить параметры. Возвращает имя слоя
     """
     parent = pcf._find_definition(parent_name)
     if parent is None:
@@ -291,7 +321,7 @@ def add_layer(pcf, parent_name: str,
 
 def _free_layer_name(pcf, parent_name: str,
                      layer_name: Optional[str]) -> Optional[str]:
-    """Имя нового слоя: заданное (None — занято) или <родитель>_layer[N]."""
+    """Имя нового слоя: заданное (None - занято) или <родитель>_layer[N]"""
     if not layer_name:
         base, n = f"{parent_name}_layer", 2
         layer_name = base
@@ -305,7 +335,7 @@ def _free_layer_name(pcf, parent_name: str,
 
 def _layer_definition(layer_name: str) -> "Element":
     """Определение слоя-заготовки: 50 спрайтов разлетаются из центра,
-    крутятся, гаснут и падают."""
+    крутятся, гаснут и падают"""
     d = Element(layer_name, "DmeParticleSystemDefinition")
     d["max_particles"] = Attribute.int("max_particles", 300)
     d["material"] = Attribute.string("material", "effects\\yellowflare.vmt")
@@ -358,12 +388,12 @@ def _layer_definition(layer_name: str) -> "Element":
 
 def add_child(pcf, parent_name: str, child_name: str,
               delay: float = 0.0) -> bool:
-    """Подцепляет существующую систему ребёнком к parent_name."""
+    """Подцепляет существующую систему ребёнком к parent_name"""
     parent = pcf._find_definition(parent_name)
     child = pcf._find_definition(child_name)
     if parent is None or child is None or parent is child:
         return False
-    # Гард от цикла: если parent достижим из child по children — в игре
+    # Гард от цикла: если parent достижим из child по children - в игре
     # это бесконечная рекурсия инстанцирования (крэш клиента)
     pending, seen = [child], set()
     while pending:
@@ -396,14 +426,14 @@ def add_child(pcf, parent_name: str, child_name: str,
 
 
 def remove_child(pcf, parent_name: str, index: int) -> bool:
-    """Отцепляет ребёнка по индексу (сама дочерняя система остаётся)."""
+    """Отцепляет ребёнка по индексу (сама дочерняя система остаётся)"""
     parent = pcf._find_definition(parent_name)
     if parent is None or "children" not in parent:
         return False
     try:
         refs = list(parent["children"].iter_elem())
         # UI нумерует только валидные ссылки (systems_json пропускает
-        # битые) — маппим индекс на сырой массив
+        # битые) - маппим индекс на сырой массив
         valid = [i for i, ch in enumerate(refs) if "child" in ch]
         refs.pop(valid[index])
     except (IndexError, Exception):

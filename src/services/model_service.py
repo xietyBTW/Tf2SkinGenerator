@@ -5,7 +5,7 @@ from src.shared.exceptions import RequiredFileMissingError
 from src.shared.file_utils import ensure_directory_exists, copy_file_safe
 from src.shared.logging_config import get_logger
 from src.services.model_build_service import ModelBuildService
-from src.services.smd_service import SMDService
+from src.services import smd_service
 
 logger = get_logger(__name__)
 
@@ -19,7 +19,7 @@ class ModelService:
             t = TRANSLATIONS.get('en', TRANSLATIONS['en'])
             raise RequiredFileMissingError(qc_path, t['error_modelname_not_extracted'].format(qc_path=qc_path))
         normalized_path = modelname_path.replace('\\', '/')
-        # Пустой dirname pathlib молча отбрасывает при join.
+        # Пустой dirname pathlib молча отбрасывает при join
         target_dir = ctx.vpkroot_dir / "models" / normalized_path.rpartition('/')[0]
         ensure_directory_exists(target_dir)
         if not ctx.compile_dir.exists():
@@ -53,7 +53,7 @@ class ModelService:
             from src.services.uv_layout_service import UVLayoutService
             logger.info(f"Генерация UV разметки для оружия: {weapon_key}")
             logger.debug(f"Директория декомпиляции: {ctx.decompile_dir}")
-            smd_path = SMDService.find_reference_smd(str(ctx.decompile_dir), weapon_key)
+            smd_path = smd_service.find_reference_smd(str(ctx.decompile_dir), weapon_key)
             if not smd_path or not os.path.exists(smd_path):
                 logger.warning(f"Не найден SMD файл для генерации UV разметки: {weapon_key}")
                 logger.debug(f"Проверяемая директория: {ctx.decompile_dir}")
@@ -70,7 +70,7 @@ class ModelService:
             if written:
                 # У многоматериальной модели файлов несколько: развёртки
                 # материалов живут в одних координатах и на общей картинке
-                # накладываются друг на друга.
+                # накладываются друг на друга
                 logger.info(f"UV разметка сохранена: {', '.join(written)}")
             else:
                 logger.error(f"Ошибка при создании UV разметки для {weapon_key}")

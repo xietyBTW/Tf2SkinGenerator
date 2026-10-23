@@ -1,15 +1,15 @@
 """
-Перевод меша из bind-позы в позу анимации.
+Перевод меша из bind-позы в позу анимации
 
 Превью показывало reference-меш как есть, а игра всегда проигрывает
 последовательность. У Мутировавшего молока хлеб в bind-позе торчит из банки на
-2.58 единицы, а первый кадр `idle` смещает кости на 2.69 — в игре хлеб внутри,
-в превью снаружи.
+2.58 единицы, а первый кадр `idle` смещает кости на 2.69 - в игре хлеб внутри,
+в превью снаружи
 
 Порядок эйлеровых углов (Rz·Ry·Rx) не угадан: в MDL кость несёт и углы, и
 посчитанный компилятором Valve кватернион, и на 35 костях стоковых моделей
-этот порядок воспроизводит кватернион с ошибкой 0.000000 (ближайший другой —
-0.78). Тест ниже отличает его от обратного порядка.
+этот порядок воспроизводит кватернион с ошибкой 0.000000 (ближайший другой -
+0.78). Тест ниже отличает его от обратного порядка
 """
 
 import math
@@ -41,10 +41,10 @@ class MatrixTests(unittest.TestCase):
         self.assertAlmostEqual(z, 0, places=6)
 
     def test_rotation_order_is_z_y_x(self):
-        """Отличает Rz·Ry·Rx от обратного порядка: результаты разные."""
+        """Отличает Rz·Ry·Rx от обратного порядка: результаты разные"""
         m = smd_pose.local_matrix((0, 0, 0), (HALF_PI, 0, HALF_PI))
         x, y, z = smd_pose.transform_point(m, (0, 1, 0))
-        # Сначала поворот вокруг X: (0,1,0) → (0,0,1); затем вокруг Z: не меняет.
+        # Сначала поворот вокруг X: (0,1,0) -> (0,0,1), затем вокруг Z: не меняет
         self.assertAlmostEqual(x, 0, places=6)
         self.assertAlmostEqual(y, 0, places=6)
         self.assertAlmostEqual(z, 1, places=6)
@@ -64,7 +64,7 @@ class MatrixTests(unittest.TestCase):
             self.assertAlmostEqual(got, want, places=9)
 
     def test_child_inherits_the_parent(self):
-        """Кость-ребёнок стоит на метр вперёд от родителя, повёрнутого на 90°."""
+        """Кость-ребёнок стоит на метр вперёд от родителя, повёрнутого на 90°"""
         parents = {0: -1, 1: 0}
         frame = {0: ((0, 0, 0), (0, 0, HALF_PI)), 1: ((1, 0, 0), (0, 0, 0))}
         world = smd_pose.world_matrices(parents, frame)
@@ -74,7 +74,7 @@ class MatrixTests(unittest.TestCase):
         self.assertAlmostEqual(z, 0, places=6)
 
     def test_broken_hierarchy_does_not_hang(self):
-        """Кость сама себе родитель — не зацикливаемся."""
+        """Кость сама себе родитель - не зацикливаемся"""
         world = smd_pose.world_matrices({0: 0}, {0: ((1, 2, 3), (0, 0, 0))})
         self.assertEqual(len(world), 1)
 
@@ -99,8 +99,8 @@ class SkinningMatrixTests(unittest.TestCase):
         self.assertIsNone(smd_pose.skinning_matrices(ref, pose))
 
     def test_root_only_difference_is_ignored(self):
-        """В анимации корень разворачивает предмет «как в руке» — в превью
-        предмет стоит в своей позе, крутить всю модель не надо."""
+        """В анимации корень разворачивает предмет «как в руке» - в превью
+        предмет стоит в своей позе, крутить всю модель не надо"""
         ref = self._smd("ref.smd", [(-1, (0, 0, 0), (0, 0, 0))])
         pose = self._smd("idle.smd", [(-1, (10, 0, 0), (0, 0, HALF_PI))])
         self.assertIsNone(smd_pose.skinning_matrices(ref, pose))
@@ -144,7 +144,7 @@ class VertexSkinningTests(unittest.TestCase):
         self.assertAlmostEqual(pos[1], 5.0)
 
     def test_unnormalised_weights_are_normalised(self):
-        """В SMD веса не всегда дают в сумме единицу."""
+        """В SMD веса не всегда дают в сумме единицу"""
         mats = {0: self.SHIFT, 1: smd_pose.IDENTITY}
         pos, _ = smd_pose.apply_to_vertex(mats, [(0, 1.0), (1, 1.0)],
                                           (0, 0, 0), (0, 0, 1))
@@ -204,7 +204,7 @@ class FindPoseSmdTests(unittest.TestCase):
         return str(path)
 
     def test_block_form(self):
-        """Так пишет Crowbar: файл на отдельной строке внутри блока."""
+        """Так пишет Crowbar: файл на отдельной строке внутри блока"""
         anims = self.dir / "model_anims"
         anims.mkdir()
         (anims / "idle.smd").write_text("version 1\n", encoding="utf-8")
@@ -226,7 +226,7 @@ class FindPoseSmdTests(unittest.TestCase):
 
     def test_idle_beats_draw(self):
         """Вьюмодель Звона смерти: первой идёт draw с закрытой крышкой, а
-        циферблат виден только в idle."""
+        циферблат виден только в idle"""
         for name in ("draw.smd", "idle.smd"):
             (self.dir / name).write_text("version 1\n", encoding="utf-8")
         qc = self._qc('$sequence "draw" {\n\t"draw.smd"\n\tsnap\n}\n'

@@ -1,5 +1,5 @@
 /*
- * Действия над эффектом: модули, атрибуты, системы, дети, сборка мода.
+ * Действия над эффектом: модули, атрибуты, системы, дети, сборка мода
  *
  * Один разбор ответа на всех: правка структуры отдаёт свежие systems и tree,
  * и после неё надо обновить и кадр, и каталог, и панель свойств.
@@ -8,7 +8,7 @@
 import * as api from '../api.js';
 import { ask } from '../ask.js';
 import { contextMenu } from '../menu.js';
-import { say, withParticles } from '../stage.js';
+import { say, sayInfo, sayError, withParticles } from '../stage.js';
 import { setBusy, setStatus, showResult } from '../layout.js';
 import { dockFx } from '../buildfx.js';
 import { pcfNodes, pcfTree, pSystem, setTree, setSystem, pcfDiff, setDiff } from './state.js';
@@ -18,9 +18,9 @@ import { showParams } from './params.js';
 import { ensureEffectMaterials } from './materials.js';
 
 
-// ── Действия над системой ────────────────────────────────────────────────
+// Действия над системой
 // Один разбор ответа на всех: правка структуры отдаёт свежие systems и tree,
-// и после неё надо обновить и кадр, и каталог, и панель свойств.
+// и после неё надо обновить и кадр, и каталог, и панель свойств
 
 export async function applyStructure(res, { reselect = null } = {}) {
   if (!res || res.error) { say(res?.error || 'не получилось'); return false; }
@@ -28,7 +28,7 @@ export async function applyStructure(res, { reselect = null } = {}) {
   if (res.tree) {
     setTree(res.tree);
     const keep = reselect || res.selected || pSystem;
-    // Систему могли переименовать или удалить - тогда показываем первую.
+    // Систему могли переименовать или удалить - тогда показываем первую
     setSystem(pcfTree.some((n) => n.key === keep) ? keep
                 : (pcfTree[0] ? pcfTree[0].key : ''));
     fillTree(pcfNodes, pSystem);
@@ -43,7 +43,7 @@ export async function applyStructure(res, { reselect = null } = {}) {
   return true;
 }
 
-/** Выбор группы и модуля для «Модуль +». */
+/** Выбор группы и модуля для «Модуль +» */
 export async function askModule() {
   const group = await ask({
     title: 'В какую группу',
@@ -68,7 +68,7 @@ export async function askModule() {
   return fn ? { group, fn } : null;
 }
 
-/** Адрес модуля для действий: тот узел, на котором открыли меню. */
+/** Адрес модуля для действий: тот узел, на котором открыли меню */
 export function currentModule() {
   if (ctxNode && ctxNode.index !== null) {
     return { group: ctxNode.group || null, index: ctxNode.index };
@@ -81,7 +81,7 @@ export function currentModule() {
 
 export const PACTS = {
   async module() {
-    // Меню открыто на группе - она и есть ответ на первый вопрос.
+    // Меню открыто на группе - она и есть ответ на первый вопрос
     const group = ctxNode && ctxNode.group && ctxNode.group !== 'children'
       ? ctxNode.group : null;
     let pick;
@@ -125,18 +125,18 @@ export const PACTS = {
   },
 
   async attr() {
-    // Параметр добавляют В МОДУЛЬ: какой именно - тот, что раскрыт в дереве.
+    // Параметр добавляют В МОДУЛЬ: какой именно - тот, что раскрыт в дереве
     const mod = currentModule();
     if (!mod) {
-      say('Раскройте модуль в экспертном режиме - параметр добавляется в него');
+      sayInfo('Раскройте модуль в экспертном режиме - параметр добавляется в него');
       return;
     }
     const missing = await api.particleMissingAttrs(pSystem, mod.group, mod.index);
-    if (!missing.length) { say('Все известные параметры уже заданы'); return; }
+    if (!missing.length) { sayInfo('Все известные параметры уже заданы'); return; }
     // Модуль из игры приходит со всеми своими полями, и «не хватает» ему
     // обычно только пяти общих на любой модуль (плавное включение и
     // выключение). Список из одних и тех же пяти строк у каждого модуля
-    // выглядит поломкой - скажем, почему он такой.
+    // выглядит поломкой - скажем, почему он такой
     const own = missing.some((a) => !/^operator (start|end|fade)/.test(a.name));
     const name = await ask({
       title: 'Какой параметр',
@@ -152,7 +152,7 @@ export const PACTS = {
       pSystem, mod.group, mod.index, attr.name, attr.t, attr.v));
   },
 
-  /** Копирует ровно то, на чём открыли меню: параметр, модуль или группу. */
+  /** Копирует ровно то, на чём открыли меню: параметр, модуль или группу */
   async copyone() {
     const n = ctxNode || {};
     return PACTS.copy({ group: n.group || null, index: n.index, attr: n.attr });
@@ -161,10 +161,10 @@ export const PACTS = {
   async copy(scope = {}) {
     const res = await api.copyParticleParams(
       pSystem, scope.group ?? null, scope.index ?? null, scope.attr ?? null);
-    if (res.error) { say(res.error); return; }
+    if (res.error) { sayError(res.error); return; }
     const text = JSON.stringify({ tf2sgParticleParams: res.payload });
     // Подпись называет, ЧТО скопировано: параметр, модуль, группа или вся
-    // система - одно «параметры скопированы» на всё читалось как ошибка.
+    // система - одно «параметры скопированы» на всё читалось как ошибка
     const what = scope.attr ? `Скопирован параметр «${scope.attr}»`
       : scope.index !== null && scope.index !== undefined ? 'Скопирован модуль'
       : scope.group ? `Скопирована группа «${scope.group}»`
@@ -174,7 +174,7 @@ export const PACTS = {
       say(what);
     } catch {
       // Доступ к буферу может быть закрыт настройками браузера - тогда
-      // показываем набор, чтобы его можно было выделить и скопировать самому.
+      // показываем набор, чтобы его можно было выделить и скопировать самому
       await ask({ title: 'Скопируйте набор параметров', value: text,
                   text: 'Буфер обмена недоступен - выделите и скопируйте.' });
     }
@@ -183,7 +183,7 @@ export const PACTS = {
   async paste() {
     let text = '';
     try { text = await navigator.clipboard.readText(); } catch { text = ''; }
-    // Чтение буфера может быть запрещено - тогда просим вставить руками.
+    // Чтение буфера может быть запрещено - тогда просим вставить руками
     if (!text) {
       text = await ask({ title: 'Вставьте набор параметров', value: '',
                          text: 'JSON с ключом tf2sgParticleParams' });
@@ -192,10 +192,10 @@ export const PACTS = {
     let payload = null;
     try {
       payload = JSON.parse(text).tf2sgParticleParams;
-    } catch (e) { say(`В буфере не JSON: ${e.message}`); return; }
-    if (!payload) { say('В JSON нет раздела tf2sgParticleParams'); return; }
+    } catch (e) { sayError(`В буфере не JSON: ${e.message}`); return; }
+    if (!payload) { sayError('В JSON нет раздела tf2sgParticleParams'); return; }
 
-    // Полный набор можно влить поверх или заменить систему целиком.
+    // Полный набор можно влить поверх или заменить систему целиком
     let mode = 'overwrite';
     if (payload.full) {
       mode = await ask({
@@ -230,7 +230,7 @@ export const PACTS = {
   },
 
   async child() {
-    // Дочернюю можно подцепить и отцепить - обе операции об одном списке.
+    // Дочернюю можно подцепить и отцепить - обе операции об одном списке
     const kids = await api.particleChildren(pSystem);
     const what = await ask({
       title: 'Дочерние системы',
@@ -268,7 +268,7 @@ export const PACTS = {
     if (!res.error) say('Слой добавлен - задайте ему параметры и текстуру');
   },
 
-  /** Родные цвета текстур: у системы и детей снимаются модули тинта. */
+  /** Родные цвета текстур: у системы и детей снимаются модули тинта */
   async natural() {
     const yes = await ask({
       title: 'Показать родные цвета текстур?',
@@ -278,7 +278,7 @@ export const PACTS = {
     });
     if (!yes) return;
     const res = await api.useParticleTextureColors(pSystem);
-    if (res.error) { say(res.error); return; }
+    if (res.error) { sayError(res.error); return; }
     withParticles((w) => w.loadParticleData({ ...res, rootName: pSystem }));
     ensureEffectMaterials();
     await showParams(pSystem);
@@ -293,7 +293,7 @@ export const PACTS = {
     await applyStructure(await api.removeParticleSystem(pSystem));
   },
 
-  /** Система как в игре: атрибуты, модули, дочерние. */
+  /** Система как в игре: атрибуты, модули, дочерние */
   async revert() {
     const yes = await ask({
       title: 'Вернуть систему как в игре?',
@@ -307,7 +307,7 @@ export const PACTS = {
     }
   },
 
-  /** Один параметр как в игре. */
+  /** Один параметр как в игре */
   async revertattr() {
     if (!ctxNode || !ctxNode.attr) return;
     await applyStructure(await api.revertParticleAttr(
@@ -316,7 +316,7 @@ export const PACTS = {
 };
 
 //: Копирование есть у всего, кроме детей: там ссылки, а не параметры. Первый
-//: пункт зависит от узла - копируют либо то, на чём щёлкнули, либо всё.
+//: пункт зависит от узла - копируют либо то, на чём щёлкнули, либо всё
 export function copyItems(label) {
   return [
     ...(label ? [{ label, value: 'copyone' }] : []),
@@ -333,11 +333,11 @@ export function copyItems(label) {
 export async function systemMenu(e, name, lead = []) {
   // Действия работают с выбранной системой, но выбор - только если пункт
   // выбран: закрытое меню оставляло выбранной систему под курсором, и правки
-  // панели (она показывает прежнюю) уходили не в ту систему.
+  // панели (она показывает прежнюю) уходили не в ту систему
   const prev = pSystem;
   setSystem(name);
   // «Вернуть как в игре» - только когда есть что возвращать: у стоковой
-  // системы пункт погашен, у файла без игрового собрата его нет вовсе.
+  // системы пункт погашен, у файла без игрового собрата его нет вовсе
   const status = pcfDiff.get(name);
   const chosen = await contextMenu(e, [
     ...lead, ...(lead.length ? [null] : []),
@@ -360,7 +360,7 @@ export async function systemMenu(e, name, lead = []) {
   else if (chosen) await PACTS[chosen]();
 }
 
-/** Меню в дереве свойств. Что предложить - решает узел под курсором. */
+/** Меню в дереве свойств. Что предложить - решает узел под курсором */
 export async function expertMenu(e, node) {
   const { group, index, attr } = node;
   let items;
@@ -369,7 +369,7 @@ export async function expertMenu(e, node) {
       ? [{ label: 'Добавить дочернюю…', value: 'child' }]
       : [{ label: 'Отцепить дочернюю', value: 'detach' }];
   } else if (index === null) {
-    // Заголовок группы: сюда добавляют модуль, отсюда копируют её целиком.
+    // Заголовок группы: сюда добавляют модуль, отсюда копируют её целиком
     const label = group ? `Копировать группу «${group}»` : null;
     items = [...copyItems(label), null,
              { label: 'Добавить модуль…', value: 'module' }];
@@ -387,17 +387,17 @@ export async function expertMenu(e, node) {
   const chosen = await contextMenu(e, items);
   if (!chosen) return;
   // Узел под курсором и есть адрес: кнопке «Параметр +» иначе пришлось бы
-  // угадывать, в какой модуль добавлять.
+  // угадывать, в какой модуль добавлять
   ctxNode = node;
   await PACTS[chosen]();
   ctxNode = null;
 }
 
-//: Узел, на котором открыли меню - адрес для действий над модулем.
+//: Узел, на котором открыли меню - адрес для действий над модулем
 export let ctxNode = null;
 
 /**
- * Сборка мода с эффектом.
+ * Сборка мода с эффектом
  *
  * Сначала проверка: типовые поломки (нет рендерера, нулевой максимум частиц)
  * видно только в игре, и находить их там - это заново собирать и перезапускать
@@ -432,18 +432,18 @@ export async function buildParticles() {
                            value: (pSystem || 'particles') + '.vpk' });
   if (!name) { setStatus('Готово', false); return; }
 
-  // Этапов у этой сборки нет: линия ждёт ответа и сразу идёт к финалу.
+  // Этапов у этой сборки нет: линия ждёт ответа и сразу идёт к финалу
   setBusy(true);
   dockFx.start('Сборка VPK…');
   // Отказ Python приходит исключением: без перехвата полоса так и осталась
-  // бы «в сборке».
+  // бы «в сборке»
   const res = await api.exportParticlesVpk(name)
     .catch((e) => ({ error: e.message || String(e) }));
   setBusy(false);
   if (res.error) { dockFx.finish(false, res.error); showResult(false); return; }
 
   // Обход sv_pure в казуале не грузит PCF больше оригинального: выросший
-  // файл просто не заработает, и знать об этом надо до похода в игру.
+  // файл просто не заработает, и знать об этом надо до похода в игру
   const over = res.overflow;
   dockFx.finish(true, over && over > 0
     ? `Собрано, но PCF на ${over} Б больше оригинала - в казуале не загрузится`

@@ -1,6 +1,6 @@
 """
 Стадия «основная текстура»: главный VTF/VMT материала и синяя пара
-главной ({texture}_blue) у предметов с настоящей командой.
+главной ({texture}_blue) у предметов с настоящей командой
 """
 
 import os
@@ -29,26 +29,26 @@ def build_main_material(
     Главная текстура материала: резолв RED (пользователь / «из игры»), создание
     главного VTF (готовый custom / .vtf из карточки / рендер из картинки) и запись
     главного VMT (родной игровой код с $basetexture, перенаправленным на материал).
-    ``_eff`` — замыкание эффективных пер-текстурных настроек.
+    ``_eff`` - замыкание эффективных пер-текстурных настроек
 
     Returns:
-        (image_path, animated_fps, is_normal_map, vmt_to_delete).
+        (image_path, animated_fps, is_normal_map, vmt_to_delete)
     """
     is_normal_map = False
     animated_fps = None
-    # RED не загружен — сначала спрашиваем пользователя
+    # RED не загружен - сначала спрашиваем пользователя
     # через существующий extra_texture_callback (стандартный диалог).
-    # Если callback вернул EXTRA_TEX_USE_GAME_ORIGINAL или None —
-    # извлекаем оригинал из игрового VPK.
+    # Если callback вернул EXTRA_TEX_USE_GAME_ORIGINAL или None -
+    # извлекаем оригинал из игрового VPK
     if image_path == EXTRA_TEX_USE_GAME_ORIGINAL:
-        # Без своей главной собирают ради другой правки — спрашивать,
-        # чем красить главную, незачем: она остаётся игровой.
+        # Без своей главной собирают ради другой правки - спрашивать,
+        # чем красить главную, незачем: она остаётся игровой
         if extra_texture_callback and not tex.main_from_game:
             image_path = extra_texture_callback(texture_filename, weapon_key)
             logger.info(f"Callback для основной RED текстуры: {image_path!r}")
 
         if image_path in (EXTRA_TEX_USE_GAME_ORIGINAL, EXTRA_TEX_USE_MAIN) or not image_path:
-            # «Из игры», «главную» (это и есть главная) или ничего — оригинал
+            # «Из игры», «главную» (это и есть главная) или ничего - оригинал
             _orig_red = game_source.get_original_vtf_bytes(
                 texture_filename, slots.original_cdmaterials_paths,
                 slots.tf2_textures_vpk, slots.tf2_misc_vpk
@@ -60,8 +60,8 @@ def build_main_material(
                     _f.write(_orig_red)
                 slots.game_copies.add(texture_filename.lower())
                 logger.info(f"Оригинальная RED VTF из игры: {vtf_filename}")
-                # Normal Map без своей текстуры — рельеф из игровой: превью
-                # его показывает, и мод без него расходился бы с превью.
+                # Normal Map без своей текстуры - рельеф из игровой: превью
+                # его показывает, и мод без него расходился бы с превью
                 is_normal_map = _normal_from_game_vtf(
                     _orig_red, texture_filename, original_cdmaterials_path,
                     _game_vmt_name, ctx, slots, tex, _eff)
@@ -80,16 +80,16 @@ def build_main_material(
         copy_file_safe(tex.custom_vtf_path, vtf_file_path)
         logger.info(f"Использован пользовательский VTF файл: {tex.custom_vtf_path} -> {vtf_file_path}")
     elif image_path and str(image_path).lower().endswith('.vtf'):
-        # В карточку главного материала загрузили готовый VTF —
-        # копируем как есть, без PIL-конвертации (иначе «cannot identify image»).
+        # В карточку главного материала загрузили готовый VTF -
+        # копируем как есть, без PIL-конвертации (иначе «cannot identify image»)
         ensure_directory_exists(slots.vtf_output_path)
         copy_file_safe(image_path, slots.vtf_output_path / vtf_filename)
         logger.info(f"Главная текстура: готовый VTF скопирован → {vtf_filename}")
     # Оригинальный VMT по пути из QC (до патчинга), по ИГРОВОМУ имени
-    # (c_sd_cleaver.vmt) — чтобы сохранить родной код материала
+    # (c_sd_cleaver.vmt) - чтобы сохранить родной код материала
     # (phong/прокси); _write_main_vmt переставит $basetexture на
     # texture_filename. Берётся ДО рендера: по нему видно, есть ли у
-    # материала родная нормаль, поверх которой ляжет рельеф картинки.
+    # материала родная нормаль, поверх которой ляжет рельеф картинки
     vmt_file = game_source.extract_original_vmt(
         original_cdmaterials_path, _game_vmt_name,
         slots.tf2_textures_vpk, slots.tf2_misc_vpk, ctx.decompile_dir,
@@ -111,6 +111,7 @@ def build_main_material(
             flags=_mfl,
             vtf_options=_mo,
             stock_normal=stock,
+            jobs=tex.jobs,
         )
 
     vmt_to_delete = _write_main_vmt(
@@ -133,11 +134,11 @@ def _write_main_vmt(
     """
     Записывает главный VMT текстуры и возвращает vmt_to_delete
     (имя отредактированного VMT, который надо убрать из tools/edited_vmt
-    после сборки), либо None.
+    после сборки), либо None
 
-    Приоритет источника: отредактированный пользователем VMT → извлечённый
-    из игры → шаблон по $cdmaterials. Затем: снятие красок (шапки),
-    анимация ($basetexture) и $bumpmap (normal-map).
+    Приоритет источника: отредактированный пользователем VMT -> извлечённый
+    из игры -> шаблон по $cdmaterials. Затем: снятие красок (шапки),
+    анимация ($basetexture) и $bumpmap (normal-map)
     """
     vmt_to_delete = None
     # Проверяем, есть ли отредактированный VMT файл (приоритет 1 - юзер знает лучше)
@@ -150,9 +151,9 @@ def _write_main_vmt(
         # Путь $baseTexture переводится на текстуру мода (правили по
         # игровому пути). Но если человек САМ указал другую текстуру
         # (белая основа эффекта, чужая текстура игры), это выбор, а не
-        # устаревший путь: переписанный, он молча терялся.
+        # устаревший путь: переписанный, он молча терялся
         if game_source.basetexture_chosen(edited_vmt_path, vmt_file):
-            logger.info(f"[{texture_filename}] $basetexture выбран в правке — оставлен")
+            logger.info(f"[{texture_filename}] $basetexture выбран в правке - оставлен")
         else:
             VMTService.update_vmt_basetexture_path(
                 str(vmt_path), patched_cdmaterials_path, texture_filename)
@@ -169,7 +170,7 @@ def _write_main_vmt(
         VMTService.create_vmt_template_from_cdmaterials(str(vmt_path), patched_cdmaterials_path, texture_filename)
         logger.info(f"Создан VMT файл из шаблона: {vmt_path}")
 
-    # Для шапок: если пользователь не хочет красок из игры — удаляем прокси красок
+    # Для шапок: если пользователь не хочет красок из игры - удаляем прокси красок
     if mode == "hat" and not hat_apply_game_paints:
         VMTService.remove_paint_proxies(str(vmt_path))
         logger.info(f"Удалены прокси красок из VMT файла шапки: {vmt_path}")
@@ -184,7 +185,7 @@ def _write_main_vmt(
         VMTService.update_vmt_bumpmap_path(str(vmt_path), patched_cdmaterials_path, normal_weapon_key)
         logger.info(f"Обновлен VMT файл для добавления $bumpmap: {normal_weapon_key}")
         if animated_fps:
-            # Бамп многокадровый (гифка + normal) — тот же fps, что у базы.
+            # Бамп многокадровый (гифка + normal) - тот же fps, что у базы
             VMTService.enable_animated_bumpmap(str(vmt_path), animated_fps)
     return vmt_to_delete
 
@@ -192,7 +193,7 @@ def _write_main_vmt(
 def _normal_from_game_vtf(vtf_bytes: bytes, texture_filename: str,
                           original_cdmaterials_path, game_vmt_name,
                           ctx, slots, tex, _eff) -> bool:
-    """Нормаль из игровой текстуры материала, если галка Normal Map стоит."""
+    """Нормаль из игровой текстуры материала, если галка Normal Map стоит"""
     from PIL import Image
     from src.services import normal_map
 
@@ -221,10 +222,10 @@ def _normal_from_game_vtf(vtf_bytes: bytes, texture_filename: str,
 
 
 def _stock_normal(texture_filename: str, vmt_file, slots):
-    """Родная нормаль материала (RGBA) — по VMT, который уйдёт в мод.
+    """Родная нормаль материала (RGBA) - по VMT, который уйдёт в мод
 
-    VMT — тот же, что выберет _write_main_vmt: правка человека, иначе
-    игровой. Нет $bumpmap или файла — None.
+    VMT - тот же, что выберет _write_main_vmt: правка человека, иначе
+    игровой. Нет $bumpmap или файла - None
     """
     from src.services import normal_map
     from src.services.edited_vmt_service import EditedVMTService
@@ -251,17 +252,17 @@ def maybe_build_blu_team_texture(
     """
     Создаёт {texture}_blue (командную раскраску) ТОЛЬКО если у предмета есть
     настоящая команда (blu_is_team) и он не одиночно-текстурный. У вариант-онли
-    оружия (обычный+австралий) команды нет — иначе появился бы лишний c_xxx_blue.
+    оружия (обычный+австралий) команды нет - иначе появился бы лишний c_xxx_blue
 
     Синюю пару главной берём из ЕЁ столбца: главной не обязательно нулевой
-    (у Quick-Fix первый столбец — общее стекло, корпус второй), и blu_row[0]
-    дал бы имя чужого материала.
+    (у Quick-Fix первый столбец - общее стекло, корпус второй), и blu_row[0]
+    дал бы имя чужого материала
     """
     from src.data.weapon_quirks import NO_BLU_WEAPON_KEYS as _NO_BLU
     # Создаём {texture}_blue ТОЛЬКО если у предмета есть настоящая
     # команда (blu_is_team). У вариант-онли оружия (скаттерган:
-    # обычный+австралий) команды нет — иначе появляется лишний
-    # c_xxx_blue, который движок даже не использует.
+    # обычный+австралий) команды нет - иначе появляется лишний
+    # c_xxx_blue, который движок даже не использует
     _main_col = next(
         (i for i, name in enumerate(red_row or [])
          if qc_skin_parser.is_shared_column(name, texture_filename)), 0)
@@ -274,14 +275,14 @@ def maybe_build_blu_team_texture(
         # Команда есть, но меняется НЕ главный материал (Quick-Fix: стекло
         # общее, синеет корпус). Синее имя тогда совпадает с красным, и
         # запись «синей главной» затёрла бы RED-текстуру этим же файлом.
-        # Командные столбцы пишет blu_rows.build_blu_row_textures — поколоночно.
+        # Командные столбцы пишет blu_rows.build_blu_row_textures - поколоночно
         logger.info(
             f"[{weapon_key}] BLU главной текстуры не нужен: '{texture_filename}' "
             f"одинаков в обеих командах, синеют другие материалы"
         )
     else:
-        # Реальное имя синего материала — из столбца главной (может быть
-        # w_grenade_blue при w_grenade_red), иначе дефолт «{texture}_blue».
+        # Реальное имя синего материала - из столбца главной (может быть
+        # w_grenade_blue при w_grenade_red), иначе дефолт «{texture}_blue»
         build_blu_team_texture(
             blu_mode, blu_image_path, vtf_filename, texture_filename,
             slots, tex, blu_texture_filename=_blu_col0,
@@ -298,20 +299,20 @@ def build_blu_team_texture(
     blu_texture_filename: Optional[str] = None,
 ) -> None:
     """
-    Создаёт BLU-командную текстуру (и VMT) рядом с RED.
+    Создаёт BLU-командную текстуру (и VMT) рядом с RED
 
-    blu_mode == 'same'        → копия RED VTF;
-    иначе при blu_image_path  → отдельное изображение → VTF.
-    BLU VMT — копия RED VMT с обновлённым $basetexture. Ошибки не критичны
-    (мод соберётся и без BLU-варианта).
+    blu_mode == 'same'        -> копия RED VTF;
+    иначе при blu_image_path  -> отдельное изображение -> VTF.
+    BLU VMT - копия RED VMT с обновлённым $basetexture. Ошибки не критичны
+    (мод соберётся и без BLU-варианта)
 
-    blu_texture_filename — РЕАЛЬНОЕ имя синего материала из $texturegroup
+    blu_texture_filename - РЕАЛЬНОЕ имя синего материала из $texturegroup
     (та же колонка, что у главной). Нужно, т.к. имя может уже нести суффикс
-    _red (w_grenade_red → w_grenade_blue), и «{texture}_blue» дало бы
-    неверное w_grenade_red_blue. По умолчанию — «{texture}_blue».
+    _red (w_grenade_red -> w_grenade_blue), и «{texture}_blue» дало бы
+    неверное w_grenade_red_blue. По умолчанию - «{texture}_blue»
 
     Примечание: BLU намеренно использует только UI-опции (tex.vtf_options),
-    не подмешивая опции из флагов — поведение сохранено как в оригинале.
+    не подмешивая опции из флагов - поведение сохранено как в оригинале
     """
     if not blu_mode or blu_mode in ('none', ''):
         return
@@ -323,12 +324,13 @@ def build_blu_team_texture(
         blu_created = False
 
         if blu_mode == 'same':
+            tex.wait_vtfs()
             if red_vtf_path.exists():
                 shutil.copy2(red_vtf_path, blu_vtf_path)
                 blu_created = True
                 logger.info(f"BLU текстура скопирована из RED: {blu_vtf_name}")
         elif blu_image_path and str(blu_image_path).lower().endswith('.vtf'):
-            # В BLU-карточку загрузили готовый VTF — копируем как есть
+            # В BLU-карточку загрузили готовый VTF - копируем как есть
             copy_file_safe(blu_image_path, blu_vtf_path)
             blu_created = blu_vtf_path.exists()
             if blu_created:
@@ -338,7 +340,7 @@ def build_blu_team_texture(
             TextureService.process_image(blu_image_path, str(blu_png_tmp), tex.size)
             blu_vtf_flags, _ = TextureService.parse_vtf_flags_and_options(tex.flags or [])
             blu_opts = dict(tex.vtf_options or {})
-            blu_opts.pop('normal', None)   # BLU — не normal map
+            blu_opts.pop('normal', None)   # BLU - не normal map
             TextureService.create_vtf(
                 str(blu_png_tmp), str(slots.vtf_output_path), tex.format_type, blu_vtf_flags, blu_opts
             )
@@ -348,7 +350,7 @@ def build_blu_team_texture(
             if blu_created:
                 logger.info(f"BLU текстура создана: {blu_vtf_name}")
 
-        # BLU VMT — копия RED с обновлённым $basetexture
+        # BLU VMT - копия RED с обновлённым $basetexture
         if blu_created and slots.vmt_path.exists():
             blu_vmt_path = slots.vtf_output_path / f"{blu_name}.vmt"
             shutil.copy2(slots.vmt_path, blu_vmt_path)

@@ -4,21 +4,21 @@
 в weapons.py; здесь - исключения, которые читают сборка и 3D-превью:
 доп. текстуры по фиксированным путям, оружие без BLU, зеркальные VMT,
 «только материалы», подмена модели превью и фильтр своих материалов,
-доп. файлы мода, нестандартные пути VTF.
+доп. файлы мода, нестандартные пути VTF
 """
 
-# ── Доп. текстуры по фиксированному пути (вне QC/модели) ──────────────────────
+# Доп. текстуры по фиксированному пути (вне QC/модели)
 # Некоторые предметы используют текстуры, которых НЕТ ни в $texturegroup, ни в
 # геометрии модели (например HUD-вставки Dead Ringer). Их нельзя найти через
-# материалы модели — путь зашит в игре. Здесь задаём такие текстуры явно:
+# материалы модели - путь зашит в игре. Здесь задаём такие текстуры явно:
 #   {weapon_key: [{"name", "vpk" (путь в VPK с materials/...vtf), "ru", "en"}]}
-# Превью покажет для них слот, сборка запишет картинку ровно по этому пути.
+# Превью покажет для них слот, сборка запишет картинку ровно по этому пути
 WEAPON_EXTRA_TEXTURES: dict[str, list[dict]] = {
     "c_pocket_watch": [
         {
             "name": "pocket_watch_fg",
             "vpk":  "materials/vgui/replay/thumbnails/deadringer/pocket_watch_fg.vtf",
-            # Оригинал в игре — здесь; мод кладёт свою в папку обхода sv_pure.
+            # Оригинал в игре - здесь, мод кладёт свою в папку обхода sv_pure
             "game": "materials/vgui/pocket_watch_fg.vtf",
             # VMT кладём В ТУ ЖЕ папку, что и VTF (так требует игра, без дублей vgui)
             "vmt":  "materials/vgui/replay/thumbnails/deadringer/pocket_watch_fg.vmt",
@@ -34,42 +34,42 @@ WEAPON_EXTRA_TEXTURES: dict[str, list[dict]] = {
     ],
 }
 
-# ── Оружие без BLU-команды ───────────────────────────────────────────────────
+# Оружие без BLU-команды
 # У некоторых предметов модель использует ОДНУ текстуру для обеих команд
-# (напр. часы шпиона). Для них не нужно создавать BLU-вариант — игнорируем
-# blu_row из $texturegroup, иначе в мод попадёт лишняя _blue текстура.
+# (напр. часы шпиона). Для них не нужно создавать BLU-вариант - игнорируем
+# blu_row из $texturegroup, иначе в мод попадёт лишняя _blue текстура
 NO_BLU_WEAPON_KEYS: frozenset = frozenset({"c_pocket_watch", "v_hm_watch", "v_ttg_watch_spy"})
 
-# ── Оружие, которому нужен зеркальный VMT по оригинальному пути ───────────────
+# Оружие, которому нужен зеркальный VMT по оригинальному пути
 # Некоторые предметы отображаются в игре ДРУГОЙ моделью, чем та, что собирает
 # инструмент, и ссылаются на текстуру по ОРИГИНАЛЬНОМУ пути материала, а не по
 # пропатченному console\. Для них создаём зеркальный VMT по оригинальному
-# $cdmaterials-пути — тогда «чужая» модель найдёт скин.
+# $cdmaterials-пути - тогда «чужая» модель найдёт скин.
 # Dead Ringer виден через РОДНОЙ viewmodel (v_watch_pocket_spy), который смотрит
 # на материал по ОРИГИНАЛЬНОМУ пути. Зеркальный VMT по этому пути ссылается на
-# console-VTF (текстура + все карты), поэтому папку console оставляем как есть.
+# console-VTF (текстура + все карты), поэтому папку console оставляем как есть
 MIRROR_VMT_WEAPON_KEYS: frozenset = frozenset({"c_pocket_watch", "v_hm_watch", "v_ttg_watch_spy"})
 
-# ── Оружие «только материалы» (без модели в моде) ────────────────────────────
+# Оружие «только материалы» (без модели в моде)
 # Эти предметы отображаются РОДНОЙ игровой моделью (напр. Dead Ringer виден
 # через viewmodel v_watch_pocket_spy). Своя перекомпилированная модель в моде
 # не нужна и вредна (игра подхватит «чужую»). Собираем только материалы (VTF/VMT
-# по console-пути) + зеркальный VMT по оригинальному пути — родная модель найдёт
-# скин и карты материала. Модель .mdl в мод НЕ кладём.
+# по console-пути) + зеркальный VMT по оригинальному пути - родная модель найдёт
+# скин и карты материала. Модель .mdl в мод НЕ кладём
 MATERIAL_ONLY_WEAPON_KEYS: frozenset = frozenset({"c_pocket_watch", "v_hm_watch", "v_ttg_watch_spy"})
 
-# ── 3D-превью: подмена модели и фильтр материалов ────────────────────────────
+# 3D-превью: подмена модели и фильтр материалов
 # Для некоторых предметов в 3D надо показывать ДРУГУЮ модель, чем собирает
 # инструмент. Dead Ringer: собираем c_pocket_watch, но в игре от первого лица
 # видно viewmodel v_watch_pocket_spy (руки + часы в одном меше). Показываем его,
-# оставляя только меши часов (материалы по whitelist), руки скрываем.
+# оставляя только меши часов (материалы по whitelist), руки скрываем
 PREVIEW_MDL_OVERRIDE: dict[str, str] = {
     "c_pocket_watch": "models/weapons/v_models/v_watch_pocket_spy.mdl",
 }
 # Подстроки имён материалов, которые у модели ЕДИНСТВЕННО свои: превью
 # оставляет только эти меши, сборка правит и пишет только эти материалы.
 # Крякенптиц и Часы ярого поклонника в игре - вьюмодели с руками шпиона, а
-# spy_hands_red/blue - общая текстура рук всего его оружия: мод их не трогает.
+# spy_hands_red/blue - общая текстура рук всего его оружия: мод их не трогает
 MODEL_MATERIAL_WHITELIST: dict[str, tuple] = {
     "c_pocket_watch": ("watch",),   # c_pocket_watch / pocket_watch_fg / pocket_watch_bg
     "v_hm_watch": ("watch",),       # v_hm_watch (+ spy_hands_*)
@@ -78,14 +78,14 @@ MODEL_MATERIAL_WHITELIST: dict[str, tuple] = {
 
 
 def is_own_material(weapon_key: str, material: str) -> bool:
-    """Свой ли материал модели (MODEL_MATERIAL_WHITELIST); без правила - все свои."""
+    """Свой ли материал модели (MODEL_MATERIAL_WHITELIST), без правила - все свои"""
     keep = MODEL_MATERIAL_WHITELIST.get(weapon_key)
     return not keep or any(s in (material or '').lower() for s in keep)
 
-# ── Доп. статические файлы мода (скрипты/метаданные) ─────────────────────────
+# Доп. статические файлы мода (скрипты/метаданные)
 # Некоторым предметам нужны не-материальные файлы в моде: HUD-скрипты (.res),
 # метаданные мода (info.vdf) и т.п. Кладутся в корень VPK по указанному пути
-# ровно с заданным содержимым. {weapon_key: [{"path", "content"}]}.
+# ровно с заданным содержимым. {weapon_key: [{"path", "content"}]}
 WEAPON_EXTRA_FILES: dict[str, list[dict]] = {
     "c_pocket_watch": [
         {
@@ -112,9 +112,9 @@ WEAPON_EXTRA_FILES: dict[str, list[dict]] = {
     ],
 }
 
-# ── Нестандартные пути VTF (дополнительные пути для поиска текстур) ───────────
+# Нестандартные пути VTF (дополнительные пути для поиска текстур)
 # Используются как приоритетный список ПЕРЕД стандартными путями.
-# Нужны когда имя/папка текстуры не совпадает с weapon_key.
+# Нужны когда имя/папка текстуры не совпадает с weapon_key
 
 WEAPON_TEXTURE_PATHS: dict[str, list[str]] = {
     # Fire Axe: текстура в c_fireaxe_pyro/
@@ -197,7 +197,7 @@ WEAPON_TEXTURE_PATHS: dict[str, list[str]] = {
     "w_sd_sapper": [
         "materials/models/weapons/w_models/w_sd_sapper/w_sd_sapper.vtf",
     ],
-    # ── Текстуры тела персонажа (materials/models/player/…) ─────────────────────
+    # Текстуры тела персонажа (materials/models/player/…)
     "player_scout":    ["materials/models/player/scout/scout_red.vtf"],
     "player_soldier":  ["materials/models/player/soldier/soldier_red.vtf"],
     "player_pyro":     ["materials/models/player/pyro/pyro_red.vtf"],
@@ -207,7 +207,7 @@ WEAPON_TEXTURE_PATHS: dict[str, list[str]] = {
     "player_medic":    ["materials/models/player/medic/medic_red.vtf"],
     "player_sniper":   ["materials/models/player/sniper/sniper_red.vtf"],
     "player_spy":      ["materials/models/player/spy/spy_red.vtf"],
-    # ── Текстуры рук (materials/models/player/…) ──────────────────────────────
+    # Текстуры рук (materials/models/player/…)
     "c_scout_arms": [
         "materials/models/player/scout/scout_hands.vtf",
     ],

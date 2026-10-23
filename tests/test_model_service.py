@@ -25,7 +25,7 @@ class ModelServiceTests(unittest.TestCase):
             base = Path(tmp)
             ctx = BuildContext("id", "m", "w", base / "ctx")
             ctx.create_directories()
-            with patch("src.services.model_service.SMDService.find_reference_smd", return_value=None):
+            with patch("src.services.model_service.smd_service.find_reference_smd", return_value=None):
                 ModelService.generate_uv_layout(ctx, "weapon", (4, 4), export_folder=str(base))
 
     def test_generate_uv_layout_success(self):
@@ -35,7 +35,7 @@ class ModelServiceTests(unittest.TestCase):
             ctx.create_directories()
             smd_path = base / "weapon_reference.smd"
             smd_path.write_text("x", encoding="utf-8")
-            with patch("src.services.model_service.SMDService.find_reference_smd", return_value=str(smd_path)):
+            with patch("src.services.model_service.smd_service.find_reference_smd", return_value=str(smd_path)):
                 with patch("src.services.uv_layout_service.UVLayoutService.generate_uv_layout_from_smd", return_value=True) as generate:
                     ModelService.generate_uv_layout(ctx, "weapon", (4, 4), export_folder=str(base))
             generate.assert_called()

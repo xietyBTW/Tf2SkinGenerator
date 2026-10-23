@@ -1,23 +1,23 @@
 """
-Конструктор $lightwarptexture — полоски, которая перекрашивает освещение.
+Конструктор $lightwarptexture - полоски, которая перекрашивает освещение
 
 Как её читает игра (source-sdk-2013, common_vertexlitgeneric_dx9.h,
-DiffuseTerm): освещённость точки в half-lambert, `0.5·N·L + 0.5` (0 — тень,
-1 — прямой свет), — это координата X полоски, а результат
+DiffuseTerm): освещённость точки в half-lambert, `0.5·N·L + 0.5` (0 - тень,
+1 - прямой свет), - это координата X полоски, а результат
 `2.0 · tex1D(lightwarp, x)`. Отсюда:
 
   * пиксель 128 (0.5) = обычная яркость, 255 = пересвет вдвое;
   * полоска читается ЛИНЕЙНО (EnableSRGBRead для её сэмплера не зовётся ни в
-    vertexlitgeneric_dx9_helper.cpp, ни в skin_dx9_helper.cpp) — пишем числа
+    vertexlitgeneric_dx9_helper.cpp, ни в skin_dx9_helper.cpp) - пишем числа
     как есть, без гамма-коррекции;
-  * нужна ширина 256 (больше — без пользы), высота 1, BGR888 без сжатия
-    (DXT даёт полосы на градиенте), CLAMPS/CLAMPT, без мипов —
+  * нужна ширина 256 (больше - без пользы), высота 1, BGR888 без сжатия
+    (DXT даёт полосы на градиенте), CLAMPS/CLAMPT, без мипов -
     developer.valvesoftware.com/wiki/$lightwarptexture. Формат и флаги
-    задаёт MATERIAL_MAPS['lightwarp'].
+    задаёт MATERIAL_MAPS['lightwarp']
 
-Основа — НАСТОЯЩИЕ полоски игры, а не придуманные формулы: нейтральная
+Основа - НАСТОЯЩИЕ полоски игры, а не придуманные формулы: нейтральная
 `dev/identitylightwarp` (Valve: «как будто lightwarp нет») S-образная, и её
-приближение x/2 ошибается до 7/255. Без игры основа — x/2.
+приближение x/2 ошибается до 7/255. Без игры основа - x/2
 """
 
 from __future__ import annotations
@@ -35,29 +35,29 @@ logger = get_logger(__name__)
 WIDTH = 256
 
 #: Основы: (VPK относительно корня игры, путь текстуры). Сколько материалов
-#: TF2 берёт каждую, посчитано по tf2_misc/tf2_textures (2026-10-13).
+#: TF2 берёт каждую, посчитано по tf2_misc/tf2_textures
 PRESETS: Dict[str, Tuple[str, str]] = {
-    # 6231 материал: персонажи и большинство вещей.
+    # 6231 материал: персонажи и большинство вещей
     'tf2_player': ('tf/tf2_textures_dir.vpk', 'models/player/pyro/pyro_lightwarp'),
-    # 956: резкая двухтоновая ступень.
+    # 956: резкая двухтоновая ступень
     'tf2_weapon': ('tf/tf2_textures_dir.vpk', 'models/lightwarps/weapon_lightwarp'),
-    # 123: мягкий переход.
+    # 123: мягкий переход
     'tf2_soft': ('tf/tf2_textures_dir.vpk', 'models/lightwarps/softened_weapon_lightwarp'),
-    # Valve: так модель выглядит без $lightwarptexture.
+    # Valve: так модель выглядит без $lightwarptexture
     'neutral': ('hl2/hl2_textures_dir.vpk', 'dev/identitylightwarp'),
 }
 DEFAULT_PRESET = 'tf2_player'
-#: Своя основа — цветные точки (`stops`), их значения пишутся в файл как есть.
+#: Своя основа - цветные точки (`stops`), их значения пишутся в файл как есть
 CUSTOM = 'custom'
 MAX_STEPS = 8
 MAX_STOPS = 16
-#: «Как без lightwarp» по яркости: от чёрного до 128 (в игре ×2 = обычная).
+#: «Как без lightwarp» по яркости: от чёрного до 128 (в игре ×2 = обычная)
 DEFAULT_STOPS = [[0.0, '#000000'], [1.0, '#808080']]
 
-#: Значения по умолчанию — «полоска основы как есть».
+#: Значения по умолчанию - «полоска основы как есть»
 DEFAULTS = {
     'preset': DEFAULT_PRESET,
-    'steps': 0,                 # 0 — плавно, 2..8 — ступени (cel shading)
+    'steps': 0,                 # 0 - плавно, 2..8 - ступени (cel shading)
     'shadow_color': '#4060c0',
     'shadow': 0,                # сила оттенка теней, 0..100
     'light_color': '#ffd090',
@@ -70,7 +70,7 @@ _HEX = re.compile(r'^#[0-9a-fA-F]{6}$')
 
 
 def clean_params(raw) -> Dict[str, object]:
-    """Параметры со страницы → проверенные (всё лишнее и битое — к умолчаниям)."""
+    """Параметры со страницы -> проверенные (всё лишнее и битое - к умолчаниям)"""
     raw = raw if isinstance(raw, dict) else {}
 
     def num(key, lo, hi):
@@ -98,7 +98,7 @@ def clean_params(raw) -> Dict[str, object]:
 
 
 def clean_stops(raw) -> list:
-    """Точки градиента: 2..16 штук, позиция 0..1, цвет #rrggbb, по порядку."""
+    """Точки градиента: 2..16 штук, позиция 0..1, цвет #rrggbb, по порядку"""
     stops = []
     for item in raw if isinstance(raw, (list, tuple)) else ():
         try:
@@ -114,11 +114,11 @@ def clean_stops(raw) -> list:
 
 
 def stops_curve(stops) -> np.ndarray:
-    """Полоска из точек: между соседними — прямая по каждому каналу. Две
-    точки на одной позиции — резкая граница (cel shading без ступеней)."""
+    """Полоска из точек: между соседними - прямая по каждому каналу. Две
+    точки на одной позиции - резкая граница (cel shading без ступеней)"""
     x = np.linspace(0.0, 1.0, WIDTH)
     pos = np.array([st[0] for st in stops], np.float64)
-    # np.interp ждёт неубывающие позиции; совпавшие разводим на волосок.
+    # np.interp ждёт неубывающие позиции, совпавшие разводим на волосок
     pos = pos + np.arange(len(pos)) * 1e-6
     rgb = np.array([[int(st[1][i:i + 2], 16) for i in (1, 3, 5)] for st in stops],
                    np.float64) / 255.0
@@ -126,10 +126,10 @@ def stops_curve(stops) -> np.ndarray:
 
 
 def to_stops(curve: np.ndarray, tolerance: int = 3) -> list:
-    """Готовая полоска (256×3 uint8) → немного точек, по которым она
+    """Готовая полоска (256×3 uint8) -> немного точек, по которым она
     повторяется с ошибкой не больше `tolerance` из 255. Резкая ступень
     weapon_lightwarp так и остаётся резкой: точку кладём туда, где ошибка
-    наибольшая."""
+    наибольшая"""
     curve = np.asarray(curve, np.float64)
     picks = [0, WIDTH - 1]
     while len(picks) < MAX_STOPS:
@@ -145,12 +145,12 @@ def to_stops(curve: np.ndarray, tolerance: int = 3) -> list:
 
 
 #: {(основа, папка игры): полоска}. Только удачные чтения: запасная x/2,
-#: запомненная при занятом VPK, держалась бы до перезапуска.
+#: запомненная при занятом VPK, держалась бы до перезапуска
 _CURVES: Dict[Tuple[str, str], Tuple[Tuple[float, float, float], ...]] = {}
 
 
 def _preset_curve(preset: str, tf2_root: str) -> Tuple[Tuple[float, float, float], ...]:
-    """Полоска основы из игры: 256 значений RGB 0..1 (средняя строка VTF)."""
+    """Полоска основы из игры: 256 значений RGB 0..1 (средняя строка VTF)"""
     cached = _CURVES.get((preset, tf2_root))
     if cached is not None:
         return cached
@@ -168,7 +168,7 @@ def _preset_curve(preset: str, tf2_root: str) -> Tuple[Tuple[float, float, float
             reader.close()
         rgba = normal_map.rgba_from_vtf(data) if data else None
     if rgba is None:
-        logger.warning(f"[lightwarp] основа {preset!r} не найдена в игре — беру x/2")
+        logger.warning(f"[lightwarp] основа {preset!r} не найдена в игре - беру x/2")
         x = np.linspace(0.0, 0.5, WIDTH)
         return tuple((v, v, v) for v in x)
     row = rgba[rgba.shape[0] // 2, :, :3].astype(np.float64) / 255.0
@@ -182,14 +182,14 @@ def _preset_curve(preset: str, tf2_root: str) -> Tuple[Tuple[float, float, float
 
 
 def _linear(hex_color: str) -> np.ndarray:
-    """Цвет из палитры (sRGB) → линейный: полоска читается линейно."""
+    """Цвет из палитры (sRGB) -> линейный: полоска читается линейно"""
     srgb = np.array([int(hex_color[i:i + 2], 16) for i in (1, 3, 5)], np.float64) / 255.0
     return np.where(srgb <= 0.04045, srgb / 12.92, ((srgb + 0.055) / 1.055) ** 2.4)
 
 
 def _tint(curve: np.ndarray, color: np.ndarray, weight: np.ndarray) -> np.ndarray:
     """Сдвиг оттенка без изменения яркости: цвет нормируется по яркости, и
-    тень остаётся тенью, а свет светом."""
+    тень остаётся тенью, а свет светом"""
     lum = lambda c: c @ np.array([0.2126, 0.7152, 0.0722])
     hue = color / max(float(lum(color)), 0.05)
     tinted = lum(curve)[:, None] * hue[None, :]
@@ -197,7 +197,7 @@ def _tint(curve: np.ndarray, color: np.ndarray, weight: np.ndarray) -> np.ndarra
 
 
 def ramp(params, tf2_root: str = '') -> np.ndarray:
-    """Полоска 256×3 uint8 по параметрам (`clean_params`)."""
+    """Полоска 256×3 uint8 по параметрам (`clean_params`)"""
     p = clean_params(params)
     if p['preset'] == CUSTOM:
         curve = stops_curve(p['stops'])
@@ -206,15 +206,15 @@ def ramp(params, tf2_root: str = '') -> np.ndarray:
     x = np.linspace(0.0, 1.0, WIDTH)
 
     if p['steps']:
-        # Ступени: внутри полосы освещённости — значение основы в её
-        # середине. Это и есть cel shading из статьи Valve про lightwarp.
+        # Ступени: внутри полосы освещённости - значение основы в её
+        # середине. Это и есть cel shading из статьи Valve про lightwarp
         n = p['steps']
         band = np.minimum((x * n).astype(int), n - 1)
         centre = ((band + 0.5) / n * (WIDTH - 1)).round().astype(int)
         curve = curve[centre]
 
     # Оттенки - только у основ игры: в своём градиенте цвет задают точки, и
-    # второй способ подкрасить то же место лишь путал бы.
+    # второй способ подкрасить то же место лишь путал бы
     if p['shadow'] and p['preset'] != CUSTOM:
         curve = _tint(curve, _linear(p['shadow_color']), p['shadow'] / 100 * (1 - x) ** 2)
     if p['light'] and p['preset'] != CUSTOM:
@@ -224,7 +224,7 @@ def ramp(params, tf2_root: str = '') -> np.ndarray:
 
 
 def write_png(params, out_path: str, tf2_root: str = '') -> str:
-    """PNG 256×1 для сборки (формат и флаги VTF — из MATERIAL_MAPS)."""
+    """PNG 256×1 для сборки (формат и флаги VTF - из MATERIAL_MAPS)"""
     from PIL import Image
 
     Image.fromarray(ramp(params, tf2_root)[None, :, :], 'RGB').save(out_path)

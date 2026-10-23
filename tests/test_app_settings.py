@@ -1,8 +1,8 @@
 """
-Настройки приложения через прикладной API.
+Настройки приложения через прикладной API
 
 Конфиг общий с окном, поэтому проверяется главное: страница не должна молча
-менять то, чего в файле ещё нет.
+менять то, чего в файле ещё нет
 """
 
 import json
@@ -17,7 +17,7 @@ from src.data.material_filter import parse_blacklist
 
 
 class BlacklistParsingTests(unittest.TestCase):
-    """Список исключений человек пишет и строками, и через запятую."""
+    """Список исключений человек пишет и строками, и через запятую"""
 
     def test_both_separators_work(self):
         self.assertEqual(parse_blacklist('a, b\nc'), ['a', 'b', 'c'])
@@ -30,7 +30,7 @@ class BlacklistParsingTests(unittest.TestCase):
 
 
 class SettingsRoundTripTests(unittest.TestCase):
-    """Сохранение не должно менять то, чего пользователь не трогал."""
+    """Сохранение не должно менять то, чего пользователь не трогал"""
 
     def setUp(self):
         AppConfig.invalidate_cache()
@@ -44,10 +44,10 @@ class SettingsRoundTripTests(unittest.TestCase):
         return config_dir / 'settings.json'
 
     def test_unset_checkbox_keeps_its_app_default(self):
-        """`particles_group_tree` в окне включён по умолчанию.
+        """`particles_group_tree` в окне включён по умолчанию
 
         Если отдать его как «не задан», страница покажет галку снятой и первое
-        же сохранение молча выключит группировку дерева частиц.
+        же сохранение молча выключит группировку дерева частиц
         """
         with tempfile.TemporaryDirectory() as tmp:
             config_file = self._isolated(tmp)
@@ -65,7 +65,7 @@ class SettingsRoundTripTests(unittest.TestCase):
                 self.assertEqual(before, after)
 
     def test_unknown_keys_are_ignored(self):
-        """Страница правит только свои ключи: геометрия окна ей не принадлежит."""
+        """Страница правит только свои ключи: геометрия окна ей не принадлежит"""
         with tempfile.TemporaryDirectory() as tmp:
             config_file = self._isolated(tmp)
             with patch.object(AppConfig, 'CONFIG_FILE', config_file):
@@ -76,7 +76,7 @@ class SettingsRoundTripTests(unittest.TestCase):
             self.assertNotEqual(saved.get('window_geometry'), 'взлом')
 
     def test_empty_export_folder_falls_back(self):
-        """Безымянная папка сломала бы сборку молча, на записи файла."""
+        """Безымянная папка сломала бы сборку молча, на записи файла"""
         with tempfile.TemporaryDirectory() as tmp:
             config_file = self._isolated(tmp)
             with patch.object(AppConfig, 'CONFIG_FILE', config_file):
@@ -92,7 +92,7 @@ class SettingsRoundTripTests(unittest.TestCase):
             self.assertEqual(values['material_blacklist'], ['eyeball', 'teeth'])
 
     def test_build_fx_keeps_only_known_groups_and_plain_words(self):
-        """Выбор анимации сборки: варианты знает страница, конфиг — только форму."""
+        """Выбор анимации сборки: варианты знает страница, конфиг - только форму"""
         with tempfile.TemporaryDirectory() as tmp:
             config_file = self._isolated(tmp)
             with patch.object(AppConfig, 'CONFIG_FILE', config_file):
@@ -106,7 +106,7 @@ class SettingsRoundTripTests(unittest.TestCase):
             self.assertEqual(values['build_fx'], {})
 
     def test_model_cache_cap_comes_from_the_list(self):
-        """Потолок кэша моделей: только из предложенных, остальное — 1 ГБ."""
+        """Потолок кэша моделей: только из предложенных, остальное - 1 ГБ"""
         with tempfile.TemporaryDirectory() as tmp:
             config_file = self._isolated(tmp)
             with patch.object(AppConfig, 'CONFIG_FILE', config_file), \
@@ -121,7 +121,7 @@ class SettingsRoundTripTests(unittest.TestCase):
 
 
 class UiStateTests(unittest.TestCase):
-    """Ширина панели и громкость: их правят на экране, а хранит тот же конфиг."""
+    """Ширина панели и громкость: их правят на экране, а хранит тот же конфиг"""
 
     def setUp(self):
         AppConfig.invalidate_cache()
@@ -144,7 +144,7 @@ class UiStateTests(unittest.TestCase):
         self.assertEqual(values['sound_volume'], 42)
 
     def test_defaults_when_nothing_saved(self):
-        """0 — «край не трогали»: ширину задаёт CSS, а она разная у двух режимов."""
+        """0 - «край не трогали»: ширину задаёт CSS, а она разная у двух режимов"""
         with tempfile.TemporaryDirectory() as tmp:
             with patch.object(AppConfig, 'CONFIG_FILE', self._isolated(tmp)):
                 values = api.settings('ru')['values']
@@ -153,7 +153,7 @@ class UiStateTests(unittest.TestCase):
         self.assertEqual(values['sound_volume'], 100)
 
     def test_values_are_clamped_and_junk_falls_back(self):
-        """Конфиг правят и руками: панель шириной в экран — не настройка."""
+        """Конфиг правят и руками: панель шириной в экран - не настройка"""
         with tempfile.TemporaryDirectory() as tmp:
             with patch.object(AppConfig, 'CONFIG_FILE', self._isolated(tmp)):
                 api.set_ui_state('sound_volume', 300)
@@ -164,11 +164,11 @@ class UiStateTests(unittest.TestCase):
                 self.assertEqual(api.settings('ru')['values']['params_width'], 0)
 
     def test_unknown_key_is_refused(self):
-        """Свой набор ключей: иначе страница писала бы в конфиг что угодно."""
+        """Свой набор ключей: иначе страница писала бы в конфиг что угодно"""
         with tempfile.TemporaryDirectory() as tmp:
             with patch.object(AppConfig, 'CONFIG_FILE', self._isolated(tmp)):
                 self.assertIn('error', api.set_ui_state('window_geometry', 'взлом'))
-                # Отказ не пишет вообще ничего — файла может ещё не быть.
+                # Отказ не пишет вообще ничего - файла может ещё не быть
                 saved = AppConfig.load_config()
         self.assertNotEqual(saved.get('window_geometry'), 'взлом')
 
@@ -178,18 +178,18 @@ if __name__ == '__main__':
 
 
 class PickFolderTests(unittest.TestCase):
-    """«Обзор…» в настройках: куда открывается диалог и что без окна."""
+    """«Обзор…» в настройках: куда открывается диалог и что без окна"""
 
     def tearDown(self):
         api.set_folder_picker(None)
 
     def test_without_app_window_says_so(self):
-        """В обычном браузере диалога нет — ошибка, а не молчание."""
+        """В обычном браузере диалога нет - ошибка, а не молчание"""
         api.set_folder_picker(None)
         self.assertIn('error', api.pick_folder('export'))
 
     def test_relative_path_opens_in_data_folder(self):
-        """«export» из поля — это папка данных/export, а не текущая папка."""
+        """«export» из поля - это папка данных/export, а не текущая папка"""
         seen = []
         api.set_folder_picker(lambda start: seen.append(start) or r'D:\Mods')
         with tempfile.TemporaryDirectory() as tmp:

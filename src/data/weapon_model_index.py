@@ -1,9 +1,9 @@
 """
-Индекс путей моделей оружия из items_game.txt (как у шапок, но для c_model оружия).
+Индекс путей моделей оружия из items_game.txt (как у шапок, но для c_model оружия)
 
-Источник: {tf2_root}/tf/scripts/items/items_game.txt — авторитетные пути model_player.
+Источник: {tf2_root}/tf/scripts/items/items_game.txt - авторитетные пути model_player.
 Это убирает разрозненные ручные оверрайды путей: точный путь (папка+файл) берётся
-прямо из игры. Кэшируется по mtime в cache/weapon_paths_cache.json.
+прямо из игры. Кэшируется по mtime в cache/weapon_paths_cache.json
 
 Публичное API:
   weapon_model_index(tf2_root) -> {basename_lower: model_player_path}
@@ -28,9 +28,9 @@ _MODEL_RE = re.compile(r'"model_player[^"]*"\s+"([^"]+\.mdl)"', re.IGNORECASE)
 _MODEL_ANY_RE = re.compile(r'"model"\s+"([^"]+\.mdl)"', re.IGNORECASE)
 _ATTACHED_BLOCK_RE = re.compile(r'"attached_models"\s*\{(.*?)\n\s*\}', re.S | re.I)
 
-# Память процесса: tf2_root -> индекс (чтобы не парсить 8 МБ повторно за сессию).
+# Память процесса: tf2_root -> индекс (чтобы не парсить 8 МБ повторно за сессию)
 _MEM: Dict[str, Dict[str, str]] = {}
-#: tf2_root -> стебли моделей-украшений (см. attachment_only_models).
+#: tf2_root -> стебли моделей-украшений (см. attachment_only_models)
 _MEM_ATTACHED: Dict[str, set] = {}
 
 
@@ -42,10 +42,10 @@ def get_items_game_path(tf2_root: str) -> Optional[Path]:
 
 
 def _parse(filepath: Path) -> Dict[str, str]:
-    """basename(.mdl без расш., lower) -> исходный model_player путь.
+    """basename(.mdl без расш., lower) -> исходный model_player путь
 
     Берём только оружейные модели (c_models / c_items). Первый встреченный путь
-    для стебля выигрывает (model_player идёт раньше прочих вариантов в блоке)."""
+    для стебля выигрывает (model_player идёт раньше прочих вариантов в блоке)"""
     try:
         txt = filepath.read_text(encoding="utf-8", errors="replace")
     except Exception as e:
@@ -78,7 +78,7 @@ def _cache_valid(tf2_root: str) -> bool:
 
 
 def weapon_model_index(tf2_root: str) -> Dict[str, str]:
-    """Индекс {basename: model_player_path}. Пустой, если items_game недоступен."""
+    """Индекс {basename: model_player_path}. Пустой, если items_game недоступен"""
     if not tf2_root:
         return {}
     if tf2_root in _MEM:
@@ -106,7 +106,7 @@ def weapon_model_index(tf2_root: str) -> Dict[str, str]:
 
 
 def resolve_weapon_mdl(weapon_key: str, tf2_root: str) -> Optional[str]:
-    """Точный путь model_player для ключа оружия из items_game (или None)."""
+    """Точный путь model_player для ключа оружия из items_game (или None)"""
     if not weapon_key or not tf2_root:
         return None
     return weapon_model_index(tf2_root).get(weapon_key.lower())
@@ -114,16 +114,16 @@ def resolve_weapon_mdl(weapon_key: str, tf2_root: str) -> Optional[str]:
 
 def attachment_only_models(tf2_root: str) -> set:
     """
-    Модели, которые игра только НАВЕШИВАЕТ на оружие, а не рисует как оружие.
+    Модели, которые игра только НАВЕШИВАЕТ на оружие, а не рисует как оружие
 
     Праздничные пушки собраны из базовой модели плюс отдельная модель-гирлянда,
-    объявленная в items_game блоком "attached_models" (c_minigun_xmas — это
-    ровно гирлянда: в ней два материала, оба — лампочки). Ключ такой модели
+    объявленная в items_game блоком "attached_models" (c_minigun_xmas - это
+    ровно гирлянда: в ней два материала, оба - лампочки). Ключ такой модели
     выглядит в списке как обычное оружие, но перекраска меняет украшение, а не
-    ствол: сам ствол — базовая запись оружия.
+    ствол: сам ствол - базовая запись оружия
 
     Возвращает стебли имён, встречающиеся ТОЛЬКО в attached_models. Пусто, если
-    items_game недоступен.
+    items_game недоступен
     """
     if not tf2_root:
         return set()
@@ -152,7 +152,7 @@ def attachment_only_models(tf2_root: str) -> set:
 
 
 #: Ключи нашего списка, которых items_game не знает под этим именем: модель
-#: в каталоге старая или переименованная, а иконка объявлена у нынешней.
+#: в каталоге старая или переименованная, а иконка объявлена у нынешней
 MODEL_ALIASES = {
     "c_dartgun": "c_sydney_sleeper",      # Sydney Sleeper
     "tankerboots": "mantreads",           # Mantreads
@@ -162,7 +162,7 @@ _ANY_MDL_RE = re.compile(r'"([^"]+\.mdl)"', re.IGNORECASE)
 
 def _mdl_stems(game, block: str, depth: int = 0) -> list:
     """Стебли всех .mdl блока и его цепочки prefab (model_player, model_world,
-    extra_wearable, model_player_per_class — ключ здесь не важен)."""
+    extra_wearable, model_player_per_class - ключ здесь не важен)"""
     from src.data.items_game_kv import MAX_PREFAB_DEPTH, flat_value
 
     stems = [os.path.splitext(os.path.basename(m.replace("\\", "/").lower()))[0]
@@ -176,14 +176,14 @@ def _mdl_stems(game, block: str, depth: int = 0) -> list:
 
 
 #: Иконки каталога приходят параллельно, а lru_cache не мешает потокам
-#: считать один и тот же индекс разом — каждый со своим проходом по items_game.
+#: считать один и тот же индекс разом - каждый со своим проходом по items_game
 _icon_lock = threading.Lock()
 
 
 @lru_cache(maxsize=4)
 def _icon_index(tf2_root: str) -> Dict[str, str]:
     """{стебель модели: image_inventory}. Первый предмет выигрывает: items_game
-    идёт по defindex, и стоковое оружие стоит раньше скинов и промо-копий."""
+    идёт по defindex, и стоковое оружие стоит раньше скинов и промо-копий"""
     from src.data.items_game_kv import ItemsGame
 
     items = get_items_game_path(tf2_root)
@@ -203,11 +203,11 @@ def _icon_index(tf2_root: str) -> Dict[str, str]:
 
 def weapon_icon(weapon_key: str, tf2_root: str) -> Optional[str]:
     """
-    Иконка рюкзака (путь image_inventory) для ключа оружия, либо None.
+    Иконка рюкзака (путь image_inventory) для ключа оружия, либо None
 
-    Имя иконки часто не совпадает с именем модели (Scottish Resistance —
+    Имя иконки часто не совпадает с именем модели (Scottish Resistance -
     `w_stickybomb_defender`), и поиск по имени файла отдавал развёртку
-    текстуры вместо иконки. items_game связывает их напрямую.
+    текстуры вместо иконки. items_game связывает их напрямую
     """
     if not weapon_key or not tf2_root:
         return None
@@ -228,11 +228,11 @@ def weapon_icon(weapon_key: str, tf2_root: str) -> Optional[str]:
 
 def tf2_root_from_misc_vpk(misc_vpk_path: Optional[str]) -> Optional[str]:
     """Корень установки TF2 из пути к tf2_misc_dir.vpk
-    ({root}/tf/tf2_misc_dir.vpk → {root}). None, если не похоже."""
+    ({root}/tf/tf2_misc_dir.vpk -> {root}). None, если не похоже"""
     if not misc_vpk_path:
         return None
     p = Path(misc_vpk_path)
-    # .../<root>/tf/tf2_misc_dir.vpk → parents[1] == <root>
+    # .../<root>/tf/tf2_misc_dir.vpk -> parents[1] == <root>
     if len(p.parents) >= 2 and p.parents[0].name.lower() == "tf":
         return str(p.parents[1])
     return None

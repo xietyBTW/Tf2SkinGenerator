@@ -6,7 +6,7 @@
 import * as api from './api.js';
 import { t } from './i18n.js';
 
-//: Значки слоёв - простые линии, цвет берут от текста.
+//: Значки слоёв - простые линии, цвет берут от текста
 const GLYPHS = {
   stripe: '<path d="M5 18 9 4M10 18 14 4M15 18 19 4"/>',
   flash: '<circle cx="12" cy="12" r="4"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M5 5l2 2M17 17l2 2M19 5l-2 2M7 17l-2 2"/>',
@@ -36,7 +36,7 @@ export const button = (text, className = 'textbtn textbtn--sm', title = '') => {
   return b;
 };
 
-/** Карточка: заголовок (и действия справа) над содержимым. */
+/** Карточка: заголовок (и действия справа) над содержимым */
 export function card(title, ...actions) {
   const box = el('section', 'sheenb__card');
   const head = el('div', 'sheenb__cardhead');
@@ -48,14 +48,14 @@ export function card(title, ...actions) {
 
 export const clone = (v) => JSON.parse(JSON.stringify(v));
 
-/** CSS-фон слоя: один цвет, градиент или сама картинка (для образца и шкалы времени). */
+/** CSS-фон слоя: один цвет, градиент или сама картинка (для образца и шкалы времени) */
 export function fillCss(layer) {
   if (layer.fill === 'image') {
     return layer.image ? `center / cover no-repeat url("${api.fileUrl(layer.image, true)}")` : '#888';
   }
   if (!layer.fill || layer.fill === 'solid' || !layer.stops) return layer.color;
   const stops = layer.stops.map(([pos, c]) => `${c} ${Math.round(pos * 100)}%`).join(', ');
-  // У CSS 0° - вверх, у узора 0° - вправо (к дулу).
+  // У CSS 0° - вверх, у узора 0° - вправо (к дулу)
   const deg = layer.fill === 'space' ? (Number(layer.gangle) || 0) + 90 : 90;
   return `linear-gradient(${deg}deg, ${stops})`;
 }

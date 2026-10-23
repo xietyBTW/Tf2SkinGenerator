@@ -12,23 +12,23 @@ logger = get_logger(__name__)
 
 class PackagingService:
 
-    #: Предел длины пути у vpk.exe и VTFCmd (Win32 MAX_PATH, с нулём в конце).
+    #: Предел длины пути у vpk.exe и VTFCmd (Win32 MAX_PATH, с нулём в конце)
     MAX_PATH = 260
 
     @staticmethod
     def longest_path(folder: Path) -> str:
-        """Самый длинный абсолютный путь среди файлов папки ('' — пусто)."""
+        """Самый длинный абсолютный путь среди файлов папки ('' - пусто)"""
         root = Path(os.path.abspath(folder))
         return max((str(p) for p in root.rglob('*') if p.is_file()), key=len, default='')
 
     @staticmethod
     def create_vpk_file(ctx, filename: str, export_folder: str = "export", language: str = "en") -> str:
-        """Создаёт VPK из ctx.vpkroot_dir и перемещает в export_folder/filename."""
+        """Создаёт VPK из ctx.vpkroot_dir и перемещает в export_folder/filename"""
         if not ctx.vpkroot_dir.exists():
             logger.warning(f"vpkroot_dir не существует: {ctx.vpkroot_dir}")
         elif logger.isEnabledFor(logging.DEBUG):
-            # Дамп дерева vpkroot — только когда debug-лог реально включён,
-            # чтобы не обходить всё дерево впустую на обычных сборках.
+            # Дамп дерева vpkroot - только когда debug-лог реально включён,
+            # чтобы не обходить всё дерево впустую на обычных сборках
             logger.debug(f"Создание VPK из: {ctx.vpkroot_dir}")
             for root, _dirs, files in os.walk(ctx.vpkroot_dir):
                 level = root.replace(str(ctx.vpkroot_dir), '').count(os.sep)
@@ -51,10 +51,10 @@ class PackagingService:
         language: str = "en",
     ) -> str:
         """
-        Запускает vpk.exe -v <vpkroot_dir>, перемещает результат в export_folder/filename.
+        Запускает vpk.exe -v <vpkroot_dir>, перемещает результат в export_folder/filename
 
         Это единственное место в проекте где вызывается vpk.exe.
-        MergeVPKService и CustomVPKService должны использовать этот метод.
+        MergeVPKService и CustomVPKService должны использовать этот метод
 
         Args:
             vpkroot_dir:   Директория с содержимым мода (любое имя; vpk.exe
@@ -64,7 +64,7 @@ class PackagingService:
             language:      Язык для сообщений об ошибках
 
         Returns:
-            Абсолютный путь к созданному VPK файлу.
+            Абсолютный путь к созданному VPK файлу
 
         Raises:
             VPKCreationError:         vpk.exe вернул ненулевой код
@@ -78,18 +78,18 @@ class PackagingService:
         t = TRANSLATIONS.get(language, TRANSLATIONS['en'])
 
         # Маски своих узоров блеска, на которые ссылаются VMT мода: файл
-        # задаётся именем и строится здесь — через это место идут все сборки.
-        # Не вышло — сборка падает: без маски на оружии была бы «шахматка».
+        # задаётся именем и строится здесь - через это место идут все сборки.
+        # Не вышло - сборка падает: без маски на оружии была бы «шахматка»
         from src.services import sheen_patterns
-        # Своя подпапка по имени мода: два мода не делят один путь маски.
+        # Своя подпапка по имени мода: два мода не делят один путь маски
         sheen_patterns.materialize(Path(vpkroot_dir), namespace=Path(filename).stem)
 
         def _locked(path: Path, exc: OSError) -> FileLockedError:
-            """Понятная ошибка вместо сырого WinError 32.
+            """Понятная ошибка вместо сырого WinError 32
 
             Файл держит запущенная игра с примонтированным модом, GCFScape или
-            проводник с превью — самый частый сценарий повторной сборки. Раньше
-            сюда улетало системное сообщение, из которого не следует, что делать.
+            проводник с превью - самый частый сценарий повторной сборки. Из
+            системного сообщения не следует, что делать
             """
             msg = t.get(
                 'error_vpk_locked',
@@ -100,7 +100,7 @@ class PackagingService:
 
         # vpk.exe не умеет путей длиннее 260 символов: на таком он падает с
         # «error opening required file …» и обрезанным именем, из которого
-        # причину не понять. Говорим её сами, до запуска.
+        # причину не понять. Говорим её сами, до запуска
         longest = PackagingService.longest_path(vpkroot_dir)
         if len(longest) >= PackagingService.MAX_PATH:
             raise VPKCreationError("", f"path too long: {len(longest)} > "
@@ -108,7 +108,7 @@ class PackagingService:
 
         vpkroot_parent = vpkroot_dir.parent
         # vpk.exe называет результат по имени упакованной папки (<dir>.vpk),
-        # поэтому имя папки может быть любым — не только "vpkroot".
+        # поэтому имя папки может быть любым - не только "vpkroot"
         temp_vpk_path = vpkroot_parent / f"{vpkroot_dir.name}.vpk"
 
         if temp_vpk_path.exists():
@@ -118,8 +118,8 @@ class PackagingService:
                 raise _locked(temp_vpk_path, exc) from exc
 
         # vpk.exe берётся из bin установленной TF2 (или из бандла). Если ни того,
-        # ни другого нет — сразу понятная ошибка «укажите папку TF2», а не сырой
-        # FileNotFoundError из subprocess. У упаковки python-fallback'а нет.
+        # ни другого нет - сразу понятная ошибка «укажите папку TF2», а не сырой
+        # FileNotFoundError из subprocess. У упаковки python-fallback'а нет
         vpk_tool = ToolPaths.get_vpk_tool()
         if not Path(vpk_tool).exists():
             msg = t.get('error_vpk_tool_not_found', 'vpk.exe tool not found')

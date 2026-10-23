@@ -1,26 +1,26 @@
 """
-Компоновщик War Paint: рецепт из `data/paintkit_defs.py` → текстура оружия.
+Компоновщик War Paint: рецепт из `data/paintkit_defs.py` -> текстура оружия
 
 В игре это делает закрытый CTextureCompositor (materialsystem.dll) шейдером
-`compositor_ps2x.fxc` — он в SDK открыт, и математика взята оттуда:
+`compositor_ps2x.fxc` - он в SDK открыт, и математика взята оттуда:
 
 * текстуры читаются как sRGB и считаются в линейном пространстве, результат
-  пишется в sRGB (EnableSRGBRead/EnableSRGBWrite в compositor.cpp); маска
+  пишется в sRGB (EnableSRGBRead/EnableSRGBWrite в compositor.cpp), маска
   групп читается без перевода;
-* уровни (black / white / gamma) — «как в Photoshop», в sRGB;
-* multiply / add — произведение и сумма входов, lerp — смешивание двух входов
-  по красному каналу третьего, select — белое там, где номер группы
+* уровни (black / white / gamma) - «как в Photoshop», в sRGB;
+* multiply / add - произведение и сумма входов, lerp - смешивание двух входов
+  по красному каналу третьего, select - белое там, где номер группы
   (`round(R·255/16)`) совпал с одним из `select/16`;
-* наклейка кладётся по альфе, её «блеск» (spec) — в альфу результата.
+* наклейка кладётся по альфе, её «блеск» (spec) - в альфу результата
 
-Чего в SDK нет — порядок случайных значений и сборка матрицы UV — взято по
+Чего в SDK нет - порядок случайных значений и сборка матрицы UV - взято по
 открытому повтору компоновщика (github.com/Rhgx/warpaint-viewer, сверен с
 игрой его автором): матрица R·S·(uv + T), сид делится на два потока
 CUniformRandomStream (Numerical Recipes ran1), узлы берут из них значения по
-очереди. Код оттуда не переносился — только формулы.
+очереди. Код оттуда не переносился - только формулы
 
-Модуль без Qt и без UI: на вход дерево и функция чтения текстур, на выход
-RGBA uint8.
+Без UI: на вход дерево и функция чтения текстур, на выход
+RGBA uint8
 """
 
 from __future__ import annotations
@@ -36,17 +36,17 @@ from src.shared.logging_config import get_logger
 
 logger = get_logger(__name__)
 
-#: Функция чтения текстуры: (путь материала, raw) → RGBA uint8 (H,W,4) или
-#: None, если такой текстуры в игре нет. raw — данные, а не цвет (маска групп):
+#: Функция чтения текстуры: (путь материала, raw) -> RGBA uint8 (H,W,4) или
+#: None, если такой текстуры в игре нет. raw - данные, а не цвет (маска групп):
 #: уменьшать её можно только выбрасыванием текселей, усреднение смешало бы
-#: номера соседних групп.
+#: номера соседних групп
 TextureLoader = Callable[..., Optional[np.ndarray]]
 
 
-# ── CUniformRandomStream ──────────────────────────────────────────────── #
+# CUniformRandomStream
 
 class UniformRandomStream:
-    """vstdlib/random.cpp (Numerical Recipes ran1) — генератор компоновщика."""
+    """vstdlib/random.cpp (Numerical Recipes ran1) - генератор компоновщика"""
 
     NTAB, IA, IM, IQ, IR = 32, 16807, 2147483647, 127773, 2836
     NDIV = 1 + (IM - 1) // NTAB
@@ -103,7 +103,7 @@ def _to_int32(v: int) -> int:
 
 
 class _Seeds:
-    """Два потока по сиду War Paint: чётные биты сида — первому, нечётные — второму."""
+    """Два потока по сиду War Paint: чётные биты сида - первому, нечётные - второму"""
 
     def __init__(self, seed: int):
         seed &= (1 << 64) - 1
@@ -123,7 +123,7 @@ class _Seeds:
         self.current ^= 1
 
 
-# ── Разбор значений ───────────────────────────────────────────────────── #
+# Разбор значений
 
 def _range(text: str) -> Optional[Tuple[float, float]]:
     parts = str(text or '').replace(',', ' ').split()
@@ -137,7 +137,7 @@ def _range(text: str) -> Optional[Tuple[float, float]]:
 
 
 def _atoi(text) -> int:
-    """atoi(): ведущие цифры, мусор после них отбрасывается ("96```" → 96)."""
+    """atoi(): ведущие цифры, мусор после них отбрасывается ("96```" -> 96)"""
     s = str(text or '').strip()
     n = ''
     for ch in s:
@@ -171,7 +171,7 @@ class Transform:
         return self.black == 0 and self.white == 1 and self.gamma == 1
 
     def matrix(self) -> np.ndarray:
-        """UV-матрица 2×3: R·S·(uv + T) — порядок Source."""
+        """UV-матрица 2×3: R·S·(uv + T) - порядок Source"""
         rad = math.radians(self.rotation)
         c, s = math.cos(rad), math.sin(rad)
         sx = (-1 if self.flip_u else 1) * self.scale
@@ -182,7 +182,7 @@ class Transform:
 
 
 def _levels(fields: Dict[str, str], seeds: _Seeds) -> Tuple[float, float, float]:
-    """black / white / gamma: чёрная и «отступ» — из 0…255, gamma обратная."""
+    """black / white / gamma: чёрная и «отступ» - из 0…255, gamma обратная"""
     rng = seeds.rng
     black = _draw(rng, fields.get('adjust_black'), 0.0, scale=1 / 255)
     offset = _draw(rng, fields.get('adjust_offset'), 255.0, scale=1 / 255)
@@ -192,7 +192,7 @@ def _levels(fields: Dict[str, str], seeds: _Seeds) -> Tuple[float, float, float]
 
 def _draw(rng: UniformRandomStream, text, default: float,
           scale: float = 1.0, inverse: bool = False) -> float:
-    """Значение из диапазона «a b» (или одного числа) — всегда одно чтение потока."""
+    """Значение из диапазона «a b» (или одного числа) - всегда одно чтение потока"""
     rg = _range(text) if text not in (None, '') else None
     low, high = rg if rg else (default, default)
     if inverse:
@@ -202,7 +202,7 @@ def _draw(rng: UniformRandomStream, text, default: float,
 
 
 def _flip(rng: UniformRandomStream, text) -> bool:
-    """flip "1" — случайное отражение (одно чтение), "0"/пусто — без чтения."""
+    """flip "1" - случайное отражение (одно чтение), "0"/пусто - без чтения"""
     rg = _range(text) if text not in (None, '') else None
     if not rg:
         return False
@@ -212,7 +212,7 @@ def _flip(rng: UniformRandomStream, text) -> bool:
     return rng.random_int(low, high) != 0
 
 
-# ── Выборка текстур ───────────────────────────────────────────────────── #
+# Выборка текстур
 
 def srgb_to_linear(x: np.ndarray) -> np.ndarray:
     return np.where(x <= 0.04045, x / 12.92, ((x + 0.055) / 1.055) ** 2.4)
@@ -224,12 +224,12 @@ def linear_to_srgb(x: np.ndarray) -> np.ndarray:
 
 
 class _Texture:
-    """Текстура с пирамидой уровней (как mip-карты у видеокарты)."""
+    """Текстура с пирамидой уровней (как mip-карты у видеокарты)"""
 
     def __init__(self, rgba: np.ndarray, srgb: bool, max_size: int):
         img = rgba.astype(np.float32) / 255.0
         while max(img.shape[:2]) > max_size and min(img.shape[:2]) >= 2:
-            # Цвет усредняем, данные (маску групп) прореживаем.
+            # Цвет усредняем, данные (маску групп) прореживаем
             img = _half(img) if srgb else img[::2, ::2]
         if srgb:
             img[..., :3] = srgb_to_linear(img[..., :3])
@@ -238,7 +238,7 @@ class _Texture:
             self.levels.append(_half(self.levels[-1]))
 
     def level_for(self, footprint: float) -> np.ndarray:
-        """Уровень, у которого тексель примерно равен пикселю результата."""
+        """Уровень, у которого тексель примерно равен пикселю результата"""
         lod = int(math.floor(math.log2(footprint))) if footprint > 1 else 0
         return self.levels[min(max(lod, 0), len(self.levels) - 1)]
 
@@ -250,7 +250,7 @@ def _half(img: np.ndarray) -> np.ndarray:
 
 
 def _bilinear(img: np.ndarray, u: np.ndarray, v: np.ndarray, wrap: bool = True) -> np.ndarray:
-    """Билинейная выборка в UV (v вниз, как у текстур Source); повтор по краям."""
+    """Билинейная выборка в UV (v вниз, как у текстур Source), повтор по краям"""
     h, w = img.shape[:2]
     x = u * w - 0.5
     y = v * h - 0.5
@@ -276,14 +276,14 @@ def _bilinear(img: np.ndarray, u: np.ndarray, v: np.ndarray, wrap: bool = True) 
 
 
 def adjust_levels(rgba: np.ndarray, black: float, white: float, gamma: float) -> np.ndarray:
-    """AdjustLevels из compositor_ps2x.fxc: уровни в sRGB, результат снова линейный."""
+    """AdjustLevels из compositor_ps2x.fxc: уровни в sRGB, результат снова линейный"""
     if black == 0 and white == 1 and gamma == 1:
         return rgba
     out = rgba.copy()
     out[..., :3] = linear_to_srgb(out[..., :3])
     if white == black:
-        # invlerp с нулевым отрезком — в шейдере бесконечность, после saturate
-        # это порог: выше чёрной точки 1, ниже 0.
+        # invlerp с нулевым отрезком - в шейдере бесконечность, после saturate
+        # это порог: выше чёрной точки 1, ниже 0
         pcg = (out > black).astype(np.float32)
     else:
         pcg = np.clip((out - black) / (white - black), 0.0, 1.0)
@@ -292,18 +292,18 @@ def adjust_levels(rgba: np.ndarray, black: float, white: float, gamma: float) ->
     return np.clip(pcg, 0.0, 1.0)
 
 
-# ── Узлы ──────────────────────────────────────────────────────────────── #
+# Узлы
 
 @dataclass
 class _Input:
-    """Вход операции: либо текстура (ещё не выбрана), либо готовый слой."""
+    """Вход операции: либо текстура (ещё не выбрана), либо готовый слой"""
     transform: Transform
     texture: Optional[_Texture] = None
     image: Optional[np.ndarray] = None
 
 
 class PaintkitCompositor:
-    """Собирает рецепт War Paint в RGBA-текстуру размером ``size``×``size``."""
+    """Собирает рецепт War Paint в RGBA-текстуру размером ``size``×``size``"""
 
     def __init__(self, loader: TextureLoader, size: int = 1024, team: str = 'red'):
         self.loader = loader
@@ -315,10 +315,10 @@ class PaintkitCompositor:
         grid = (np.arange(n, dtype=np.float64) + 0.5) / n
         self._u, self._v = np.meshgrid(grid, grid)
 
-    # ── Точка входа ───────────────────────────────────────────────────── #
+    # Точка входа
 
     def compose(self, recipe: dict, seed: int = 0) -> np.ndarray:
-        """RGBA uint8 (sRGB, альфа — маска блеска, как у игры)."""
+        """RGBA uint8 (sRGB, альфа - маска блеска, как у игры)"""
         seeds = _Seeds(int(seed))
         root = self._eval(recipe, seeds)
         linear = self._sample(root)
@@ -326,10 +326,10 @@ class PaintkitCompositor:
         out[..., :3] = linear_to_srgb(out[..., :3])
         return np.clip(np.round(out * 255.0), 0, 255).astype(np.uint8)
 
-    # ── Текстуры ──────────────────────────────────────────────────────── #
+    # Текстуры
 
     def _texture(self, path: str, srgb: bool = True, report: bool = True) -> Optional[_Texture]:
-        """Текстура рецепта; report=False — отсутствие нормально (необязательный spec)."""
+        """Текстура рецепта; report=False - отсутствие нормально (необязательный spec)"""
         key = (path, srgb)
         if key not in self._textures:
             rgba = self.loader(path, raw=not srgb) if path else None
@@ -343,7 +343,7 @@ class PaintkitCompositor:
         return self._textures[key]
 
     def _sample(self, inp: _Input) -> np.ndarray:
-        """Вход на сетке результата: выборка по UV-матрице и уровни."""
+        """Вход на сетке результата: выборка по UV-матрице и уровни"""
         t = inp.transform
         if inp.image is not None:
             img = inp.image
@@ -366,7 +366,7 @@ class PaintkitCompositor:
             return img
         return _bilinear(img, u, v, wrap=True)
 
-    # ── Вычисление узлов (порядок чтения случайных чисел — как в игре) ── #
+    # Вычисление узлов (порядок чтения случайных чисел - как в игре)
 
     def _eval(self, node: dict, seeds: _Seeds) -> _Input:
         kind = node['type']
@@ -392,8 +392,8 @@ class PaintkitCompositor:
             return _Input(Transform(), image=self._select(node))
         if kind == 'apply_sticker':
             return self._sticker(node, seeds)
-        # combine_*: у самого узла только уровни — применяются, когда его
-        # результат читает родитель; UV-поля у combine игра не использует.
+        # combine_*: у самого узла только уровни - применяются, когда его
+        # результат читает родитель; UV-поля у combine игра не использует
         black, white, gamma = _levels(fields, seeds)
         seeds.advance()
         children = [self._eval(child, seeds) for child in node.get('nodes') or []]
@@ -416,7 +416,7 @@ class PaintkitCompositor:
             out = np.ones((n, n, 4), np.float32)
             for layer in layers:
                 out = out * layer
-        # Промежуточный слой в игре — 8-битная текстура: всё за [0, 1] срезается.
+        # Промежуточный слой в игре - 8-битная текстура: всё за [0, 1] срезается
         return np.clip(out, 0.0, 1.0).astype(np.float32)
 
     def _select(self, node: dict) -> np.ndarray:
@@ -426,7 +426,7 @@ class PaintkitCompositor:
         if not wanted or tex is None:
             return np.zeros((n, n, 4), np.float32)
         # Ближайший тексель: билинейная выборка на шве двух групп дала бы
-        # третью (48 и 80 → 64).
+        # третью (48 и 80 -> 64)
         raw = tex.levels[0]
         h, w = raw.shape[:2]
         xs = np.minimum((self._u[0] * w).astype(np.int64), w - 1)
@@ -459,13 +459,13 @@ class PaintkitCompositor:
         return _Input(Transform(black, white, gamma), image=out)
 
     def _apply_sticker(self, base: np.ndarray, sticker: dict, fields: Dict[str, str]) -> np.ndarray:
-        """Наклейка по трём углам (tl, tr, bl) в UV: цвет по альфе, блеск — в альфу."""
+        """Наклейка по трём углам (tl, tr, bl) в UV: цвет по альфе, блеск - в альфу"""
         art = self._texture(sticker.get('base', ''))
         if art is None:
             return base
-        # Пустой spec — «имя основы + _spec» (комментарий к полю в .proto); нет
-        # и его — блеск нулевой. Читается как sRGB: compositor.cpp для ps20b
-        # включает EnableSRGBRead на всех четырёх сэмплерах.
+        # Пустой spec - «имя основы + _spec» (комментарий к полю в .proto), нет
+        # и его - блеск нулевой. Читается как sRGB: compositor.cpp для ps20b
+        # включает EnableSRGBRead на всех четырёх сэмплерах
         spec_name = sticker.get('spec') or ''
         if not spec_name and sticker.get('base'):
             stem, ext = os.path.splitext(sticker['base'])

@@ -1,4 +1,4 @@
-"""Тесты проверок эффекта перед сборкой."""
+"""Тесты проверок эффекта перед сборкой"""
 
 import pytest
 
@@ -16,7 +16,7 @@ def _system(**over):
         "renderers": [{"functionName": "render_animated_sprites", "attrs": {}}],
         "emitters": [{"functionName": "emit_continuously", "attrs": {}}],
         "initializers": [],
-        # Без оператора смерти частицы бессмертны — рабочий эффект так не
+        # Без оператора смерти частицы бессмертны - рабочий эффект так не
         # выглядит, и правило immortal справедливо ругается (см. тесты ниже)
         "operators": [{"functionName": "Lifespan Decay", "attrs": {}}],
         "forces": [], "constraints": [],
@@ -31,7 +31,7 @@ def test_clean_effect_has_no_findings():
 
 
 def test_hidden_from_camera_is_reported_and_fixable():
-    """Тот самый случай: эффект перенесли в чужой контекст, и он скрыт."""
+    """Тот самый случай: эффект перенесли в чужой контекст, и он скрыт"""
     s = _system()
     s["attrs"]["control point to disable rendering if it is the camera"] = {
         "t": "integer", "v": 0}
@@ -55,20 +55,20 @@ def test_invisible_particles_rules():
     assert next(f for f in alpha_found if f.rule == "zero_alpha").fix_value \
         == [255, 0, 0, 255]
 
-    # Нулевой радиус при Radius Random — норма, модуль задаёт размер сам
+    # Нулевой радиус при Radius Random - норма, модуль задаёт размер сам
     ok = _system(initializers=[{"functionName": "Radius Random", "attrs": {}}])
     ok["attrs"]["radius"] = {"t": "float", "v": 0.0}
     assert "zero_radius" not in [f.rule for f in check_systems({"fx": ok})]
 
 
 def test_container_systems_are_not_noise():
-    """Родитель без рендерера/эмиттера, но с детьми — норма Valve (14% стока)."""
+    """Родитель без рендерера/эмиттера, но с детьми - норма Valve (14% стока)"""
     parent = _system(renderers=[], emitters=[],
                      children=[{"delay": 0.0, "childName": "kid"}])
     systems = {"fx": parent, "kid": _system()}
     assert check_systems(systems) == []
 
-    # А вот система, которая спавнит частицы без рендерера — проблема
+    # А вот система, которая спавнит частицы без рендерера - проблема
     orphan = _system(renderers=[])
     assert "no_renderer" in [f.rule for f in check_systems({"fx": orphan})]
     # ...и полностью пустая система тоже
@@ -89,21 +89,21 @@ def test_missing_child_and_material():
 
 
 def test_baseline_filters_untouched_systems():
-    """Особенности стоковых систем не должны попадать в отчёт."""
+    """Особенности стоковых систем не должны попадать в отчёт"""
     stock = _system()
     stock["attrs"]["control point to disable rendering if it is the camera"] = {
         "t": "integer", "v": 0}
     systems = {"fx": stock}
     assert check_systems(systems, baseline=systems) == []
 
-    # Та же проблема, но принесённая правкой — сообщаем
+    # Та же проблема, но принесённая правкой - сообщаем
     edited = {"fx": stock, "my_copy": dict(stock, name="my_copy")}
     found = check_systems(edited, baseline=systems)
     assert [f.system for f in found] == ["my_copy"]
 
 
 def test_root_scope_limits_check():
-    """С указанием корня проверяются только он и его дети."""
+    """С указанием корня проверяются только он и его дети"""
     systems = {
         "root": _system(children=[{"delay": 0.0, "childName": "kid"}]),
         "kid": _system(renderers=[]),
@@ -127,8 +127,8 @@ def test_attr_warning():
 
 
 def test_custom_override_detection(tmp_path):
-    """Рассыпной PCF в tf/custom перекрывает мод — самая коварная причина
-    «мод не работает»."""
+    """Рассыпной PCF в tf/custom перекрывает мод - самая коварная причина
+    «мод не работает»"""
     custom = tmp_path / "tf" / "custom" / "somemod" / "particles"
     custom.mkdir(parents=True)
     (custom / "crit.pcf").write_bytes(b"x")
@@ -148,7 +148,7 @@ def test_apply_fixes_writes_to_tree():
 
     svc = ParticleEditorService()
     svc.load_bytes(_make_pcf_bytes())
-    # Без эмиттера max_particles не при чём — система и так не спавнит
+    # Без эмиттера max_particles не при чём - система и так не спавнит
     svc.add_module("fx", "emitters", "emit_continuously")
     d = svc._find_definition("fx")
     d["control point to disable rendering if it is the camera"] = \
@@ -167,23 +167,23 @@ def test_apply_fixes_writes_to_tree():
 
 
 def _sheet(frames: int, seq: str = "0") -> dict:
-    """Материал со спрайт-листом на заданное число кадров."""
+    """Материал со спрайт-листом на заданное число кадров"""
     return {"sheet": {"sequences": {seq: {"clamp": True, "duration": 1.0,
                                           "frames": [[0, 0, 1, 1]] * frames}}}}
 
 
 def test_immortal_particles_reported():
     """Непрерывный поток без оператора смерти: частицы копятся до потолка,
-    и эффект замирает навсегда — в превью это выглядит как «сначала шло,
-    потом перестало»."""
+    и эффект замирает навсегда - в превью это выглядит как «сначала шло,
+    потом перестало»"""
     s = _system(operators=[])
     assert "immortal" in [f.rule for f in check_systems({"fx": s})]
 
-    # Смерть может приходить и от Alpha Fade and Decay — тогда всё в порядке
+    # Смерть может приходить и от Alpha Fade and Decay - тогда всё в порядке
     ok = _system(operators=[{"functionName": "Alpha Fade and Decay", "attrs": {}}])
     assert "immortal" not in [f.rule for f in check_systems({"fx": ok})]
 
-    # Разовый залп копиться не может — правило молчит
+    # Разовый залп копиться не может - правило молчит
     burst = _system(operators=[],
                     emitters=[{"functionName": "emit_instantaneously",
                                "attrs": {}}])
@@ -192,7 +192,7 @@ def test_immortal_particles_reported():
 
 def test_frozen_animation_reported_and_fixable():
     """Гифка из 30 кадров при «1 кадр в секунду» и жизни в секунду: в игре
-    частица так и стоит первым кадром. Чинится растягиванием листа на жизнь."""
+    частица так и стоит первым кадром. Чинится растягиванием листа на жизнь"""
     s = _system(initializers=[{"functionName": "Lifetime Random",
                                "attrs": {"lifetime_max": {"t": "float", "v": 1.0}}}],
                 renderers=[{"functionName": "render_animated_sprites",
@@ -208,7 +208,7 @@ def test_frozen_animation_reported_and_fixable():
 
 
 def test_animation_not_reported_when_it_plays():
-    """Способы проиграть лист, которыми пользуется сама игра."""
+    """Способы проиграть лист, которыми пользуется сама игра"""
     mats = {"effects/test.vmt": _sheet(30)}
     life = [{"functionName": "Lifetime Random",
              "attrs": {"lifetime_max": {"t": "float", "v": 1.0}}}]
@@ -228,7 +228,7 @@ def test_animation_not_reported_when_it_plays():
         assert "frozen_animation" not in [
             f.rule for f in check_systems({"fx": case}, materials=mats)]
 
-    # Одно-кадровый лист анимировать нечем — молчим
+    # Одно-кадровый лист анимировать нечем - молчим
     single = _system(initializers=life, renderers=[
         {"functionName": "render_animated_sprites",
          "attrs": {"animation rate": {"t": "float", "v": 0.1}}}])
@@ -239,8 +239,8 @@ def test_animation_not_reported_when_it_plays():
 
 def test_slow_sheet_scroll_is_not_reported():
     """Приём Valve: длинный лист еле ползёт, зато Sequence Random раздаёт
-    частицам разные стартовые кадры. Так сделаны кровь и дым — это не
-    ошибка, и ругаться на неё значит утопить отчёт в шуме."""
+    частицам разные стартовые кадры. Так сделаны кровь и дым - это не
+    ошибка, и ругаться на неё значит утопить отчёт в шуме"""
     mats = {"effects/test.vmt": _sheet(15)}
     life = [{"functionName": "Lifetime Random",
              "attrs": {"lifetime_max": {"t": "float", "v": 0.5}}}]
@@ -253,14 +253,14 @@ def test_slow_sheet_scroll_is_not_reported():
     assert "frozen_animation" not in [
         f.rule for f in check_systems({"fx": with_random}, materials=mats)]
 
-    # Без раздачи кадров та же настройка — статичная картинка
+    # Без раздачи кадров та же настройка - статичная картинка
     without = _system(initializers=life, renderers=slow)
     assert "frozen_animation" in [
         f.rule for f in check_systems({"fx": without}, materials=mats)]
 
 
 def test_frozen_animation_uses_system_sequence_number():
-    """Кадры считаются по той последовательности, которую система играет."""
+    """Кадры считаются по той последовательности, которую система играет"""
     mats = {"effects/test.vmt": {"sheet": {"sequences": {
         "0": {"frames": [[0, 0, 1, 1]]},
         "3": {"frames": [[0, 0, 1, 1]] * 16}}}}}
@@ -279,9 +279,9 @@ def test_frozen_animation_uses_system_sequence_number():
 
 def test_parent_scaled_emitter_without_multiplier_is_silent_in_game():
     """«Эмиссия по частицам родителя» умножает темп ещё и на «scale emission
-    to used control points», а его умолчание — ноль (симуляция Valve через
+    to used control points», а его умолчание - ноль (симуляция Valve через
     particles.lib: без атрибута эмиттер не создаёт ничего). Превью ручеёк
-    показывало, игра — нет."""
+    показывало, игра - нет"""
     flag = {"use parent particles for emission scaling": {"t": "bool", "v": True}}
     s = _system(emitters=[{"functionName": "emit_continuously", "attrs": dict(flag)}])
     found = [f for f in check_systems({"fx": s}) if f.rule == "parent_scale_zero"]

@@ -1,4 +1,4 @@
-"""Тесты particle_editor_service: JSON-конвертация, правка, roundtrip, sheet."""
+"""Тесты particle_editor_service: JSON-конвертация, правка, roundtrip, sheet"""
 
 import io
 import struct
@@ -15,12 +15,12 @@ from src.services.particle_editor_service import (  # noqa: E402
 
 
 def _make_pcf_bytes() -> bytes:
-    """Минимальный PCF: система fx с инициализатором и ребёнком."""
+    """Минимальный PCF: система fx с инициализатором и ребёнком"""
     root = Element("root", "DmElement")
 
     child = Element("fx_child", "DmeParticleSystemDefinition")
     child["max_particles"] = Attribute.int("max_particles", 20)
-    # Тот же материал, но с другим регистром/слэшами — для проверки нормализации
+    # Тот же материал, но с другим регистром/слэшами - для проверки нормализации
     child["material"] = Attribute.string("material", "Effects/TEST.vmt")
 
     init = Element("Color Random", "DmeParticleOperator")
@@ -75,7 +75,7 @@ def test_set_attr_and_save_roundtrip(tmp_path):
 
     assert svc.set_attr("fx", "initializers", 0, "color1", [255, 0, 255, 128])
     assert svc.set_attr("fx", None, 0, "radius", 12.5)
-    # Несуществующие цели — False, не исключение
+    # Несуществующие цели - False, не исключение
     assert not svc.set_attr("nope", None, 0, "radius", 1)
     assert not svc.set_attr("fx", "initializers", 5, "color1", [1, 2, 3, 4])
     assert not svc.set_attr("fx", "initializers", 0, "missing_attr", 1)
@@ -92,7 +92,7 @@ def test_set_attr_and_save_roundtrip(tmp_path):
 
 def test_set_system_texture_overwrites_original(tmp_path):
     """Своя картинка ПЕРЕЗАПИСЫВАЕТ оригинальный VTF-путь (для казуала):
-    имя материала в PCF не меняется, custom_-путей не появляется."""
+    имя материала в PCF не меняется, custom_-путей не появляется"""
     pytest.importorskip("PIL")
     from pathlib import Path as _P
     if not _P("tools/VTF/VTFLib.dll").exists():
@@ -119,25 +119,25 @@ def test_set_system_texture_overwrites_original(tmp_path):
     assert not any("custom_" in p for p in svc.custom_files)
     assert svc.custom_files["materials/effects/test.vtf"][:4] == b"VTF\x00"
 
-    # превью видит кастом; fx_child делит материал (иной регистр) → тоже
+    # превью видит кастом; fx_child делит материал (иной регистр) -> тоже
     assert svc.materials_json("").get("effects\\test.vmt") is not None
     assert svc.materials_json("").get("Effects/TEST.vmt") is not None
     assert svc.is_custom_material("effects\\test.vmt")
 
-    # повторная замена — тот же путь, один файл
+    # повторная замена - тот же путь, один файл
     img2 = tmp_path / "tex2.png"
     Image.new("RGBA", (64, 64), (0, 255, 0, 255)).save(img2)
     assert svc.set_system_texture("fx", str(img2), tf2_root_dir="") is not None
     assert set(svc.custom_files) == {"materials/effects/test.vtf",
                                  "materials/effects/test.vmt"}
 
-    # сброс — оверрайд убран
+    # сброс - оверрайд убран
     assert svc.reset_material_texture("effects\\test.vmt") == "effects\\test.vmt"
     assert svc.custom_files == {}
     assert not svc.is_custom_material("effects\\test.vmt")
     assert svc.reset_material_texture("effects\\test.vmt") is None
 
-    # «сироты»: материал больше не используется → файл не в экспорте
+    # «сироты»: материал больше не используется -> файл не в экспорте
     svc2 = ParticleEditorService()
     svc2.load_bytes(_make_pcf_bytes())
     svc2.set_material_texture("effects\\test.vmt", str(img), "")
@@ -162,24 +162,24 @@ def test_set_system_texture_overwrites_original(tmp_path):
 
 def test_set_material_to_game():
     """Переназначение материала на игровой: имя строки меняется, новых
-    custom-файлов не создаётся (для казуала)."""
+    custom-файлов не создаётся (для казуала)"""
     svc = ParticleEditorService()
     svc.load_bytes(_make_pcf_bytes())
 
-    # fx и fx_child делят effects/test → оба переводятся на игровой материал
+    # fx и fx_child делят effects/test -> оба переводятся на игровой материал
     assert svc.set_material_to_game("effects\\test.vmt", "effects\\yellowflare.vmt")
     sysj = svc.systems_json()
     assert sysj["fx"]["attrs"]["material"]["v"] == "effects\\yellowflare.vmt"
     assert sysj["fx_child"]["attrs"]["material"]["v"] == "effects\\yellowflare.vmt"
     # никаких кастомных файлов
     assert svc.custom_files == {}
-    # несуществующий исходный материал → False
+    # несуществующий исходный материал -> False
     assert not svc.set_material_to_game("effects\\nope.vmt", "effects\\x.vmt")
 
 
 def test_pcf_compression_strips_defaults(tmp_path):
     """save() вырезает default-атрибуты (для влезания в слот VPK казуала),
-    рабочее дерево не мутируется, эффект остаётся валидным."""
+    рабочее дерево не мутируется, эффект остаётся валидным"""
     svc = ParticleEditorService()
     svc.load_bytes(_make_pcf_bytes())
 
@@ -195,7 +195,7 @@ def test_pcf_compression_strips_defaults(tmp_path):
     svc.save(str(dest))
     data = dest.read_bytes()
 
-    # рабочее дерево НЕ тронуто — дефолтный атрибут ещё на месте
+    # рабочее дерево НЕ тронуто - дефолтный атрибут ещё на месте
     op_live = list(svc._find_definition("fx")["operators"].iter_elem())[0]
     assert "operator start fadein" in op_live
 
@@ -213,11 +213,11 @@ def test_pcf_compression_strips_defaults(tmp_path):
 
 
 def test_structural_editing():
-    """add/remove module, duplicate/remove system, add/remove child."""
+    """add/remove module, duplicate/remove system, add/remove child"""
     svc = ParticleEditorService()
     svc.load_bytes(_make_pcf_bytes())
 
-    # добавление модуля: шаблона в файле нет → элемент с functionName
+    # добавление модуля: шаблона в файле нет -> элемент с functionName
     assert svc.add_module("fx", "operators", "Rotation Spin Roll")
     ops = svc.systems_json()["fx"]["operators"]
     assert [o["functionName"] for o in ops] == ["Rotation Spin Roll"]
@@ -233,7 +233,7 @@ def test_structural_editing():
     assert svc.systems_json()["fx"]["initializers"][0]["attrs"]["color1"]["v"] \
         == [0, 255, 30, 255]
 
-    # удаление модуля (последнего в группе → пустая типизированная группа)
+    # удаление модуля (последнего в группе -> пустая типизированная группа)
     assert svc.remove_module("fx", "operators", 0)
     assert svc.systems_json()["fx"]["operators"] == []
     assert not svc.remove_module("fx", "operators", 0)
@@ -254,7 +254,7 @@ def test_structural_editing():
     ch = svc.systems_json()["fx"]["children"]
     assert {"delay": 0.5, "childName": "fx_stars"} in ch
     # цикл запрещён: fx достижим из fx_stars? нет, но fx_stars уже ребёнок fx
-    # → обратная связь создала бы цикл
+    # -> обратная связь создала бы цикл
     assert not svc.add_child("fx_stars", "fx")
     assert svc.remove_child("fx", len(ch) - 1)
     assert not any(c["childName"] == "fx_stars"
@@ -322,7 +322,7 @@ def test_use_texture_colors():
     assert removed == 1   # Color Random из фикстуры
     sysj = svc.systems_json()
     assert sysj["fx"]["initializers"] == []
-    # повторный вызов — модулей больше нет
+    # повторный вызов - модулей больше нет
     assert svc.use_texture_colors("fx") == 0
 
     # roundtrip: изменения переживают сохранение
@@ -336,7 +336,7 @@ def test_use_texture_colors():
 
 
 def test_paste_params():
-    """Копи-паста параметров: merge атрибутов системы и модулей по functionName."""
+    """Копи-паста параметров: merge атрибутов системы и модулей по functionName"""
     svc = ParticleEditorService()
     svc.load_bytes(_make_pcf_bytes())
 
@@ -345,12 +345,12 @@ def test_paste_params():
                   "new_scale": {"t": "float", "v": 1.5}},       # нет в fx
         "modules": {
             "initializers": {
-                # Color Random есть в fx → merge: color1 перезаписан, color2 добавлен
+                # Color Random есть в fx -> merge: color1 перезаписан, color2 добавлен
                 "Color Random": {"color1": {"t": "color", "v": [1, 2, 3, 4]},
                                  "color2": {"t": "color", "v": [9, 9, 9, 9]}},
             },
             "operators": {
-                # операторов в fx нет вовсе → создаются и группа, и модуль
+                # операторов в fx нет вовсе -> создаются и группа, и модуль
                 "Movement Basic": {"gravity": {"t": "vec3", "v": [0, 0, -400]}},
             },
         },
@@ -367,7 +367,7 @@ def test_paste_params():
     assert op["functionName"] == "Movement Basic"
     assert op["attrs"]["gravity"]["v"] == [0.0, 0.0, -400.0]
 
-    # несуществующая система / пустой payload → False
+    # несуществующая система / пустой payload -> False
     assert not svc.paste_params("nope", payload)
     assert not svc.paste_params("fx", {"attrs": {}, "modules": {}})
 
@@ -383,7 +383,7 @@ def test_paste_params():
 
 def test_paste_params_reports_problems():
     """Кривой набор (например, от нейросети) не должен проходить молча:
-    вставка складывает причины в report."""
+    вставка складывает причины в report"""
     svc = ParticleEditorService()
     svc.load_bytes(_make_pcf_bytes())
 
@@ -418,7 +418,7 @@ def test_paste_params_reports_problems():
     svc.paste_params("fx", {"modules": "нет"}, report=report)
     assert [k for k, _p in report] == ["particles_paste_bad_modules"]
 
-    # Модуль, которого нет в каталоге игры, — предупреждаем, но вставляем
+    # Модуль, которого нет в каталоге игры, - предупреждаем, но вставляем
     ParticleEditorService._attr_catalog[("operators", "movement basic")] = {}
     report = []
     assert svc.paste_params("fx", {"modules": {"operators": [
@@ -436,7 +436,7 @@ def test_paste_params_reports_problems():
 
 
 def test_paste_params_modes():
-    """Режимы вставки: keep не трогает существующее, replace сносит всё."""
+    """Режимы вставки: keep не трогает существующее, replace сносит всё"""
     payload = {
         "attrs": {"radius": {"t": "float", "v": 42.0},
                   "new_scale": {"t": "float", "v": 1.5}},
@@ -476,7 +476,7 @@ def test_paste_params_modes():
 
 def test_seed_spawn_area():
     """Добавленная область спавна не должна быть точкой: вырожденной задаём
-    размер от радиуса частиц, осмысленную из шаблона не трогаем."""
+    размер от радиуса частиц, осмысленную из шаблона не трогаем"""
     svc = ParticleEditorService()
     svc.load_bytes(_make_pcf_bytes())
     d = svc._find_definition("fx")          # radius = 5.0 в фикстуре
@@ -488,7 +488,7 @@ def test_seed_spawn_area():
             el[name] = attr
         return el
 
-    # Вырожденный бокс (min == max) → куб ±radius*4
+    # Вырожденный бокс (min == max) -> куб ±radius*4
     box = _mod("Position Within Box Random", [
         ("min", Attribute.vec3("min", 0, 0, 64)),
         ("max", Attribute.vec3("max", 0, 0, 64))])
@@ -496,7 +496,7 @@ def test_seed_spawn_area():
     assert list(box["min"].val_vec3) == [-20.0, -20.0, -20.0]
     assert list(box["max"].val_vec3) == [20.0, 20.0, 20.0]
 
-    # Бокс вообще без атрибутов — тоже получает размер
+    # Бокс вообще без атрибутов - тоже получает размер
     bare = _mod("Position Within Box Random")
     assert ParticleEditorService._seed_spawn_area(d, bare)
     assert list(bare["max"].val_vec3) == [20.0, 20.0, 20.0]
@@ -508,7 +508,7 @@ def test_seed_spawn_area():
     assert not ParticleEditorService._seed_spawn_area(d, good)
     assert list(good["min"].val_vec3) == [-3.0, -3.0, -3.0]
 
-    # Сфера нулевого радиуса → radius*6; ненулевая не трогается
+    # Сфера нулевого радиуса -> radius*6; ненулевая не трогается
     sph = _mod("Position Within Sphere Random", [
         ("distance_max", Attribute.float("distance_max", 0.0))])
     assert ParticleEditorService._seed_spawn_area(d, sph)
@@ -536,8 +536,8 @@ def test_seed_spawn_area():
 
 def test_paste_params_duplicate_modules():
     """Списковый формат буфера: два одинаковых модуля не схлопываются,
-    n-я копия в буфере метит n-ю копию у цели (инцидент halloween_ghosts —
-    два Remap Noise to Scalar, radius-ремап терялся при копировании)."""
+    n-я копия в буфере метит n-ю копию у цели (инцидент halloween_ghosts -
+    два Remap Noise to Scalar, radius-ремап терялся при копировании)"""
     payload = {
         "attrs": {},
         "modules": {
@@ -558,7 +558,7 @@ def test_paste_params_duplicate_modules():
     remaps = [m for m in inits if m["functionName"] == "Remap Noise to Scalar"]
     assert [m["attrs"]["output field"]["v"] for m in remaps] == [3, 1]
 
-    # повторная вставка: 1-я запись мержится в 1-ю копию, 2-я во 2-ю —
+    # повторная вставка: 1-я запись мержится в 1-ю копию, 2-я во 2-ю -
     # модули не плодятся
     assert svc.paste_params("fx", payload)
     inits = svc.systems_json()["fx"]["initializers"]
@@ -575,12 +575,12 @@ def test_paste_params_duplicate_modules():
 
 def test_attr_catalog_and_missing_attrs():
     """Каталог параметров модуля собирается из самих эффектов, а не из
-    захардкоженного списка."""
+    захардкоженного списка"""
     ParticleEditorService._attr_catalog.clear()
     svc = ParticleEditorService()
     svc.load_bytes(_make_pcf_bytes())
 
-    # В фикстуре у Color Random задан только color1 — добавим второй
+    # В фикстуре у Color Random задан только color1 - добавим второй
     # экземпляр модуля с другим полем, каталог должен объединить оба
     assert svc.add_module("fx_child", "initializers", "Color Random")
     d = svc._find_definition("fx_child")
@@ -609,7 +609,7 @@ def test_attr_catalog_and_missing_attrs():
 
 def test_attr_catalog_disk_cache(tmp_path, monkeypatch):
     """Каталог собирается ОДНИМ проходом на все модули и переживает
-    перезапуск: иначе пользователь ловил паузу на каждый новый модуль."""
+    перезапуск: иначе пользователь ловил паузу на каждый новый модуль"""
     ParticleEditorService._attr_catalog.clear()
     ParticleEditorService._game_materials_cache = None
     cache_file = tmp_path / "catalog.json"
@@ -644,7 +644,7 @@ def test_attr_catalog_disk_cache(tmp_path, monkeypatch):
     assert ("initializers", "color random") in ParticleEditorService._attr_catalog
     assert ParticleEditorService._game_materials_cache      # с диска
 
-    # Игра обновилась — отпечаток другой, кэш игнорируется
+    # Игра обновилась - отпечаток другой, кэш игнорируется
     ParticleEditorService._attr_catalog.clear()
     monkeypatch.setattr(ParticleEditorService, "_game_stamp",
                         classmethod(lambda cls, root: "stamp-2"))
@@ -654,7 +654,7 @@ def test_attr_catalog_disk_cache(tmp_path, monkeypatch):
 
 def test_param_reference(monkeypatch, tmp_path):
     """Справочник для генерации пресетов: канонические имена модулей,
-    формат буфера и отметка поддержки превью (с учётом алиасов)."""
+    формат буфера и отметка поддержки превью (с учётом алиасов)"""
     ParticleEditorService._attr_catalog.clear()
     ParticleEditorService._module_display.clear()
     monkeypatch.setattr(ParticleEditorService, "_attr_catalog_file",
@@ -670,7 +670,7 @@ def test_param_reference(monkeypatch, tmp_path):
                "aliases": {"color_random": "color random"}}
     ref = ParticleEditorService.param_reference("D:/fake", supported=support)
 
-    # Имя модуля — как в игре, а не приведённое к нижнему регистру
+    # Имя модуля - как в игре, а не приведённое к нижнему регистру
     inits = ref["modules"]["initializers"]
     assert "Color Random" in inits
     assert inits["Color Random"]["params"]["color1"]["type"] == "color"
@@ -689,7 +689,7 @@ def test_param_reference(monkeypatch, tmp_path):
     attrs = svc.systems_json()["fx"]["attrs"]
     assert attrs["max_particles"]["v"] == 50
 
-    # Вариант с заданием для ИИ: инструкция первым ключом, обычный — без неё
+    # Вариант с заданием для ИИ: инструкция первым ключом, обычный - без неё
     assert "instructions_for_ai" not in ref
     with_ai = ParticleEditorService.param_reference(
         "D:/fake", supported=support, with_prompt=True)
@@ -700,10 +700,10 @@ def test_param_reference(monkeypatch, tmp_path):
     assert "TOGETHER WITH their own description" in prompt
     assert "ASK BEFORE ANSWERING" in prompt
     assert "Spawn area" in prompt
-    # Дополнение к эффекту или полная замена — спросить обязательно
+    # Дополнение к эффекту или полная замена - спросить обязательно
     assert "brand-new effect that should replace the whole system" in prompt
-    assert '"full": false — an ADDITION' in prompt
-    assert '"full": true — a COMPLETE effect' in prompt
+    assert '"full": false - an ADDITION' in prompt
+    assert '"full": true - a COMPLETE effect' in prompt
     assert "Hammer units" in prompt          # масштаб
     assert "One preset describes ONE particle system" in prompt
     # Анимированные листы: без высокого rate или fit_lifetime они «стоят»
@@ -727,7 +727,7 @@ def test_param_reference(monkeypatch, tmp_path):
 
 
 def test_remove_attr():
-    """Удаление параметра = возврат к умолчанию движка (и меньший PCF)."""
+    """Удаление параметра = возврат к умолчанию движка (и меньший PCF)"""
     svc = ParticleEditorService()
     svc.load_bytes(_make_pcf_bytes())
 
@@ -742,7 +742,7 @@ def test_remove_attr():
     assert svc.systems_json()["fx"]["initializers"][0]["functionName"] \
         == "Color Random"
 
-    # Несуществующие цели — False, не исключение
+    # Несуществующие цели - False, не исключение
     assert not svc.remove_attr("nope", None, 0, "radius")
     assert not svc.remove_attr("fx", "initializers", 9, "color1")
     assert not svc.remove_attr("fx", None, 0, "radius")   # уже удалён
@@ -757,7 +757,7 @@ def test_remove_attr():
 
 
 def test_rename_system():
-    """Переименование не рвёт связь родителя с ребёнком."""
+    """Переименование не рвёт связь родителя с ребёнком"""
     svc = ParticleEditorService()
     svc.load_bytes(_make_pcf_bytes())
 
@@ -785,12 +785,12 @@ def test_rename_system():
 
 
 def test_rename_material():
-    """Свой путь материала вместо перезаписи стокового; кастомные файлы
-    переезжают вместе с ним."""
+    """Свой путь материала вместо перезаписи стокового, кастомные файлы
+    переезжают вместе с ним"""
     svc = ParticleEditorService()
     svc.load_bytes(_make_pcf_bytes())
 
-    # fx и fx_child делят материал (разный регистр) — оба переводятся
+    # fx и fx_child делят материал (разный регистр) - оба переводятся
     assert svc.rename_material("effects\\test.vmt", "effects\\mine.vmt")
     sysj = svc.systems_json()
     assert sysj["fx"]["attrs"]["material"]["v"] == "effects\\mine.vmt"
@@ -798,7 +798,7 @@ def test_rename_material():
 
     assert not svc.rename_material("effects\\nope.vmt", "effects\\x.vmt")
     assert not svc.rename_material("effects\\mine.vmt", "")
-    # Тот же путь в другом написании — не переименование
+    # Тот же путь в другом написании - не переименование
     assert not svc.rename_material("effects\\mine.vmt", "effects/mine.vmt")
 
     # С кастомной текстурой: файлы и оверрайд едут на новый путь
@@ -824,7 +824,7 @@ def test_rename_material():
 
 
 def test_snapshot_restore():
-    """Снимок/восстановление для Ctrl+Z: дерево и оверрайды текстур."""
+    """Снимок/восстановление для Ctrl+Z: дерево и оверрайды текстур"""
     svc = ParticleEditorService()
     svc.load_bytes(_make_pcf_bytes())
 
@@ -855,7 +855,7 @@ def test_snapshot_restore():
     assert "materials/effects/test.vtf" in svc.custom_files
     assert svc.is_custom_material("effects\\test.vmt")
 
-    # Снимок — независимая копия: правки после него не протекают в историю
+    # Снимок - независимая копия: правки после него не протекают в историю
     svc.set_attr("fx", None, 0, "radius", 1.0)
     svc.custom_files["materials/effects/other.vtf"] = b"x"
     assert svc.restore(snap1)
@@ -868,7 +868,7 @@ def test_snapshot_restore():
 
 
 def _make_shared_pcf_bytes() -> bytes:
-    """Две системы делят ОДИН элемент оператора — как в crit.pcf у Valve."""
+    """Две системы делят ОДИН элемент оператора - как в crit.pcf у Valve"""
     root = Element("root", "DmElement")
     fade = Element("Alpha Fade and Decay", "DmeParticleOperator")
     fade["functionName"] = Attribute.string("functionName", "Alpha Fade and Decay")
@@ -888,14 +888,14 @@ def _make_shared_pcf_bytes() -> bytes:
 
 def test_shared_module_is_unshared_before_edit():
     """У Valve один оператор стоит у десяти систем: правка у одной не должна
-    менять остальные."""
+    менять остальные"""
     svc = ParticleEditorService()
     svc.load_bytes(_make_shared_pcf_bytes())
     assert svc.set_attr("crit_text", "operators", 0, "end_alpha", 77.0)
     sysj = svc.systems_json()
     assert sysj["crit_text"]["operators"][0]["attrs"]["end_alpha"]["v"] == 77.0
     assert sysj["hit_text"]["operators"][0]["attrs"]["end_alpha"]["v"] == 0.0
-    # Второй раз копировать нечего — элемент уже свой.
+    # Второй раз копировать нечего - элемент уже свой
     d = svc._find_definition("crit_text")
     mod = list(d["operators"].iter_elem())[0]
     assert svc._module_owners(mod) == 1
@@ -912,7 +912,7 @@ def test_remove_attr_on_shared_module_keeps_the_neighbour():
 
 
 class _StockStub(ParticleEditorService):
-    """Сервис, у которого «игровая версия» — заданные байты, без VPK."""
+    """Сервис, у которого «игровая версия» - заданные байты, без VPK"""
 
     def __init__(self, stock_bytes: bytes):
         super().__init__()
@@ -928,8 +928,8 @@ class _StockStub(ParticleEditorService):
 
 
 def test_stock_diff_and_reverts():
-    """Отличия от игры считаются по атрибутам, модулям и детям; откат
-    возвращает систему байт в байт по составу."""
+    """Отличия от игры считаются по атрибутам, модулям и детям, откат
+    возвращает систему байт в байт по составу"""
     from src.services.particle_editor_service import diff_systems
 
     stock = _make_pcf_bytes()
@@ -949,25 +949,25 @@ def test_stock_diff_and_reverts():
     assert d["modules"]["operators"][0]["status"] == "added"
     assert d["children"] is True
 
-    # Один параметр — к значению игры; лишний (которого в игре нет) — долой.
+    # Один параметр - к значению игры, лишний (которого в игре нет) - долой
     assert svc.revert_attr("", "fx", None, 0, "radius")
     assert svc.systems_json()["fx"]["attrs"]["radius"]["v"] == 5.0
     svc.ensure_attr("fx", None, 0, "extra", "float", 1.0)
     assert svc.revert_attr("", "fx", None, 0, "extra")
     assert "extra" not in svc.systems_json()["fx"]["attrs"]
 
-    # Вся система разом.
+    # Вся система разом
     assert svc.revert_system("", "fx")
     assert svc.stock_diff("")["fx"]["status"] == "same"
     assert svc.systems_json()["fx"]["children"] == [{"delay": 0.25, "childName": "fx_child"}]
     assert svc.systems_json()["fx"]["operators"] == []
 
-    # Системы, которой в игре нет, — «added»; вернуть её не к чему.
+    # Системы, которой в игре нет, - «added», вернуть её не к чему
     svc.duplicate_system("fx", "fx_copy")
     assert svc.stock_diff("")["fx_copy"]["status"] == "added"
     assert not svc.revert_system("", "fx_copy")
 
-    # Чистая функция: удалённый модуль виден списком.
+    # Чистая функция: удалённый модуль виден списком
     cur = {"a": {"attrs": {}, "operators": [], "children": []}}
     ref = {"a": {"attrs": {}, "operators": [{"functionName": "Gone", "attrs": {}}],
                  "children": []}}
@@ -1011,7 +1011,7 @@ def test_parse_vtf_sheet():
     assert len(seq["frames"][0]["coords"]) == 4
     assert seq["frames"][0]["coords"][0] == [0.0, 0.0, 0.5, 0.5]
 
-    # Не-VTF и VTF 7.2 (без ресурсов) → None
+    # Не-VTF и VTF 7.2 (без ресурсов) -> None
     assert parse_vtf_sheet(b"not a vtf") is None
     v72 = b"VTF\x00" + struct.pack("<II", 7, 2) + b"\x00" * 0x60
     assert parse_vtf_sheet(v72) is None
@@ -1020,8 +1020,8 @@ def test_parse_vtf_sheet():
 def test_canonical_attr_case_on_paste(tmp_path, monkeypatch):
     """Source читает атрибуты С УЧЁТОМ РЕГИСТРА: записанный строчными
     'spin strength' игра игнорирует и берёт умолчание. AI-пресеты дают
-    строчные имена — при вставке приводим к написанию игры.
-    Реальный инцидент: бабочки не разворачивались и анимация летела."""
+    строчные имена - при вставке приводим к написанию игры.
+    Реальный инцидент: бабочки не разворачивались и анимация летела"""
     ParticleEditorService._attr_catalog.clear()
     ParticleEditorService._attr_canonical.clear()
     ParticleEditorService._module_display.clear()
@@ -1034,20 +1034,20 @@ def test_canonical_attr_case_on_paste(tmp_path, monkeypatch):
                         staticmethod(lambda root: ["a.pcf", "b.pcf"]))
 
     def fake_load(self, root, pcf):
-        """a.pcf — «мод юзера» со строчным именем, b.pcf — стоковое
-        написание. Побеждать должно частое (стоковое)."""
+        """a.pcf - «мод юзера» со строчным именем, b.pcf - стоковое
+        написание. Побеждать должно частое (стоковое)"""
         root_el = Element("root", "DmElement")
         sysdef = Element("fx", "DmeParticleSystemDefinition")
         op = Element("Rotation Orient to 2D Direction", "DmeParticleOperator")
         op["functionName"] = Attribute.string(
             "functionName", "Rotation Orient to 2D Direction")
-        # в a.pcf — строчное, в b.pcf — как в игре (и встречается чаще)
+        # в a.pcf - строчное, в b.pcf - как в игре (и встречается чаще)
         op["spin strength" if pcf == "a.pcf" else "Spin Strength"] = \
             Attribute.float("spin strength" if pcf == "a.pcf"
                             else "Spin Strength", 1.0)
         ops = Attribute.array("operators", srctools_dmx.ValueType.ELEMENT)
         ops.append(op)
-        if pcf == "b.pcf":          # второе стоковое вхождение — перевес
+        if pcf == "b.pcf":          # второе стоковое вхождение - перевес
             op2 = Element("Rotation Orient to 2D Direction", "DmeParticleOperator")
             op2["functionName"] = Attribute.string(
                 "functionName", "Rotation Orient to 2D Direction")
@@ -1089,11 +1089,11 @@ def test_canonical_attr_case_on_paste(tmp_path, monkeypatch):
     ParticleEditorService._module_display.clear()
 
 
-# ── Контрольные точки, каталог параметров, согласованность с превью ────── #
+# Контрольные точки, каталог параметров, согласованность с превью
 
 def test_referenced_control_points():
-    """Какие CP нужны эффекту — вычитывается из модулей: в игре их ставит
-    код, в превью пользователь, и без подсказки о CP 9 не догадаться."""
+    """Какие CP нужны эффекту - вычитывается из модулей: в игре их ставит
+    код, в превью пользователь, и без подсказки о CP 9 не догадаться"""
     from src.services.particle_editor_service import referenced_control_points
 
     child = {
@@ -1119,8 +1119,8 @@ def test_referenced_control_points():
 
 
 def test_referenced_control_points_ignores_range_fields():
-    """«maximum end control point» = 30 — это граница диапазона, а не точка:
-    в стоке такие поля есть, и без фильтра подсказка врала бы."""
+    """«maximum end control point» = 30 - это граница диапазона, а не точка:
+    в стоке такие поля есть, и без фильтра подсказка врала бы"""
     from src.services.particle_editor_service import referenced_control_points
 
     s = {"attrs": {}, "renderers": [], "emitters": [], "initializers": [],
@@ -1134,7 +1134,7 @@ def test_referenced_control_points_ignores_range_fields():
 
 def test_referenced_control_points_skips_self_set_points():
     """Анюжуал шапки (butterfly, лето 2026) сам расставляет точки 1-3 из
-    своих частиц, снаружи ему нужна только точка 0 — как и даёт игра."""
+    своих частиц, снаружи ему нужна только точка 0 - как и даёт игра"""
     from src.services.particle_editor_service import referenced_control_points
 
     kid = {"attrs": {}, "renderers": [], "emitters": [], "initializers": [],
@@ -1159,7 +1159,7 @@ def test_referenced_control_points_skips_self_set_points():
 
 def test_attr_stats_tracks_value_spread():
     """Каталог копит разброс значения по эффектам игры: одного «примера»
-    мало, чтобы понять, 0.1 — это норма или экзотика."""
+    мало, чтобы понять, 0.1 - это норма или экзотика"""
     from src.services.particle_editor_service import ParticleEditorService as P
 
     entry = {"t": "float", "v": 1.0}
@@ -1188,7 +1188,7 @@ def test_param_reference_entry_carries_range():
     spread = P._param_reference_entry(
         {"t": "float", "v": 1.0, "lo": 0.5, "hi": 4.0, "n": 12})
     assert spread == {"type": "float", "example": 1.0, "range": [0.5, 4.0]}
-    # Одно значение на всю игру — диапазона нет
+    # Одно значение на всю игру - диапазона нет
     same = P._param_reference_entry(
         {"t": "float", "v": 1.0, "lo": 1.0, "hi": 1.0, "n": 9})
     assert "range" not in same
@@ -1196,10 +1196,10 @@ def test_param_reference_entry_carries_range():
 
 def test_module_catalog_covers_everything_preview_simulates():
     """Каталог «Добавить модуль…» и движок превью не должны разъезжаться:
-    если превью умеет модуль, он обязан быть в списке под рукой.
+    если превью умеет модуль, он обязан быть в списке под рукой
 
-    Исключение — модули, которых нет в файлах TF2 вовсе (порт движка знает
-    операторы других игр Source); они перечислены явно.
+    Исключение - модули, которых нет в файлах TF2 вовсе (порт движка знает
+    операторы других игр Source), они перечислены явно
     """
     import re
     from pathlib import Path
@@ -1226,7 +1226,7 @@ def test_module_catalog_covers_everything_preview_simulates():
         r"^    '([^']+)': '([^']+)',",
         src[src.index("const FN_ALIASES"):src.index("function resolveFnName")],
         re.M))
-    #: Операторы движка, которых нет ни в одном стоковом PCF TF2.
+    #: Операторы движка, которых нет ни в одном стоковом PCF TF2
     not_in_tf2 = {"alpha fade in simple", "alpha fade out simple"}
 
     for group, const in (("initializers", "INITIALIZERS"),
@@ -1241,11 +1241,11 @@ def test_module_catalog_covers_everything_preview_simulates():
 
 
 def test_material_key_collapses_doubled_separators():
-    """В PCF стока попадаются задвоенные разделители: `effects\\crit`.
+    """В PCF стока попадаются задвоенные разделители: `effects\\crit`
 
-    Для архива `materials/effects//crit.vmt` — другой путь, которого там нет,
+    Для архива `materials/effects//crit.vmt` - другой путь, которого там нет,
     и боевой крит-эффект оставался без текстуры. Ключ материала обязан быть
-    один и тот же, как бы путь ни записали.
+    один и тот же, как бы путь ни записали
     """
     from src.services.particle_editor_service import _norm_mat
 
@@ -1262,8 +1262,8 @@ def test_material_key_collapses_doubled_separators():
 
 
 def test_sprite_render_mode_counts_as_additive():
-    """У Sprite-материалов «$spriterendermode 5» (kRenderTransAdd) — сложение с
-    фоном без слова $additive; текстура без альфы рисовалась чёрным квадратом."""
+    """У Sprite-материалов «$spriterendermode 5» (kRenderTransAdd) - сложение с
+    фоном без слова $additive; текстура без альфы рисовалась чёрным квадратом"""
     from src.services import vmt_parse
     from src.services.particle_editor_service import _is_additive
 

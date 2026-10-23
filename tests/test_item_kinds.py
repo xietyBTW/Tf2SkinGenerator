@@ -1,4 +1,4 @@
-"""Классификация вида предмета — единый ответ вместо проверок по строке."""
+"""Классификация вида предмета - единый ответ вместо проверок по строке"""
 
 import unittest
 
@@ -31,7 +31,7 @@ class KindOfTests(unittest.TestCase):
     def test_spy_mask(self):
         kind = kind_of(SPY_MASK_MODE_KEY)
         self.assertTrue(kind.is_spy_mask)
-        self.assertFalse(kind.is_character, "маски — не тело, у них своя панель")
+        self.assertFalse(kind.is_character, "маски - не тело, у них своя панель")
 
     def test_weapon_is_the_default(self):
         for mode in ("scout_c_scattergun", "", None, "что-то новое"):
@@ -47,7 +47,7 @@ class KindOfTests(unittest.TestCase):
             self.assertEqual(sum(flags), 1, f"{mode}: {flags}")
 
     def test_same_object_for_same_mode(self):
-        """Вид — значение, а не состояние: можно сравнивать и кэшировать."""
+        """Вид - значение, а не состояние: можно сравнивать и кэшировать"""
         self.assertIs(kind_of("hat"), kind_of("hat"))
         self.assertEqual(kind_of("hat"), kind_of("hat"))
 

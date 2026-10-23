@@ -1,13 +1,13 @@
 /*
- * Каталог предметов.
+ * Каталог предметов
  *
  * Часть стилей страницы: файлы подключены в index.html в порядке каскада
  * (style.css первым), порядок менять нельзя.
  */
 
-/* ── Каталог предметов ───────────────────────────────────────────────────
-   Один блок на оба режима. Прибитый — узкая колонка слева, сетка сама
-   становится в один столбец. Плавающий — на весь экран. */
+/* Каталог предметов
+   Один блок на оба режима. Прибитый - узкая колонка слева, сетка сама
+   становится в один столбец. Плавающий - на весь экран */
 .catalog {
   display: flex;
   flex-direction: column;
@@ -35,16 +35,16 @@
   overflow: auto;
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
-  /* Ряды — к верху. Сетка высотой во весь экран, и при двух рядах (фильтр
-     «Снайпер · Основное») по умолчанию лишняя высота делилась между ними —
-     карточки разъезжались. */
+  /* Ряды - к верху. Сетка высотой во весь экран, и при двух рядах (фильтр
+     «Снайпер · Основное») по умолчанию лишняя высота делилась между ними -
+     карточки разъезжались */
   align-content: start;
   gap: 22px 18px;
   padding-bottom: 4px;
 }
 
 /* Полоса между модами из VPK и своими работами в «Кастомном моде» -
-   во всю ширину сетки, с подписью нижней группы. */
+   во всю ширину сетки, с подписью нижней группы */
 .catalog__rule {
   grid-column: 1 / -1;
   display: flex; align-items: center; gap: 10px;
@@ -52,6 +52,10 @@
   color: var(--ink-mute);
 }
 .catalog__rule::after { content: ""; flex: 1; border-top: 1px solid var(--hairline-strong); }
+
+/* Распорка окна сетки (catalog-window.js): высота рядов, которых нет в
+   документе. Во всю ширину, чтобы занимать ровно свои ряды */
+.catalog__pad { grid-column: 1 / -1; }
 
 .pick {
   position: relative;       /* для пометки стилей (.pick__styles) */
@@ -64,7 +68,7 @@
   text-align: left;
   cursor: pointer;
 }
-/* Обложка — иконка предмета из рюкзака (materials/backpack/…), она квадратная. */
+/* Обложка - иконка предмета из рюкзака (materials/backpack/…), она квадратная */
 .pick__box {
   position: relative;
   aspect-ratio: 1;
@@ -74,31 +78,53 @@
   transition: border-color var(--dur);
 }
 /* Иконка вписывается целиком: у игровых картинок прозрачные поля, и обрезка
-   по краю срезала бы стволы и поля шляп. */
+   по краю срезала бы стволы и поля шляп */
 .pick__icon {
   display: block;
   width: 100%;
   height: 100%;
   object-fit: contain;
 }
+/* до загрузки не видна: иконка в очереди стоит без адреса, а снятая на полпути
+   считается битой, и браузер рисовал бы на их месте свой значок */
+.pick__icon:not(.is-loaded) { visibility: hidden; }
+.pick__icon.is-loaded { animation: icon-in 160ms ease-out; }
+@keyframes icon-in { from { opacity: 0; } }
+[data-motion="off"] .pick__icon.is-loaded { animation: none; }
+@media (prefers-reduced-motion: reduce) { .pick__icon.is-loaded { animation: none; } }
 .pick:hover .pick__box { border-color: var(--ink); }
+/* На весь экран карточка при наведении чуть приподнимается, а предмет в ней
+   подаётся вперёд. В прибитой колонке обложка - метка в 26 px, там движение
+   только мельтешило бы */
+[data-panels="float"] .pick__box {
+  transition: border-color var(--dur), transform 320ms cubic-bezier(.2, .7, .2, 1),
+              box-shadow 320ms cubic-bezier(.2, .7, .2, 1);
+}
+[data-panels="float"] .pick__icon { transition: transform 420ms cubic-bezier(.2, .7, .2, 1); }
+[data-panels="float"] .pick:hover .pick__box {
+  transform: translateY(-3px);
+  box-shadow: 0 12px 26px rgba(0, 0, 0, .16);
+}
+[data-panels="float"] .pick:hover .pick__icon { transform: scale(1.06); }
+[data-motion="off"] .pick__box, [data-motion="off"] .pick__icon { transform: none !important; }
+@media (prefers-reduced-motion: reduce) { .pick__box, .pick__icon { transform: none !important; } }
 .pick.is-active .pick__box { border-color: var(--accent); }
 
 /* Обложка специального режима: свой значок вместо картинки из рюкзака (её у
-   спрея и эффектов смерти нет — см. catalog.js → SPECIAL_ART).
+   спрея и эффектов смерти нет - см. catalog.js -> SPECIAL_ART)
 
    Размер долей от рамки, а не в пикселях: та же обложка бывает и во всю плитку
    каталога, и меткой в 26 px у имени в прибитой панели. А вот линия долей быть
-   не может — `non-scaling-stroke` держит её волосяной в обоих размерах, иначе
-   на большой обложке она выходит в десяток пикселей. */
+   не может - `non-scaling-stroke` держит её волосяной в обоих размерах, иначе
+   на большой обложке она выходит в десяток пикселей */
 .pick__art {
   position: absolute;
   left: 22%;
   top: 22%;
   width: 56%;
   height: 56%;
-  /* Значок — содержимое карточки, а не её оправа: `--ink-soft` контрастнее
-     рамки в обеих темах, а `--ink-mute` терялся рядом с подписью. */
+  /* Значок - содержимое карточки, а не её оправа: `--ink-soft` контрастнее
+     рамки в обеих темах, а `--ink-mute` терялся рядом с подписью */
   color: var(--ink-soft);
   fill: none;
   stroke: currentColor;
@@ -107,14 +133,14 @@
   stroke-linejoin: round;
 }
 .pick__art * { vector-effect: non-scaling-stroke; }
-/* Заливка только у капель баллончика — как у точек на кубике «Случайно». */
+/* Заливка только у капель баллончика - как у точек на кубике «Случайно» */
 .pick__art .pick__drop { fill: currentColor; stroke: none; }
 .pick:hover .pick__art { color: var(--ink); }
 .pick.is-active .pick__art { color: var(--accent); }
 .pick__name { font-size: 13px; }
 
 /* Имя и путь режем многоточием: у косметики пути вида
-   models/player/items/demo/... длиннее плитки и налезали на соседние. */
+   models/player/items/demo/... длиннее плитки и налезали на соседние */
 .pick__name,
 .pick .mono {
   min-width: 0;
@@ -128,13 +154,13 @@
 
 /* Видимостью рядов фильтров управляет ТОЛЬКО applyCategory в app.js.
    Правила `[data-for] { display: none }` здесь быть не должно: скрипт снимает
-   inline-стиль у видимых рядов, и такое правило оставляло бы их скрытыми. */
+   inline-стиль у видимых рядов, и такое правило оставляло бы их скрытыми */
 .catalog__empty { margin: 0; color: var(--ink-mute); font-size: 12px; }
 
 /* Прибитый режим: узкая колонка. Большие обложки в 230 пикселях съедают
-   экран — видно четыре предмета вместо пятнадцати. Поэтому там сетка
-   становится списком, а обложка — маленькой меткой слева от имени.
-   Компонент тот же, меняется только плотность. */
+   экран - видно четыре предмета вместо пятнадцати. Поэтому там сетка
+   становится списком, а обложка - маленькой меткой слева от имени.
+   Компонент тот же, меняется только плотность */
 [data-panels="pinned"] .catalog { border-right: 1px solid var(--hairline); padding-right: var(--gap); }
 [data-panels="pinned"] #closecat { display: none; }
 [data-panels="pinned"] .catalog__filters { gap: 10px; }
@@ -164,8 +190,8 @@
 }
 [data-panels="pinned"] .pick__name,
 [data-panels="pinned"] .pick .mono { grid-column: 2; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-/* Пометка стилей — отдельной колонкой справа от имени: на обложке в 26 px
-   ей места нет. Колонка `auto` появляется только у шапок со стилями. */
+/* Пометка стилей - отдельной колонкой справа от имени: на обложке в 26 px
+   ей места нет. Колонка `auto` появляется только у шапок со стилями */
 [data-panels="pinned"] .pick:has(.pick__styles) {
   grid-template-columns: 26px minmax(0, 1fr) auto;
 }
@@ -178,6 +204,6 @@
   border: 1px solid var(--hairline);
 }
 
-/* Вложенность системы частиц: ребёнка видно, что он ребёнок. */
+/* Вложенность системы частиц: ребёнка видно, что он ребёнок */
 .pick__name, .pick .mono { padding-left: calc(var(--depth, 0) * 9px); }
 

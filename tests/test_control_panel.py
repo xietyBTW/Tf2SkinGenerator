@@ -1,9 +1,9 @@
 """
-Экран модели (vgui-панель на attachment'ах controlpanel0) как геометрия.
+Экран модели (vgui-панель на attachment'ах controlpanel0) как геометрия
 
 Циферблат Звона смерти в меше отсутствует: игра рисует его панелью между
 двумя attachment'ами. Превью строит по ним квад фона и веер заполнения и
-кладёт их отдельным SMD рядом с reference — дальше он идёт как бодигруппа.
+кладёт их отдельным SMD рядом с reference - дальше он идёт как бодигруппа
 """
 
 from __future__ import annotations
@@ -15,7 +15,7 @@ import unittest
 from src.services import control_panel
 from src.services.preview_3d_worker import Preview3DWorker
 
-# bottom_left в начале координат, top_right на (2, 1, 0): экран 2×1 в XY, нормаль +Z.
+# bottom_left в начале координат, top_right на (2, 1, 0): экран 2×1 в XY, нормаль +Z
 REFERENCE_SMD = (
     'version 1\nnodes\n0 "root" -1\n1 "bottom_left" 0\n2 "top_right" 0\nend\n'
     'skeleton\ntime 0\n0 0 0 0 0 0 0\n1 0 0 0 0 0 0\n2 2 1 0 0 0 0\nend\n'
@@ -61,12 +61,12 @@ class ScreenSmdTests(unittest.TestCase):
         self.assertEqual([os.path.basename(p) for p in paths], ['__screen0.smd'])
         bg = self._vertices(paths[0], 'pocket_watch_bg')
         self.assertEqual(len(bg), 6)
-        # Шкала занимает прямоугольник (10,10,260,80) панели 280×100.
+        # Шкала занимает прямоугольник (10,10,260,80) панели 280×100
         xs, ys, zs = (sorted({round(v[i], 3) for v in bg}) for i in range(3))
         self.assertEqual(xs, [round(2 * 10 / 280, 3), round(2 * 270 / 280, 3)])
         self.assertEqual(ys, [0.1, 0.9])
         self.assertEqual(zs, [0.0])
-        # Заполнение — половина круга, приподнята над фоном по нормали.
+        # Заполнение - половина круга, приподнята над фоном по нормали
         fg = self._vertices(paths[0], 'pocket_watch_fg')
         self.assertTrue(fg)
         self.assertEqual({round(v[2], 3) for v in fg}, {0.02})
@@ -78,7 +78,7 @@ class ScreenSmdTests(unittest.TestCase):
             text = f.read()
         self.assertIn('1 "bottom_left" 0', text)
         self.assertIn('2 "top_right" 0', text)
-        # Вершины привязаны к кости нижнего левого угла.
+        # Вершины привязаны к кости нижнего левого угла
         self.assertIn('\n1 ', text.split('triangles', 1)[1])
 
     def test_unknown_model_or_missing_attachments_give_nothing(self):

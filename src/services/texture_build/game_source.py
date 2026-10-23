@@ -1,6 +1,6 @@
 """
 Оригиналы игры и общие записи VMT: VTF/VMT материала из игровых VPK,
-$basetexture родного VMT, правка VMT человека поверх записанного.
+$basetexture родного VMT, правка VMT человека поверх записанного
 """
 
 import os
@@ -18,10 +18,10 @@ logger = get_logger(__name__)
 
 def write_material_vmt(target_vmt_path, base_vmt_path, cdmaterials_path: str, tex_name: str) -> None:
     """
-    Записывает VMT вторичного материала (extra / variant / shared / BLU).
+    Записывает VMT вторичного материала (extra / variant / shared / BLU)
 
-    Если базовый VMT существует — копирует его и переставляет $basetexture
-    на tex_name; иначе создаёт VMT из шаблона по $cdmaterials.
+    Если базовый VMT существует - копирует его и переставляет $basetexture
+    на tex_name; иначе создаёт VMT из шаблона по $cdmaterials
     """
     if base_vmt_path.exists():
         copy_file_safe(base_vmt_path, target_vmt_path)
@@ -39,21 +39,21 @@ def get_original_vtf_bytes(
     log_not_found: bool = True,
 ) -> Optional[bytes]:
     """
-    Извлекает оригинальный VTF из игровых VPK-файлов.
+    Извлекает оригинальный VTF из игровых VPK-файлов
 
     Crowbar добавляет префикс ``console\\`` ко всем $cdmaterials путям.
     В реальных VPK этого префикса нет, поэтому мы его снимаем.
-    Пути вида ``console\\..\\..\\effects`` (для частиц) пропускаются.
+    Пути вида ``console\\..\\..\\effects`` (для частиц) пропускаются
 
     Args:
         mat_name:          Имя материала (без расширения).
         cdmaterials_paths: Один путь или список путей из $cdmaterials QC.
                            Crowbar-префикс ``console/`` снимается автоматически.
         textures_vpk:      Путь к tf2_textures_dir.vpk.
-        misc_vpk:          Путь к tf2_misc_dir.vpk.
+        misc_vpk:          Путь к tf2_misc_dir.vpk
 
     Returns:
-        Байты VTF или None если не найдено.
+        Байты VTF или None если не найдено
     """
     try:
         from src.services.tf2_vpk_extract_service import _open_vpk_cached
@@ -70,9 +70,9 @@ def get_original_vtf_bytes(
 
         candidates: list = []
 
-        # Кандидаты из QC ($cdmaterials) — общей нормализацией: она же
+        # Кандидаты из QC ($cdmaterials) - общей нормализацией: она же
         # разрешает относительные пути ('../../effects' рядом с
-        # 'models/player/spy' — это 'models/effects', где лежит убер-эффект).
+        # 'models/player/spy' - это 'models/effects', где лежит убер-эффект)
         cdmats = qc_skin_parser.resolve_cdmaterials(raw_paths)
         candidates += [f"materials/{cdmat}/{mat_lower}.vtf" for cdmat in cdmats]
 
@@ -104,20 +104,20 @@ def get_original_vtf_bytes(
 
         # Прямые пути угадывают не всё: у служебных материалов персонажей
         # (глаза, убер-скин, зомби) VTF лежит не рядом со своим VMT, а в
-        # общей папке — `models/player/spy/eyeball_r.vmt` указывает на
+        # общей папке - `models/player/spy/eyeball_r.vmt` указывает на
         # `models/player/shared/eyeball_r`. Знает об этом только сам VMT,
-        # поэтому последним шагом идём общей цепочкой VMT → $basetexture.
+        # поэтому последним шагом идём общей цепочкой VMT -> $basetexture
         data, has_own_texture = vtf_via_vmt(
             mat_lower, cdmats, textures_vpk, misc_vpk)
         if data:
             return data
         if not has_own_texture:
             # Не потеря, а неверный вопрос: у EyeRefract (глаза персонажей)
-            # $basetexture нет вовсе — картинка собирается из $Iris и
-            # $CorneaTexture. Копировать в мод тут нечего.
+            # $basetexture нет вовсе - картинка собирается из $Iris и
+            # $CorneaTexture. Копировать в мод тут нечего
             logger.info(
                 f"У материала '{mat_name}' нет своей текстуры "
-                f"($basetexture в VMT отсутствует) — оригинал не нужен"
+                f"($basetexture в VMT отсутствует) - оригинал не нужен"
             )
             return None
 
@@ -139,16 +139,16 @@ def get_original_vtf_bytes(
 
 def vtf_via_vmt(mat_lower: str, cdmaterials: list,
                  textures_vpk: str, misc_vpk: str) -> Tuple[Optional[bytes], bool]:
-    """Сырые байты VTF через цепочку VMT → $basetexture → VTF.
+    """Сырые байты VTF через цепочку VMT -> $basetexture -> VTF
 
     Та же единая цепочка, что у превью (MaterialResolver), но БЕЗ краски и
-    без PNG: в мод должен лечь ровно тот файл, что лежит в игре — командный
-    цвет из VMT движок накладывает сам.
+    без PNG: в мод должен лечь ровно тот файл, что лежит в игре - командный
+    цвет из VMT движок накладывает сам
 
     Returns:
         (байты | None, есть ли у материала своя текстура). Второе нужно
         ради лога: у шейдеров вроде EyeRefract $basetexture нет вовсе, и
-        «оригинал не найден» для них — не потеря, а неверный вопрос.
+        «оригинал не найден» для них - не потеря, а неверный вопрос
     """
     try:
         from src.services.game_vpk_reader import GameVpkReader
@@ -175,10 +175,10 @@ def extract_original_vmt(
     decompile_dir,
 ) -> Optional[str]:
     """
-    Извлекает оригинальный VMT текстуры из игровых VPK.
+    Извлекает оригинальный VMT текстуры из игровых VPK
 
-    Порядок: tf2_textures_dir.vpk → tf2_misc_dir.vpk (Valve кладёт текстуры
-    то туда, то туда). Возвращает путь к извлечённому VMT или None.
+    Порядок: tf2_textures_dir.vpk -> tf2_misc_dir.vpk (Valve кладёт текстуры
+    то туда, то туда). Возвращает путь к извлечённому VMT или None
     """
     if not cdmaterials_path:
         return None
@@ -198,11 +198,11 @@ def extract_original_vmt(
 
 
 def read_vmt_basetexture(vmt_path: str) -> Optional[str]:
-    """Читает $basetexture из VMT (путь к VTF без расширения, как в файле).
+    """Читает $basetexture из VMT (путь к VTF без расширения, как в файле)
 
     Нужно для «use game original»: у головы/варианта имя VTF ≠ имя материала
-    (demoman_head_red → $basetexture "models/player/demo/demoman_head"), поэтому
-    реальный VTF резолвим именно по $basetexture, а не по имени материала."""
+    (demoman_head_red -> $basetexture "models/player/demo/demoman_head"), поэтому
+    реальный VTF резолвим именно по $basetexture, а не по имени материала"""
     try:
         import re as _re_bt
         with open(vmt_path, encoding='utf-8', errors='ignore') as _f:
@@ -214,11 +214,11 @@ def read_vmt_basetexture(vmt_path: str) -> Optional[str]:
 
 
 def find_original_vmt(name, ctx, slots):
-    """Родной VMT материала по путям $cdmaterials модели (или None).
+    """Родной VMT материала по путям $cdmaterials модели (или None)
 
     Пути разрешённые, как у поиска VTF (get_original_vtf_bytes): у тела
     шпиона убер-эффект invulnfx лежит по `..\\..\\effects` рядом с
-    `models\\player\\spy`, и по сырому пути его VMT не находился.
+    `models\\player\\spy`, и по сырому пути его VMT не находился
     """
     for _cd in qc_skin_parser.resolve_cdmaterials(
             list(slots.original_cdmaterials_paths or [])):
@@ -232,7 +232,7 @@ def find_original_vmt(name, ctx, slots):
 
 def game_texture(name, ctx, slots) -> Optional[str]:
     """$basetexture родного VMT материала, если такая текстура есть в игре
-    (путь без materials/ и .vtf); иначе None."""
+    (путь без materials/ и .vtf), иначе None"""
     from src.services.tf2_vpk_extract_service import _open_vpk_cached
 
     found = find_original_vmt(name, ctx, slots)
@@ -244,7 +244,7 @@ def game_texture(name, ctx, slots) -> Optional[str]:
     for vpk_path in filter(None, (slots.tf2_textures_vpk, slots.tf2_misc_vpk)):
         try:
             pak = _open_vpk_cached(vpk_path) if os.path.exists(vpk_path) else None
-        except Exception:   # noqa: BLE001 — нет архива: проверим следующий
+        except Exception:   # noqa: BLE001 - нет архива: проверим следующий
             pak = None
         if pak is not None and want in pak:
             return bt
@@ -253,7 +253,7 @@ def game_texture(name, ctx, slots) -> Optional[str]:
 
 def basetexture_fps(vmt_path) -> Optional[float]:
     """Частота прокси AnimatedTexture, который листает $basetexture (или
-    None). Только он: у тел есть и прокси огня по $detail."""
+    None). Только он: у тел есть и прокси огня по $detail"""
     from src.services import vmt_parse
 
     try:
@@ -271,10 +271,10 @@ def basetexture_fps(vmt_path) -> Optional[float]:
 
 
 def basetexture_chosen(edited_vmt, game_vmt) -> bool:
-    """В правке $basetexture другой, чем в игровом VMT материала.
+    """В правке $basetexture другой, чем в игровом VMT материала
 
-    Без игрового VMT сравнить не с чем — считаем, что правили старый путь
-    (как было до этой проверки).
+    Без игрового VMT сравнить не с чем - считаем, что правили старый путь
+    (как было до этой проверки)
     """
     def norm(path):
         base = read_vmt_basetexture(str(path)) if path else None
@@ -293,15 +293,15 @@ def basetexture_chosen(edited_vmt, game_vmt) -> bool:
 def apply_edited_vmt(name, vmt_path, orig_vmt, slots, own_texture: bool,
                       strip_paints: bool = False) -> None:
     """
-    Правка VMT из редактора поверх того, что записала сборка.
+    Правка VMT из редактора поверх того, что записала сборка
 
     Доп. материалы (голова тела, «Прочее», второй материал шапки) правку
     не брали вовсе: редактор её сохранял, а в мод шёл игровой VMT. Правило
-    то же, что у главного (_write_main_vmt): own_texture — VTF материала
+    то же, что у главного (_write_main_vmt): own_texture - VTF материала
     лежит в моде, и $basetexture правки переводится на него, если человек
-    не выбрал в правке свой. strip_paints — шапка без «Красок из игры»:
+    не выбрал в правке свой. strip_paints - шапка без «Красок из игры»:
     прокси краски снимаются и здесь, как у главного, иначе второй материал
-    красился бы, а главный нет.
+    красился бы, а главный нет
     """
     from src.services.edited_vmt_service import EditedVMTService
 
@@ -318,7 +318,7 @@ def apply_edited_vmt(name, vmt_path, orig_vmt, slots, own_texture: bool,
 
 def texture_reader(local_root: Optional[Path], vpk_paths) -> Callable[[str], Optional[bytes]]:
     """Читалка текстур по пути из VMT: сначала файлы мода
-    (`local_root`/materials), затем VPK игры."""
+    (`local_root`/materials), затем VPK игры"""
     from src.services.game_vpk_reader import GameVpkReader
 
     paks = [p for p in (vpk_paths or []) if p]

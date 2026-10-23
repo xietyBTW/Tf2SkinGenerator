@@ -1,11 +1,11 @@
 """
-Редактор частиц: разобранный PCF, его правка, история и сборка.
+Редактор частиц: разобранный PCF, его правка, история и сборка
 
 Живёт отдельно от сеанса предмета: эффект открывают из своего раздела, у него
 своя история отмены и своя сцена с моделью для контрольных точек. От сеанса
-нужны только пути к игре (`tf2_paths`) и очередь событий страницы (`_put`).
+нужны только пути к игре (`tf2_paths`) и очередь событий страницы (`_put`)
 
-Доступ — `session().particles`; `api.py` зовёт его методы напрямую.
+Доступ - `session().particles`; `api.py` зовёт его методы напрямую
 """
 
 from __future__ import annotations
@@ -28,14 +28,14 @@ logger = get_logger(__name__)
 
 
 def _in_export(path: str) -> Path:
-    """Относительный путь со страницы — внутри папки экспорта, а не от
-    текущей папки процесса (её в собранном приложении никто не видит)."""
+    """Относительный путь со страницы - внутри папки экспорта, а не от
+    текущей папки процесса (её в собранном приложении никто не видит)"""
     p = Path(str(path))
     return p if p.is_absolute() else export_dir() / p
 
 
 def qc_is_y_up(qc_path: str) -> bool:
-    """`$upaxis Y` в QC — модель (персонаж) лежит в SMD осью Y вверх."""
+    """`$upaxis Y` в QC - модель (персонаж) лежит в SMD осью Y вверх"""
     try:
         with open(qc_path, encoding='utf-8', errors='replace') as f:
             text = f.read()
@@ -45,7 +45,7 @@ def qc_is_y_up(qc_path: str) -> bool:
 
 
 def qc_is_player_item(qc_path: str) -> bool:
-    """Косметика/реквизит игрока по `$modelname` (…/player/items/…)."""
+    """Косметика/реквизит игрока по `$modelname` (…/player/items/…)"""
     try:
         with open(qc_path, encoding='utf-8', errors='replace') as f:
             text = f.read()
@@ -56,14 +56,14 @@ def qc_is_player_item(qc_path: str) -> bool:
 
 
 def angles_y_up_to_z_up(angles) -> List[float]:
-    """Углы Source (pitch, yaw, roll) после поворота Y-up → Z-up."""
+    """Углы Source (pitch, yaw, roll) после поворота Y-up -> Z-up"""
     from src.services.model_attachments import angle_matrix, concat_transforms, matrix_angles
     rot = [[1.0, 0.0, 0.0, 0.0], [0.0, 0.0, -1.0, 0.0], [0.0, 1.0, 0.0, 0.0]]
     return list(matrix_angles(concat_transforms(rot, angle_matrix(*angles))))
 
 
 def obj_y_up_to_z_up(obj_text: str) -> str:
-    """Поворот OBJ из Y-up в Z-up: (x, y, z) → (x, −z, y), для вершин и нормалей."""
+    """Поворот OBJ из Y-up в Z-up: (x, y, z) -> (x, −z, y), для вершин и нормалей"""
     out = []
     for line in obj_text.splitlines():
         parts = line.split()
@@ -80,7 +80,7 @@ def obj_y_up_to_z_up(obj_text: str) -> str:
 
 
 def obj_shift(obj_text: str, delta) -> str:
-    """Сдвиг вершин OBJ на −delta (нормали не трогаем)."""
+    """Сдвиг вершин OBJ на −delta (нормали не трогаем)"""
     out = []
     for line in obj_text.splitlines():
         parts = line.split()
@@ -97,53 +97,53 @@ def obj_shift(obj_text: str, delta) -> str:
 
 
 def tree_nodes(tree: list) -> List[dict]:
-    """Иерархия систем в вид для каталога: {key, name, kids}.
+    """Иерархия систем в вид для каталога: {key, name, kids}
 
     Вложенность в PCF настоящая (система тянет детей), и показывать её надо
     вложенностью же: в class_fx.pcf 104 системы, и плоским списком имён они
-    читаются как свалка. Выбрать при этом можно любой узел — движок строит
-    эффект от того, который назвали корнем.
+    читаются как свалка. Выбрать при этом можно любой узел - движок строит
+    эффект от того, который назвали корнем
 
-    Циклы обрывает system_hierarchy, поэтому обход конечен.
+    Циклы обрывает system_hierarchy, поэтому обход конечен
     """
     return [{'key': name, 'name': name, 'kids': tree_nodes(kids)}
             for name, kids in tree]
 
 
 class ParticlesEditor:
-    """Открытый в редакторе эффект и всё, что с ним делают."""
+    """Открытый в редакторе эффект и всё, что с ним делают"""
 
     def __init__(self, host: "AppSession") -> None:
         self._host = host
         #: Разобранный PCF. Живёт между вызовами: правка параметров и сборка
-        #: VPK работают с тем же деревом, что показано на экране.
+        #: VPK работают с тем же деревом, что показано на экране
         self.pcf = None
-        #: История правок эффекта: тот же стек снимков, что у предмета.
+        #: История правок эффекта: тот же стек снимков, что у предмета
         self.history = EditHistory(limit=self.HISTORY_LIMIT)
-        #: Во время отката новые снимки не пишем — иначе он сам стал бы правкой.
+        #: Во время отката новые снимки не пишем - иначе он сам стал бы правкой
         self._restoring = False
         #: Номер последнего открытия файла: открытым становится он, а не тот,
-        #: что разбирался дольше (см. `load_particles`).
+        #: что разбирался дольше (см. `load_particles`)
         self._load_seq = 0
         self._load_lock = threading.Lock()
         #: Открытый эффект: после правок движку уходят его текстуры, а не
-        #: все текстуры файла (у item_fx это 8,5 МБ на каждый Ctrl+Z).
+        #: все текстуры файла (у item_fx это 8,5 МБ на каждый Ctrl+Z)
         self._shown = ''
 
 
-    #: Сколько эффектов отдаём под поиском: систем в игре десять тысяч.
+    #: Сколько эффектов отдаём под поиском: систем в игре десять тысяч
     EFFECTS_PAGE = 200
 
     def particle_effects(self, query: str = '', source: str = '',
                          lang: str = 'ru') -> Dict[str, Any]:
-        """Эффекты игры по имени и по тому, чем они вызываются: {ready, items, facets}.
+        """Эффекты игры по имени и по тому, чем они вызываются: {ready, items, facets}
 
-        Без запроса и без источника — необычные эффекты с именами из игры
-        (то, что ищут чаще всего). С источником — все системы этого вида
+        Без запроса и без источника - необычные эффекты с именами из игры
+        (то, что ищут чаще всего). С источником - все системы этого вида
         (оружие, постройки, игрок…), подписанные предметом: «Огнемёт»,
-        «Турель». С запросом — поиск по всем 10 тысячам систем 134 файлов,
+        «Турель». С запросом - поиск по всем 10 тысячам систем 134 файлов,
         включая имена предметов: «огнемёт» находит его вспышку и пламя.
-        `ready` — собран ли индекс систем; до того ищем только по именам.
+        `ready` - собран ли индекс систем, до того ищем только по именам
         """
         from src.data import particle_sources as ps
 
@@ -153,7 +153,7 @@ class ParticlesEditor:
 
         by_name = {row['system']: row for row in rows}
         counts: Dict[str, int] = {}
-        #: Корни на показ, в порядке первого совпадения: {корень: [дети]}.
+        #: Корни на показ, в порядке первого совпадения: {корень: [дети]}
         found: Dict[str, List[Dict[str, Any]]] = {}
         matched: set = set()
         for row in rows:
@@ -161,19 +161,19 @@ class ParticlesEditor:
                 continue
             if source and source not in row['kinds']:
                 continue
-            # Без запроса и источника — каталог: только необычные.
+            # Без запроса и источника - каталог: только необычные
             if not words and not source and not row['name']:
                 continue
             matched.add(row['system'])
             # Дочерняя встаёт под свой корень: у эффекта из тридцати систем
-            # человеку нужна одна строка, а не тридцать.
+            # человеку нужна одна строка, а не тридцать
             top = row['root'] or row['system']
             kids = found.setdefault(top, [])
             if row['root'] and by_name.get(top) is not None:
                 kids.append(row)
-        # Счётчики — по корням и по всей игре под запросом, а не по
+        # Счётчики - по корням и по всей игре под запросом, а не по
         # показанному: из каталога необычных иначе нельзя было бы уйти в
-        # «Оружие».
+        # «Оружие»
         for top in {r['root'] or r['system'] for r in rows
                     if not words or all(w in r['blob'] for w in words)}:
             for kind in self._root_kinds(by_name, top):
@@ -184,10 +184,10 @@ class ParticlesEditor:
             root = by_name.get(top)
             if root is None:
                 continue
-            # Совпал только корень — показываем всех его детей, чтобы было
-            # что развернуть; совпали дети — только их.
-            # `open` — раскрыть сразу: нашли только детей, а не корень;
-            # когда совпал и корень, сотня раскрытых огнемётов — шум.
+            # Совпал только корень - показываем всех его детей, чтобы было
+            # что развернуть, совпали дети - только их.
+            # `open` - раскрыть сразу: нашли только детей, а не корень;
+            # когда совпал и корень, сотня раскрытых огнемётов - шум
             hit = bool(kids) and top not in matched
             if not kids and top in matched:
                 kids = [by_name[k] for k in self._children.get(top, ())
@@ -196,8 +196,8 @@ class ParticlesEditor:
                           'matched': top in matched, 'open': hit})
 
         if words:
-            # Совпавшие целиком или с начала — выше: «crit» это crit_text,
-            # а не bullet_tracer01_crit. Корень наследует лучший ранг детей.
+            # Совпавшие целиком или с начала - выше: «crit» это crit_text,
+            # а не bullet_tracer01_crit. Корень наследует лучший ранг детей
             def rank_one(it: Dict[str, Any]) -> int:
                 if any(w in it['keys'] for w in words):
                     return 0
@@ -210,8 +210,8 @@ class ParticlesEditor:
                 return min([own, *(rank_one(k) for k in it['kids'])])
             items.sort(key=rank)
         elif source:
-            # Под источником — по предмету, потом по имени: все вспышки
-            # огнемёта рядом.
+            # Под источником - по предмету, потом по имени: все вспышки
+            # огнемёта рядом
             items.sort(key=lambda it: (' '.join(it['labels']).lower() or '\uffff',
                                        it['system'].lower()))
         facets = [{'key': kind, 'name': name, 'count': counts.get(kind, 0)}
@@ -219,8 +219,8 @@ class ParticlesEditor:
                   if counts.get(kind) or kind == source]
         hidden = ('blob', 'keys', 'root', 'matched')
         strip = lambda it: {k: v for k, v in it.items() if k not in hidden}  # noqa: E731
-        # Каталог отдаём весь (645 строк — его листают); список источника —
-        # до восьмисот, поиск — первые двести: дальше уточняют запрос.
+        # Каталог отдаём весь (645 строк - его листают), список источника -
+        # до восьмисот, поиск - первые двести: дальше уточняют запрос
         page = (items if not words and not source
                 else items[:self.EFFECTS_PAGE * (1 if words else 4)])
         return {'ready': ready,
@@ -230,7 +230,7 @@ class ParticlesEditor:
 
     def _root_kinds(self, by_name: Dict[str, dict], top: str) -> set:
         """Виды корня вместе с детьми: огнемёт зовёт эффект, у которого
-        сам корень — «правила игры», а пламя — дети."""
+        сам корень - «правила игры», а пламя - дети"""
         kinds = set(by_name[top]['kinds']) if top in by_name else set()
         for kid in self._children.get(top, ()):
             if kid in by_name:
@@ -238,12 +238,12 @@ class ParticlesEditor:
         return kinds
 
     def _effect_rows(self, lang: str):
-        """Все эффекты игры со словами для поиска — один раз на язык.
+        """Все эффекты игры со словами для поиска - один раз на язык
 
         Строка стоит подписей на двух языках и десятка словарных обращений;
         на десять тысяч систем это полсекунды, и делать это на каждую
         букву запроса нельзя. Пока индекс систем строится, строк только
-        необычные — и кэш не ставится, чтобы дождаться остальных.
+        необычные - и кэш не ставится, чтобы дождаться остальных
         """
         from src.data import particle_sources as ps
         from src.data.hats_parser import parse_localization
@@ -258,7 +258,7 @@ class ParticlesEditor:
         cache = getattr(self, '_effect_cache', None)
         if cache and cache[0] == (lang, len(index)):
             return cache[1], bool(index)
-        #: {корень: [дети]} — для разворачивания и счётчиков.
+        #: {корень: [дети]} - для разворачивания и счётчиков
         self._children: Dict[str, List[str]] = {}
         for kid, top in roots.items():
             self._children.setdefault(top, []).append(kid)
@@ -266,7 +266,7 @@ class ParticlesEditor:
         # Имя в items_game и в PCF бывает разного регистра (stamp_spin против
         # Stamp_spin в stamp_spin.pcf), а игра сравнивает без регистра. Берём
         # написание файла: иначе у эффекта не находился файл, и он не
-        # открывался, а система файла шла второй строкой без имени.
+        # открывался, а система файла шла второй строкой без имени
         spelled = {system.lower(): system for system in index}
 
         def as_in_file(effects: List[dict]) -> List[dict]:
@@ -284,8 +284,8 @@ class ParticlesEditor:
         loc_en = loc if lang == 'en' else parse_localization(paths['root'], 'english')
         order = {'cosmetic': 0, 'taunt': 1, 'weapon': 2, 'killstreak': 3,
                  'other': 4}
-        # Необычные — первыми и по категориям (так идёт каталог), остальные
-        # системы — в порядке индекса.
+        # Необычные - первыми и по категориям (так идёт каталог), остальные
+        # системы - в порядке индекса
         pairs = [(fx['system'], index.get(fx['system'], ''))
                  for fx in sorted(unusuals, key=lambda fx: order.get(fx['category'], 9))]
         pairs += [(system, file) for system, file in index.items()
@@ -300,9 +300,9 @@ class ParticlesEditor:
             labels_en = ps.labels_of(system, file, loc_en, english, 'en')
             rows.append({
                 'system': system, 'file': file, 'name': name,
-                # Эффект с именем из игры — сам себе корень, даже если в
+                # Эффект с именем из игры - сам себе корень, даже если в
                 # файле он чей-то ребёнок: superrare_burning2 лежит под
-                # superrare_test, а ищут его.
+                # superrare_test, а ищут его
                 'root': '' if name else roots.get(system, ''),
                 'category': fx['category'] if fx else '',
                 'category_name': CATEGORY_NAMES[fx['category']] if fx else '',
@@ -318,7 +318,7 @@ class ParticlesEditor:
         return rows, bool(index)
 
     def _unusual_effects(self, lang: str) -> List[dict]:
-        """Таблица необычных эффектов с именами на языке интерфейса."""
+        """Таблица необычных эффектов с именами на языке интерфейса"""
         from src.data import unusual_effects
         from src.data.hats_parser import parse_localization
         from src.data.weapon_model_index import get_items_game_path
@@ -341,17 +341,17 @@ class ParticlesEditor:
     def load_particles(self, source: str, system: str = '') -> Dict[str, Any]:
         """
         Разбирает PCF и отдаёт всё, что нужно рендереру, открытым сразу на
-        системе `system` (пусто или нет такой - первый корень).
+        системе `system` (пусто или нет такой - первый корень)
 
         Ответом, а не событием: страница всё равно ничего не может показать,
         пока не получит его целиком. Текстуры - только выбранного эффекта:
         у item_fx их 96, все вместе это 8,5 МБ PNG в ответе и полторы
         секунды распаковки VTF при первом открытии, а эффекту нужны две-три.
-        Другие эффекты файла добирают свои (`particle_effect_materials`).
+        Другие эффекты файла добирают свои (`particle_effect_materials`)
 
         Новый вызов обгоняет прежний ({'cancelled': True}): иначе файл,
         который разбирался дольше, становился открытым ПОСЛЕ того, что
-        выбрали следом, и правки уходили не в тот файл, что на экране.
+        выбрали следом, и правки уходили не в тот файл, что на экране
         """
         paths = self._host.tf2_paths()
         if 'error' in paths:
@@ -370,7 +370,7 @@ class ParticlesEditor:
                 svc.load_from_game(paths['root'], source)
             else:
                 svc.load_file(source)
-        except Exception as exc:                     # noqa: BLE001 — граница
+        except Exception as exc:                     # noqa: BLE001 - граница
             logger.warning(f"PCF {source} не разобран: {exc}")
             return {'error': str(exc)}
 
@@ -378,12 +378,12 @@ class ParticlesEditor:
         tree = tree_nodes(system_hierarchy(systems, order=svc.system_names()))
         # Ключ именно такой: этот словарь уходит в loadParticleData движка
         # как есть, а он читает rootName. Пустая сцена после загрузки
-        # выглядит поломкой - что-то показываем сразу.
+        # выглядит поломкой - что-то показываем сразу
         root = system if system in systems else (tree[0]['key'] if tree else '')
         if source.startswith('particles/'):
             # Только что прочитан из игры - он и есть сток: разбирать тот же
             # файл второй раз ради «всё совпадает» незачем. Системы стока
-            # запоминаем: правки дальше сравниваются с ними.
+            # запоминаем: правки дальше сравниваются с ними
             svc._stock_systems = systems
             diff = {name: entry['status']
                     for name, entry in diff_systems(systems, systems).items()}
@@ -400,40 +400,40 @@ class ParticlesEditor:
             'materials': svc.materials_json(
                 paths['root'], names=self._effect_materials(root, systems) if root else []),
             'tree': tree,
-            # Что отличается от игры — метки в дереве. Открыли файл с диска
-            # без игрового собрата — пусто.
+            # Что отличается от игры - метки в дереве. Открыли файл с диска
+            # без игрового собрата - пусто
             'diff': self._particle_diff_all(systems) if diff is None else diff,
             'rootName': root,
         }
 
     def _shown_materials(self, tf2_root: str) -> Dict[str, dict]:
-        """Текстуры открытого эффекта для движка после правки; эффект ещё не
+        """Текстуры открытого эффекта для движка после правки, эффект ещё не
         выбран - все текстуры файла. Чего не хватит другому эффекту, страница
-        доберёт при его выборе (`particle_effect_materials`)."""
+        доберёт при его выборе (`particle_effect_materials`)"""
         names = self._effect_materials(self._shown) if self._shown else None
         return self.pcf.materials_json(tf2_root, names=names)
 
     def particle_effect_materials(self, system: str) -> Dict[str, Any]:
         """Текстуры эффекта для движка ({материал: info}) - добираются при
-        выборе другой системы того же файла (см. `load_particles`)."""
+        выборе другой системы того же файла (см. `load_particles`)"""
         paths = self._host.tf2_paths()
         if self.pcf is None or 'error' in paths:
             return {'materials': {}, 'names': []}
         self._shown = system
         names = self._effect_materials(system)
         # names - что спрашивали: не найденное в игре движок запомнит как
-        # «нет» и не будет спрашивать его снова на каждую правку.
+        # «нет» и не будет спрашивать его снова на каждую правку
         return {'materials': self.pcf.materials_json(paths['root'], names=names),
                 'names': names}
 
     def particle_params(self, system: str, lang: str = 'ru') -> List[dict]:
         """
-        Крутилки простого режима для системы — то же, что в панели приложения.
+        Крутилки простого режима для системы - то же, что в панели приложения
 
         Схема одна на оба интерфейса (services/simple_params): подпись, границы
         и адреса атрибутов описаны там, здесь только чтение значений. value=None
-        значит, что нужного модуля в системе нет — крутилку показывают
-        бледной заготовкой, а не прячут: первая правка модуль создаст.
+        значит, что нужного модуля в системе нет - крутилку показывают
+        бледной заготовкой, а не прячут: первая правка модуль создаст
         """
         from src.data.translations import TRANSLATIONS
         from src.services import simple_params as sp
@@ -456,9 +456,9 @@ class ParticlesEditor:
                 'placeholder': (list(p.placeholder_value)
                                 if isinstance(p.placeholder_value, tuple)
                                 else p.placeholder_value),
-                # Мягкие границы — для ползунка, жёсткие — предел ручного
+                # Мягкие границы - для ползунка, жёсткие - предел ручного
                 # ввода: в стоке встречаются emission_rate под миллион, и
-                # запрет на них молча испортил бы чужой эффект.
+                # запрет на них молча испортил бы чужой эффект
                 'min': p.minimum, 'max': p.maximum,
                 'hard_min': p.minimum if p.hard_min is None else p.hard_min,
                 'hard_max': p.maximum if p.hard_max is None else p.hard_max,
@@ -472,11 +472,11 @@ class ParticlesEditor:
     def set_particle_param(self, system: str, key: str,
                            value: Any) -> Dict[str, Any]:
         """
-        Пишет значение крутилки и отдаёт обновлённые системы.
+        Пишет значение крутилки и отдаёт обновлённые системы
 
         Системы возвращаются целиком: движок обновляет сцену через
         updateSystems, а какие именно модули задел ensure_attr, странице знать
-        незачем. Материалы при этом НЕ пересобираются — их PNG уже в кадре.
+        незачем. Материалы при этом НЕ пересобираются - их PNG уже в кадре
         """
         from src.services import simple_params as sp
 
@@ -492,11 +492,11 @@ class ParticlesEditor:
             return {'error': f'система не найдена: {system}'}
 
         # Правка заготовки И ЕСТЬ включение параметра: модуля под ним в
-        # системе ещё нет, и создаём мы его сами — как панель приложения.
-        # Отдельной кнопки «Включить» нет ни там, ни здесь.
+        # системе ещё нет, и создаём мы его сами - как панель приложения.
+        # Отдельной кнопки «Включить» нет ни там, ни здесь
         if sp.read_param(sys_json, param) is None:
-            # creatable=False — модуль создавать нельзя. У эмиттеров это не
-            # придирка: добавленный emit_instantaneously задваивает залп.
+            # creatable=False - модуль создавать нельзя. У эмиттеров это не
+            # придирка: добавленный emit_instantaneously задваивает залп
             if not param.creatable:
                 return {'error': 'в этой системе нет модуля для этого параметра'}
             paths = self._host.tf2_paths()
@@ -516,19 +516,19 @@ class ParticlesEditor:
         systems = self.pcf.systems_json()
         return {'systems': systems,
                 'diff': self._particle_diff_all(systems),
-                # Подробно — только для правленой системы: экспертное дерево
-                # помечает изменённые строки, не перестраиваясь.
+                # Подробно - только для правленой системы: экспертное дерево
+                # помечает изменённые строки, не перестраиваясь
                 'system_diff': self.particle_diff(system)}
 
     def particle_system(self, system: str, lang: str = 'ru') -> Dict[str, Any]:
         """
-        Полное содержимое системы для экспертного режима.
+        Полное содержимое системы для экспертного режима
 
         Всё, что есть в PCF: атрибуты самой системы и каждый модуль каждой
         группы со своими атрибутами. Правила показа те же, что в дереве
-        приложения: служебные ключи (functionName, name, id) скрыты — они
-        адресуют модуль, а не настраивают его; пустые forces/constraints не
-        показываются, остальные группы видны всегда.
+        приложения: служебные ключи (functionName, name, id) скрыты - они
+        адресуют модуль, а не настраивают его, пустые forces/constraints не
+        показываются, остальные группы видны всегда
         """
         from src.data import particle_docs
         from src.services.particle_editor_service import MODULE_GROUPS
@@ -548,7 +548,7 @@ class ParticlesEditor:
                     'name': name, 't': tv['t'], 'v': tv['v'],
                     'help': particle_docs.attr_help(name, lang) or '',
                     # Атрибуты с фиксированным набором значений редактор
-                    # показывает списком, а не голым числом.
+                    # показывает списком, а не голым числом
                     'enum': {str(k): particle_docs.enum_label(name, k, lang)
                              for k in (particle_docs.enum_values(name) or {})}
                             or None,
@@ -572,8 +572,8 @@ class ParticlesEditor:
                 for i, m in enumerate(mods)
             ]})
 
-        # Дети — тоже часть системы, и в дереве приложения у них своя ветка:
-        # оттуда их цепляют и отцепляют. Параметров у ссылки нет, только имя.
+        # Дети - тоже часть системы, и в дереве приложения у них своя ветка:
+        # оттуда их цепляют и отцепляют. Параметров у ссылки нет, только имя
         groups.append({'group': 'children', 'modules': [
             {'index': i, 'title': c.get('childName', ''), 'help': '', 'attrs': []}
             for i, c in enumerate(sys_json.get('children') or [])
@@ -581,14 +581,14 @@ class ParticlesEditor:
         return {'name': system, 'groups': groups,
                 'diff': self.particle_diff(system)}
 
-    # ── Структура эффекта ──────────────────────────────────────────────── #
+    # Структура эффекта
     #
     # Всё, что меняет состав систем и модулей. Каждая операция отдаёт свежие
     # системы И дерево: добавленный модуль виден в свойствах, а созданная или
-    # переименованная система — ещё и в каталоге слева.
+    # переименованная система - ещё и в каталоге слева
 
     def _particles_state(self, **extra: Any) -> Dict[str, Any]:
-        """Свежий снимок для страницы после правки структуры."""
+        """Свежий снимок для страницы после правки структуры"""
         from src.services.particle_editor_service import system_hierarchy
 
         self._history_commit()
@@ -603,7 +603,7 @@ class ParticlesEditor:
         return out
 
     def _particle_diff_all(self, systems: Dict[str, dict]) -> Dict[str, str]:
-        """{система: added|changed|same} против игры. Пусто — стока нет."""
+        """{система: added|changed|same} против игры. Пусто - стока нет"""
         from src.services.particle_editor_service import diff_systems
 
         paths = self._host.tf2_paths()
@@ -619,10 +619,10 @@ class ParticlesEditor:
                 for name, entry in diff_systems(systems, cached).items()}
 
     def particle_diff(self, system: str) -> Dict[str, Any]:
-        """Чем система отличается от игры: атрибуты, модули, дочерние.
+        """Чем система отличается от игры: атрибуты, модули, дочерние
 
-        Пустой ответ (без `status`) — сравнивать не с чем: файл не из игры
-        и одноимённого в ней нет.
+        Пустой ответ (без `status`) - сравнивать не с чем: файл не из игры
+        и одноимённого в ней нет
         """
         paths = self._host.tf2_paths()
         if 'error' in paths or not hasattr(self.pcf, 'stock_diff'):
@@ -630,7 +630,7 @@ class ParticlesEditor:
         return self.pcf.stock_diff(paths['root']).get(system) or {}
 
     def revert_particle_system(self, system: str) -> Dict[str, Any]:
-        """Система как в игре — атрибуты, модули, дочерние."""
+        """Система как в игре - атрибуты, модули, дочерние"""
         if (err := self._need_pcf()):
             return err
         paths = self._host.tf2_paths()
@@ -640,7 +640,7 @@ class ParticlesEditor:
 
     def revert_particle_attr(self, system: str, group: Optional[str],
                              index: int, attr: str) -> Dict[str, Any]:
-        """Один параметр как в игре (в игре его нет — убираем)."""
+        """Один параметр как в игре (в игре его нет - убираем)"""
         if (err := self._need_pcf()):
             return err
         paths = self._host.tf2_paths()
@@ -649,20 +649,20 @@ class ParticlesEditor:
             return {'error': f'не удалось вернуть {attr}'}
         return self._particles_state(selected=system)
 
-    # ── История правок ─────────────────────────────────────────────────── #
+    # История правок
     #
     # Снимками, а не обратимыми командами: снимок автоматически покрывает и
-    # будущие операции — забыть «откат» для новой правки невозможно.
+    # будущие операции - забыть «откат» для новой правки невозможно
 
-    #: Сколько шагов помним. Снимок explosion.pcf — около сотни килобайт.
+    #: Сколько шагов помним. Снимок explosion.pcf - около сотни килобайт
     HISTORY_LIMIT = 30
 
     def _history_reset(self) -> None:
-        """Начальное состояние после загрузки PCF."""
+        """Начальное состояние после загрузки PCF"""
         self.history.reset(self.pcf.snapshot() if self.pcf is not None else None)
 
     def _history_commit(self) -> None:
-        """Фиксирует состояние ПОСЛЕ правки. Во время отката молчит."""
+        """Фиксирует состояние ПОСЛЕ правки. Во время отката молчит"""
         if self._restoring or self.pcf is None or self.history.pos < 0:
             return
         snap = self.pcf.snapshot()
@@ -671,11 +671,11 @@ class ParticlesEditor:
 
     def particle_history(self) -> Dict[str, Any]:
         """Есть ли куда откатываться и возвращаться; `unsaved` - есть правки,
-        которых нет ни в одном сохранённом файле (уход на другой их выбросит)."""
+        которых нет ни в одном сохранённом файле (уход на другой их выбросит)"""
         return {**self.history.state(), 'unsaved': self.history.unsaved}
 
     def undo_particles(self, delta: int = -1) -> Dict[str, Any]:
-        """Откат (-1) или возврат (+1) на шаг."""
+        """Откат (-1) или возврат (+1) на шаг"""
         if (err := self._need_pcf()):
             return err
         pos = self.history.pos + int(delta)
@@ -691,7 +691,7 @@ class ParticlesEditor:
             out = self._particles_state()
         finally:
             self._restoring = False
-        # Материалы отдаём вместе: откат мог вернуть или убрать свою текстуру.
+        # Материалы отдаём вместе: откат мог вернуть или убрать свою текстуру
         paths = self._host.tf2_paths()
         if 'error' not in paths:
             out['materials'] = self._shown_materials(paths['root'])
@@ -702,7 +702,7 @@ class ParticlesEditor:
         return None if self.pcf is not None else {'error': 'PCF не загружен'}
 
     def particle_module_catalog(self, group: str) -> List[str]:
-        """Что можно добавить в эту группу: ходовое сверху, дальше всё из игры."""
+        """Что можно добавить в эту группу: ходовое сверху, дальше всё из игры"""
         from src.services.particle_editor_service import ParticleEditorService
 
         paths = self._host.tf2_paths()
@@ -719,6 +719,15 @@ class ParticlesEditor:
             return {'error': f'не удалось добавить {function_name}'}
         return self._particles_state()
 
+    def apply_particle_gizmo(self, system: str, edits: list) -> Dict[str, Any]:
+        """Итог перетаскивания ручек гизмо - одним шагом истории"""
+        if (err := self._need_pcf()):
+            return err
+        paths = self._host.tf2_paths()
+        error = self.pcf.apply_gizmo_edits(
+            system, edits or [], '' if 'error' in paths else paths['root'])
+        return {'error': error} if error else self._particles_state()
+
     def remove_particle_module(self, system: str, group: str,
                                index: int) -> Dict[str, Any]:
         if (err := self._need_pcf()):
@@ -730,10 +739,10 @@ class ParticlesEditor:
     def particle_missing_attrs(self, system: str, group: Optional[str],
                                index: int, lang: str = 'ru') -> List[dict]:
         """
-        Параметры, которых у модуля ещё нет.
+        Параметры, которых у модуля ещё нет
 
-        Значение подставляется такое, как в эффектах игры — иначе первый же
-        добавленный параметр вырубал бы эффект нулём.
+        Значение подставляется такое, как в эффектах игры - иначе первый же
+        добавленный параметр вырубал бы эффект нулём
         """
         from src.data import particle_docs
 
@@ -757,28 +766,28 @@ class ParticlesEditor:
 
     def remove_particle_attr(self, system: str, group: Optional[str],
                              index: int, attr: str) -> Dict[str, Any]:
-        """Удаляет параметр — значение возвращается к умолчанию движка."""
+        """Удаляет параметр - значение возвращается к умолчанию движка"""
         if (err := self._need_pcf()):
             return err
         if not self.pcf.remove_attr(system, group, int(index), attr):
             return {'error': f'не удалось удалить {attr}'}
         return self._particles_state()
 
-    # ── Копирование параметров ─────────────────────────────────────────── #
+    # Копирование параметров
 
     def copy_particle_params(self, system: str, group: Optional[str] = None,
                              index: Optional[int] = None,
                              attr: Optional[str] = None) -> Dict[str, Any]:
         """
-        Набор параметров для буфера обмена — формат панели приложения.
+        Набор параметров для буфера обмена - формат панели приложения
 
         Что именно копируем, задаёт адрес:
-          ничего            — вся система (при вставке спросят, заменять ли
+          ничего            - вся система (при вставке спросят, заменять ли
                               её целиком);
-          group             — все модули этой группы;
-          group + index     — один модуль;
-          + attr            — один параметр этого модуля (или самой системы,
-                              если группы нет).
+          group             - все модули этой группы;
+          group + index     - один модуль;
+          + attr            - один параметр этого модуля (или самой системы,
+                              если группы нет)
         """
         from src.services.particle_editor_service import MODULE_GROUPS
 
@@ -800,8 +809,8 @@ class ParticlesEditor:
 
         payload: Dict[str, Any] = {'attrs': {}, 'modules': {}}
 
-        # Один параметр — самый частый случай: перенести настройку, не трогая
-        # остального в цели.
+        # Один параметр - самый частый случай: перенести настройку, не трогая
+        # остального в цели
         if attr is not None:
             if group is None:
                 tv = (sys_json.get('attrs') or {}).get(attr)
@@ -834,7 +843,7 @@ class ParticlesEditor:
                 [m['functionName'], clean(m.get('attrs') or {})] for m in mods]
             return {'payload': payload}
 
-        payload['full'] = True              # полный набор → выбор при вставке
+        payload['full'] = True              # полный набор -> выбор при вставке
         payload['attrs'] = clean(sys_json.get('attrs') or {})
         for g in MODULE_GROUPS:
             for mod in sys_json.get(g) or []:
@@ -844,7 +853,7 @@ class ParticlesEditor:
 
     def paste_particle_params(self, system: str, payload: dict,
                               mode: str = 'overwrite') -> Dict[str, Any]:
-        """Вставляет скопированный набор. mode: overwrite | keep | replace."""
+        """Вставляет скопированный набор. mode: overwrite | keep | replace"""
         if (err := self._need_pcf()):
             return err
         report: list = []
@@ -855,7 +864,7 @@ class ParticlesEditor:
                              or 'вставить не удалось'}
         return self._particles_state(report=[str(r) for r in report])
 
-    # ── Системы: копии, имена, дети ────────────────────────────────────── #
+    # Системы: копии, имена, дети
 
     def duplicate_particle_system(self, system: str,
                                   new_name: str) -> Dict[str, Any]:
@@ -881,7 +890,7 @@ class ParticlesEditor:
         return self._particles_state()
 
     def particle_children(self, system: str) -> List[dict]:
-        """Дочерние системы: их отцепляют по индексу."""
+        """Дочерние системы: их отцепляют по индексу"""
         if self.pcf is None:
             return []
         sys_json = self.pcf.systems_json().get(system) or {}
@@ -905,7 +914,7 @@ class ParticlesEditor:
         return self._particles_state()
 
     def add_particle_layer(self, parent: str) -> Dict[str, Any]:
-        """Готовый слой-подэффект: остаётся дать текстуру и покрутить."""
+        """Готовый слой-подэффект: остаётся дать текстуру и покрутить"""
         if (err := self._need_pcf()):
             return err
         name = self.pcf.add_layer(parent)
@@ -915,7 +924,7 @@ class ParticlesEditor:
 
     def set_particle_attr(self, system: str, group: Optional[str], index: int,
                           attr: str, value: Any) -> Dict[str, Any]:
-        """Правка одного атрибута из экспертного режима."""
+        """Правка одного атрибута из экспертного режима"""
         if (err := self._need_pcf()):
             return err
         if not self.pcf.set_attr(system, group, int(index), attr, value):
@@ -924,19 +933,19 @@ class ParticlesEditor:
         systems = self.pcf.systems_json()
         return {'systems': systems,
                 'diff': self._particle_diff_all(systems),
-                # Подробно — только для правленой системы: экспертное дерево
-                # помечает изменённые строки, не перестраиваясь.
+                # Подробно - только для правленой системы: экспертное дерево
+                # помечает изменённые строки, не перестраиваясь
                 'system_diff': self.particle_diff(system)}
 
-    # ── Контрольные точки ──────────────────────────────────────────────── #
+    # Контрольные точки
     #
     # В игре положение точек задаёт код (где оружие, какого цвета килстрик),
-    # в превью их выставляет человек. Само превью ими и управляет — здесь
+    # в превью их выставляет человек. Само превью ими и управляет - здесь
     # только то, чего страница знать не может: какие точки эффекту нужны и
-    # где на модели находятся её точки крепления.
+    # где на модели находятся её точки крепления
 
     def particle_control_points(self, system: str) -> Dict[str, Any]:
-        """Номера точек, на которые ссылается эффект и его дочерние системы."""
+        """Номера точек, на которые ссылается эффект и его дочерние системы"""
         from src.services.particle_editor_service import (
             referenced_control_points,
         )
@@ -950,20 +959,19 @@ class ParticlesEditor:
         return {'used': referenced_control_points(sys_json, systems)}
 
     #: Порядок групп в списке моделей для точек: сперва то, на что вешают
-    #: анюжуалы — игроки и косметика, — потом остальное.
+    #: анюжуалы - игроки и косметика, - потом остальное
     _MODEL_GROUPS = ('player', 'hat', 'weapon', 'arms', 'other')
 
     def particle_models(self, lang: str = 'ru') -> List[dict]:
         """
-        Модели из кэша декомпиляции — на них сажают контрольную точку.
+        Модели из кэша декомпиляции - на них сажают контрольную точку
 
         Своей распаковки VPK здесь нет намеренно: Crowbar долгий, а модели
-        попадают в кэш при обычной работе на вкладках оружия и шапок.
+        попадают в кэш при обычной работе на вкладках оружия и шапок
 
-        Список был сырым: хэши папок, `__player_scout`, полные пути к MDL,
-        один разведчик дважды. Теперь запись — это модель игры: подпись из
-        каталога (класс, название шапки или оружия), группа по пути модели,
-        дубли по одному и тому же MDL схлопнуты.
+        Запись - это модель игры, а не папка кэша: подпись из каталога (класс,
+        название шапки или оружия), группа по пути модели, дубли по одному и
+        тому же MDL схлопнуты
         """
         from src.services.model_attachments import (
             list_decompiled_models_meta, reference_smd_for_qc,
@@ -973,7 +981,7 @@ class ParticlesEditor:
         seen: Dict[str, dict] = {}
         for m in list_decompiled_models_meta():
             # Без reference-SMD меш не собрать: в кэше лежат и папки одних
-            # анимаций (__anims_*), предлагать их значит предлагать ошибку.
+            # анимаций (__anims_*), предлагать их значит предлагать ошибку
             if not reference_smd_for_qc(m['qc']):
                 continue
             mdl = (m['mdl'] or m['label']).lower()
@@ -987,7 +995,7 @@ class ParticlesEditor:
                       key=lambda x: (order.get(x['group'], 99), x['label'].lower()))
 
     def _model_names(self, lang: str) -> Dict[str, str]:
-        """{путь модели (нижний регистр): название из каталогов игры}."""
+        """{путь модели (нижний регистр): название из каталогов игры}"""
         from src.data.player_characters import PLAYER_CHARACTERS
 
         names: Dict[str, str] = {}
@@ -999,7 +1007,7 @@ class ParticlesEditor:
                 from src.data.hats_parser import parse_hats
                 for h in parse_hats(paths['root'], lang):
                     names.setdefault(h.mdl_path.replace('\\', '/').lower(), h.name)
-            except Exception as exc:                 # noqa: BLE001 — каталог не обязателен
+            except Exception as exc:                 # noqa: BLE001 - каталог не обязателен
                 logger.debug(f"каталог шапок для списка моделей не прочитан: {exc}")
         try:
             from src.app.api import items
@@ -1012,16 +1020,16 @@ class ParticlesEditor:
     @staticmethod
     def _model_group_and_name(mdl: str, label: str, names: Dict[str, str],
                               lang: str) -> Tuple[str, str]:
-        """Группа и подпись модели по её пути в игре."""
+        """Группа и подпись модели по её пути в игре"""
         base = os.path.splitext(os.path.basename(mdl))[0]
         if mdl.startswith('models/player/') and mdl.count('/') == 2:
             return 'player', names.get(mdl, base)
         if '/items/taunts/' in mdl or base.startswith('taunt_') or '_prop' in base:
-            return 'other', base            # реквизит насмешек — не косметика
+            return 'other', base            # реквизит насмешек - не косметика
         if '/items/' in mdl:
             name = names.get(mdl)
             # Стили шапки лежат отдельными моделями (`_style2`), а в каталоге
-            # только первый: имя берём у него, номер стиля дописываем.
+            # только первый: имя берём у него, номер стиля дописываем
             style = re.search(r'_style(\d+)$', base)
             if not name and style:
                 first = re.sub(r'_style\d+', '_style1', mdl)
@@ -1042,18 +1050,18 @@ class ParticlesEditor:
     def particle_model_load(self, mode: str, key: str = '',
                             lang: str = 'ru') -> Dict[str, Any]:
         """
-        Модель для точек по предмету каталога: класс, шапка, оружие.
+        Модель для точек по предмету каталога: класс, шапка, оружие
 
-        Кэш декомпиляции — тот же, что у вкладок оружия и шапок
+        Кэш декомпиляции - тот же, что у вкладок оружия и шапок
         (`ensure_decompiled`): что уже открывали, придёт сразу, остальное
-        разберёт Crowbar. Это секунды-минуты, поэтому фоном: ответ — только
-        «начали», сцена приезжает событием `cp_model`, ход — `progress`.
+        разберёт Crowbar. Это секунды-минуты, поэтому фоном: ответ - только
+        «начали», сцена приезжает событием `cp_model`, ход - `progress`
 
         Args:
             mode: режим каталога (`scout_c_scattergun`, `scout_body`,
                   `scout_hands`, `hat`).
-            key:  у шапки — путь MDL (у мультиклассовой — уже выбранного
-                  класса), у остальных не нужен.
+            key:  у шапки - путь MDL (у мультиклассовой - уже выбранного
+                  класса), у остальных не нужен
         """
         from src.services import model_decompile_service
         from src.services.model_decompile_service import DecompileError
@@ -1070,7 +1078,7 @@ class ParticlesEditor:
 
         seq = self._cp_model_seq = getattr(self, '_cp_model_seq', 0) + 1
         misc_vpk = paths['misc_vpk']
-        # Подписи стадий — те же, что у 3D-превью: одна и та же работа.
+        # Подписи стадий - те же, что у 3D-превью: одна и та же работа
         from src.services.preview_3d_worker import Preview3DWorker
         t = Preview3DWorker._PROGRESS.get(lang, Preview3DWorker._PROGRESS['en'])
 
@@ -1085,7 +1093,7 @@ class ParticlesEditor:
                 self._host._put('cp_model', error=str(exc))
                 return
             if self._cp_model_seq != seq:
-                return                       # выбрали другую — эта не нужна
+                return                       # выбрали другую - эта не нужна
             if found is None:
                 self._host._put('cp_model', error=t['not_found'])
                 return
@@ -1104,8 +1112,8 @@ class ParticlesEditor:
 
     @staticmethod
     def _cp_model_candidates(mode: str, key: str, root: str):
-        """(ключ кэша, пути MDL в VPK) — тем же правилом, что у 3D-превью
-        (`smd_locator.mdl_candidates`), чтобы кэш был общий."""
+        """(ключ кэша, пути MDL в VPK) - тем же правилом, что у 3D-превью
+        (`smd_locator.mdl_candidates`), чтобы кэш был общий"""
         from src.data.player_characters import PLAYER_BODY_MODE_KEYS
         from src.data.player_hands import HAND_MODE_KEYS
         from src.domain.preview.model_key import model_key_for
@@ -1129,7 +1137,7 @@ class ParticlesEditor:
 
     @staticmethod
     def _qc_in(directory: str) -> Optional[str]:
-        """QC разобранной модели: по мете кэша, иначе единственный *.qc."""
+        """QC разобранной модели: по мете кэша, иначе единственный *.qc"""
         import glob
         import json
 
@@ -1146,11 +1154,11 @@ class ParticlesEditor:
 
     def particle_model_scene(self, qc: str) -> Dict[str, Any]:
         """
-        Меш модели и её точки крепления для сцены превью.
+        Меш модели и её точки крепления для сцены превью
 
         Оси Source сохраняем: эффект живёт в них же, иначе точка крепления
         уехала бы относительно частиц. В игре анюжуал висит именно на
-        attachment, а не в произвольной точке.
+        attachment, а не в произвольной точке
         """
         import shutil
         import tempfile
@@ -1174,7 +1182,7 @@ class ParticlesEditor:
             if not ok or not Path(obj_path).is_file():
                 return {'error': 'не удалось собрать меш модели'}
             obj = Path(obj_path).read_text(encoding='utf-8')
-        except Exception as exc:                     # noqa: BLE001 — граница
+        except Exception as exc:                     # noqa: BLE001 - граница
             logger.warning(f"меш модели для точек не построен: {exc}")
             return {'error': str(exc)}
         finally:
@@ -1183,23 +1191,23 @@ class ParticlesEditor:
         paths = self._host.tf2_paths()
         textures: Dict[str, Any] = {}
         try:
-            # Без текстур модель просто серая — это не повод отказывать.
+            # Без текстур модель просто серая - это не повод отказывать
             textures = resolve_model_textures(
                 qc, mat_names, '' if 'error' in paths else paths['root']) or {}
         except Exception as exc:                     # noqa: BLE001
             logger.debug(f"текстуры модели не найдены: {exc}")
 
-        # unusual_* вперёд: именно на них игра вешает эффекты.
+        # unusual_* вперёд: именно на них игра вешает эффекты
         found = attachments_from_qc(qc)
         order = sorted(found, key=lambda a: (
             not a.name.lower().startswith('unusual'), a.name.lower()))
         # Персонажи собраны с `$upaxis Y`: их SMD лежит осью Y вверх, а сцена
-        # частиц — Source, Z вверх. Без поворота разведчик лежал на полу и
+        # частиц - Source, Z вверх. Без поворота разведчик лежал на полу и
         # свечение «на игроке» садилось на лежачего. Поворот тот же, что
-        # делает studiomdl: (x, y, z) → (x, −z, y). Точки крепления — так же.
+        # делает studiomdl: (x, y, z) -> (x, −z, y). Точки крепления - так же.
         # Косметика собрана против того же скелета и тоже лежит Y вверх, хотя
-        # `$upaxis` Crowbar ей не пишет (bip_head у harmburg — (0, 75.7, −2.9)):
-        # верх шапки смотрел вбок.
+        # `$upaxis` Crowbar ей не пишет (bip_head у harmburg - (0, 75.7, −2.9)):
+        # верх шапки смотрел вбок
         y_up = qc_is_y_up(qc) or qc_is_player_item(qc)
         if y_up:
             obj = obj_y_up_to_z_up(obj)
@@ -1209,17 +1217,17 @@ class ParticlesEditor:
                     'pos': ([a.pos[0], -a.pos[2], a.pos[1]] if y_up else list(a.pos)),
                     'angles': angles_y_up_to_z_up(a.angles) if y_up else list(a.angles)}
 
-        # Корневая кость — куда игра вешает анюжуал косметики
+        # Корневая кость - куда игра вешает анюжуал косметики
         # (`attach_to_rootbone 1`): у шапки это bip_head на высоте головы, и
-        # точка 0 в нуле сцены стояла бы у ног.
+        # точка 0 в нуле сцены стояла бы у ног
         root = root_bone_from_qc(qc)
         points = [point(a) for a in order]
         root_pt = point(root) if root else None
 
         # Косметику ставим точкой подвеса в ноль сцены: новые шапки собраны на
-        # высоте головы (bip_head на ~75), старые — вокруг нуля, и без сдвига
+        # высоте головы (bip_head на ~75), старые - вокруг нуля, и без сдвига
         # шапка висела под потолком, а камера смотрела в пустой пол. Игрока и
-        # оружие не трогаем: игрок стоит на сетке, оружие и так у нуля.
+        # оружие не трогаем: игрок стоит на сетке, оружие и так у нуля
         if qc_is_player_item(qc):
             anchor = next((p for p in points
                            if p['name'].lower() in ('unusual', 'unusual_0')),
@@ -1236,22 +1244,22 @@ class ParticlesEditor:
             'root': root_pt,
         }
 
-    # ── Текстуры эффекта ───────────────────────────────────────────────── #
+    # Текстуры эффекта
     #
-    # Материал в PCF — путь к VMT; картинка к нему приезжает уже развёрнутой
+    # Материал в PCF - путь к VMT; картинка к нему приезжает уже развёрнутой
     # в PNG. Заменить её можно двумя способами, и разница принципиальная:
     # своя картинка добавляет в мод НОВЫЙ файл (в казуале обход sv_pure его
-    # не подхватит), а перевод на существующий материал игры работает везде.
+    # не подхватит), а перевод на существующий материал игры работает везде
 
     def _effect_materials(self, system: str,
                           systems: Optional[Dict[str, dict]] = None) -> List[str]:
         """
-        Материалы выбранного эффекта: сам корень плюс все дочерние.
+        Материалы выбранного эффекта: сам корень плюс все дочерние
 
         Именно эффекта, а не файла: в одном PCF десятки систем, и показывать
-        карточку от чужого эффекта — предлагать заменить не ту текстуру.
+        карточку от чужого эффекта - предлагать заменить не ту текстуру.
         Порядок обхода сохраняем, повторы убираем. `systems` - уже собранные
-        системы, если они под рукой (сборка заново - десятки миллисекунд).
+        системы, если они под рукой (сборка заново - десятки миллисекунд)
         """
         systems = self.pcf.systems_json() if systems is None else systems
         out: List[str] = []
@@ -1275,7 +1283,7 @@ class ParticlesEditor:
         return out
 
     def particle_materials(self, system: str = '') -> List[dict]:
-        """Материалы эффекта с их картинками — карточки 2D."""
+        """Материалы эффекта с их картинками - карточки 2D"""
         paths = self._host.tf2_paths()
         if self.pcf is None or 'error' in paths:
             return []
@@ -1283,7 +1291,7 @@ class ParticlesEditor:
             self._shown = system
         names = (self._effect_materials(system) if system
                  else self.pcf.material_names())
-        # Распаковываем только карточки эффекта, а не все текстуры файла.
+        # Распаковываем только карточки эффекта, а не все текстуры файла
         found = self.pcf.materials_json(paths['root'], names=names)
         out: List[dict] = []
         for name in names:
@@ -1294,14 +1302,14 @@ class ParticlesEditor:
                 'width': info.get('width', 0),
                 'height': info.get('height', 0),
                 # Покадровая анимация: своя картинка её собьёт, и об этом
-                # надо предупредить до замены, а не после.
+                # надо предупредить до замены, а не после
                 'sheet': bool(info.get('sheet')),
                 'custom': self.pcf.is_custom_material(name),
             })
         return out
 
     def _materials_result(self) -> Dict[str, Any]:
-        """Материалы и системы после правки — движку нужно и то, и другое."""
+        """Материалы и системы после правки - движку нужно и то, и другое"""
         self._history_commit()
         paths = self._host.tf2_paths()
         root = '' if 'error' in paths else paths['root']
@@ -1312,7 +1320,7 @@ class ParticlesEditor:
 
     def set_particle_texture(self, material: str, path: str,
                              max_size: int = 512) -> Dict[str, Any]:
-        """Заменяет текстуру материала своей картинкой."""
+        """Заменяет текстуру материала своей картинкой"""
         if (err := self._need_pcf()):
             return err
         paths = self._host.tf2_paths()
@@ -1321,7 +1329,7 @@ class ParticlesEditor:
         try:
             res = self.pcf.set_material_texture(
                 material, path, paths['root'], max_size=int(max_size))
-        except Exception as exc:                     # noqa: BLE001 — граница
+        except Exception as exc:                     # noqa: BLE001 - граница
             logger.warning(f"текстура {material}: {exc}")
             return {'error': str(exc)}
         if res is None:
@@ -1329,7 +1337,7 @@ class ParticlesEditor:
         return self._materials_result()
 
     def reset_particle_texture(self, material: str) -> Dict[str, Any]:
-        """Возвращает текстуру игры (свою перезапись убираем)."""
+        """Возвращает текстуру игры (свою перезапись убираем)"""
         if (err := self._need_pcf()):
             return err
         if self.pcf.reset_material_texture(material) is None:
@@ -1337,7 +1345,7 @@ class ParticlesEditor:
         return self._materials_result()
 
     def game_particle_materials(self) -> List[str]:
-        """Материалы всех эффектов игры — выбор вместо своей картинки."""
+        """Материалы всех эффектов игры - выбор вместо своей картинки"""
         from src.services.particle_editor_service import ParticleEditorService
 
         paths = self._host.tf2_paths()
@@ -1347,7 +1355,7 @@ class ParticlesEditor:
 
     def set_particle_material_to_game(self, material: str,
                                       game_material: str) -> Dict[str, Any]:
-        """Переводит эффект на существующий материал игры."""
+        """Переводит эффект на существующий материал игры"""
         if (err := self._need_pcf()):
             return err
         if not self.pcf.set_material_to_game(material, game_material):
@@ -1357,11 +1365,11 @@ class ParticlesEditor:
     def rename_particle_material(self, material: str,
                                  new_material: str) -> Dict[str, Any]:
         """
-        Меняет путь материала у всех систем, где он встречается.
+        Меняет путь материала у всех систем, где он встречается
 
         Нужно, чтобы своя текстура не перезаписывала стоковый материал: с
         собственным путём замена перестаёт менять картинку у других эффектов
-        игры.
+        игры
         """
         if (err := self._need_pcf()):
             return err
@@ -1370,7 +1378,7 @@ class ParticlesEditor:
         return self._materials_result()
 
     def use_particle_texture_colors(self, system: str) -> Dict[str, Any]:
-        """Снимает подкраску: эффект показывает родные цвета текстур."""
+        """Снимает подкраску: эффект показывает родные цвета текстур"""
         if (err := self._need_pcf()):
             return err
         removed = self.pcf.use_texture_colors(system)
@@ -1378,14 +1386,14 @@ class ParticlesEditor:
         out['removed'] = removed
         return out
 
-    # ── Файл: проверка, сохранение, сборка ─────────────────────────────── #
+    # Файл: проверка, сохранение, сборка
 
     def particle_lint(self, system: str = '', lang: str = 'ru') -> Dict[str, Any]:
         """
-        Проверка перед сборкой: что в эффекте сломает его в игре.
+        Проверка перед сборкой: что в эффекте сломает его в игре
 
         Те же правила, что в панели приложения. Часть находок чинится
-        автоматически — у них есть адрес атрибута и правильное значение.
+        автоматически - у них есть адрес атрибута и правильное значение
         """
         from src.data.translations import TRANSLATIONS
         from src.services import particle_lint
@@ -1407,7 +1415,7 @@ class ParticlesEditor:
         } for f in found]}
 
     def fix_particle_lint(self, system: str = '') -> Dict[str, Any]:
-        """Чинит всё, что чинится автоматически, и говорит сколько."""
+        """Чинит всё, что чинится автоматически, и говорит сколько"""
         from src.services import particle_lint
 
         if (err := self._need_pcf()):
@@ -1418,14 +1426,14 @@ class ParticlesEditor:
         return self._particles_state(fixed=fixed)
 
     def save_particles(self, path: str) -> Dict[str, Any]:
-        """Сохраняет правленый PCF отдельным файлом."""
+        """Сохраняет правленый PCF отдельным файлом"""
         if (err := self._need_pcf()):
             return err
         dest = _in_export(path)
         try:
             dest.parent.mkdir(parents=True, exist_ok=True)
             self.pcf.save(str(dest))
-        except Exception as exc:                     # noqa: BLE001 — граница
+        except Exception as exc:                     # noqa: BLE001 - граница
             return {'error': str(exc)}
         self.history.mark_saved()
         return {'path': str(dest), 'size': self.pcf.serialized_size()}
@@ -1433,11 +1441,11 @@ class ParticlesEditor:
     def export_particles_vpk(self, name: str = 'particles_mod.vpk',
                              lang: str = 'ru') -> Dict[str, Any]:
         """
-        Собирает VPK-мод: правленый PCF и заменённые текстуры.
+        Собирает VPK-мод: правленый PCF и заменённые текстуры
 
         Предупреждение о переполнении отдаём отдельным полем: в казуале
         обход sv_pure не грузит PCF больше оригинального, и файл, выросший
-        на пару килобайт, просто не заработает — молчать об этом нельзя.
+        на пару килобайт, просто не заработает - молчать об этом нельзя
         """
         from pathlib import Path
 
@@ -1450,7 +1458,7 @@ class ParticlesEditor:
         dest.parent.mkdir(parents=True, exist_ok=True)
         try:
             out = self.pcf.export_vpk(str(dest), language=lang)
-        except Exception as exc:                     # noqa: BLE001 — граница
+        except Exception as exc:                     # noqa: BLE001 - граница
             logger.warning(f"сборка VPK частиц не удалась: {exc}")
             return {'error': str(exc)}
         self.history.mark_saved()
@@ -1463,11 +1471,11 @@ class ParticlesEditor:
     def particle_param_reference(self, path: str = '', for_ai: bool = False,
                                  lang: str = 'en') -> Dict[str, Any]:
         """
-        Справочник параметров модулей в JSON.
+        Справочник параметров модулей в JSON
 
         Нужен, чтобы собрать набор параметров снаружи (в том числе языковой
         моделью) и вставить его сюда через буфер обмена. Вариант «для ИИ»
-        кладёт внутрь и само задание.
+        кладёт внутрь и само задание
         """
         import json
 
@@ -1484,6 +1492,6 @@ class ParticlesEditor:
             dest.parent.mkdir(parents=True, exist_ok=True)
             dest.write_text(json.dumps(data, ensure_ascii=False, indent=2),
                             encoding='utf-8')
-        except Exception as exc:                     # noqa: BLE001 — граница
+        except Exception as exc:                     # noqa: BLE001 - граница
             return {'error': str(exc)}
         return {'path': str(dest)}

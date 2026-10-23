@@ -1,4 +1,4 @@
-"""Общий путь «кэш → VPK → Crowbar» (src/services/model_decompile_service.py)."""
+"""Общий путь «кэш -> VPK -> Crowbar» (src/services/model_decompile_service.py)"""
 
 import tempfile
 import unittest
@@ -14,7 +14,7 @@ WORKSHOP = "models/workshop/weapons/c_models/c_test/c_test.mdl"
 
 
 class _Recorder:
-    """Заглушки Crowbar и VPK: считают вызовы и пишут файлы, как настоящие."""
+    """Заглушки Crowbar и VPK: считают вызовы и пишут файлы, как настоящие"""
 
     def __init__(self, present_in_vpk):
         self.present = set(present_in_vpk)
@@ -78,11 +78,11 @@ class EnsureDecompiledTests(unittest.TestCase):
         self.assertEqual(rec.decompiles, 1, "второй прогон обязан идти из кэша")
 
     def test_cache_hit_when_model_lies_under_a_later_candidate(self):
-        """Кэш ищется по КАЖДОМУ кандидату, а не только по первому.
+        """Кэш ищется по КАЖДОМУ кандидату, а не только по первому
 
         Запись сохраняется под тем путём, который реально нашёлся. Пока
         проверялся только первый кандидат, всё, что лежит не по прямому пути
-        (шапки в workshop/), декомпилировалось заново при каждом показе.
+        (шапки в workshop/), декомпилировалось заново при каждом показе
         """
         rec = _Recorder([WORKSHOP])
         candidates = [DIRECT, WORKSHOP]
@@ -130,6 +130,29 @@ class EnsureDecompiledTests(unittest.TestCase):
         rec.decompile = boom
         with self.assertRaises(mds.DecompileError):
             self._run(rec, [DIRECT])
+
+    def test_decompile_into_copies_and_leaves_cache_intact(self):
+        """Сборка правит SMD/QC на месте: запись кэша должна остаться нетронутой"""
+        rec = _Recorder([DIRECT])
+        entry = Path(self._run(rec, [DIRECT]).directory)
+        target = Path(self._tmp.name) / "build"
+        with patch.object(mds.TF2Paths, "get_crowbar_path", return_value=str(self.crowbar)):
+            qc = mds.decompile_into(WEAPON, str(self.vpk), [DIRECT], str(target))
+        self.assertEqual(Path(qc), target / f"{WEAPON}.qc")
+        Path(qc).write_text("patched", encoding="utf-8")
+        self.assertEqual((entry / f"{WEAPON}.qc").read_text(encoding="utf-8"), "$modelname x")
+        self.assertEqual(rec.decompiles, 1)
+
+    def test_decompile_into_removes_temp_dir_when_cache_failed(self):
+        temp = Path(self._tmp.name) / "crowbar_out"
+        temp.mkdir()
+        (temp / "m.qc").write_text("qc", encoding="utf-8")
+        found = mds.Decompiled(directory=str(temp), mdl_rel=DIRECT, cached=False)
+        with patch.object(mds, "ensure_decompiled", return_value=found):
+            qc = mds.decompile_into(WEAPON, str(self.vpk), [DIRECT],
+                                    str(Path(self._tmp.name) / "build"))
+        self.assertTrue(Path(qc).is_file())
+        self.assertFalse(temp.exists())
 
 
 if __name__ == "__main__":

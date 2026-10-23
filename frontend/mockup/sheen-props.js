@@ -11,12 +11,12 @@ import { stopsEditor } from './lightwarp.js';
 import { el, button, card, fillCss, angleDial } from './sheen-ui.js';
 
 const IMAGE_TYPES = '.png,.jpg,.jpeg,.gif,.bmp,.webp,.tga';
-//: Поля движения - своя секция свойств, остальные поля слоя - «Форма».
+//: Поля движения - своя секция свойств, остальные поля слоя - «Форма»
 const MOTION = new Set(['angle', 'tilt', 'wave', 'waves', 'speed']);
-//: Такому слою цвет не нужен - секция цвета его не показывает.
+//: Такому слою цвет не нужен - секция цвета его не показывает
 const SHAPE_ONLY = new Set(['mask', 'cut']);
 
-//: Какие секции свойств открыты - между показами окна тоже.
+//: Какие секции свойств открыты - между показами окна тоже
 const openSections = new Set(['shape', 'motion', 'colour']);
 
 function section(id, title, rows, summary = null) {
@@ -58,7 +58,7 @@ export function createProps(pattern, schema, { changed, syncSwatch }) {
     swatch.style.background = fillCss(layer);
     const span = el('span', 'mono sheenb__secsum',
       t(`${(layer.start * pattern.length).toFixed(1)}-${(layer.end * pattern.length).toFixed(1)} с`));
-    // Маска и вырезание не светят сами - цвет им ни к чему.
+    // Маска и вырезание не светят сами - цвет им ни к чему
     const colour = SHAPE_ONLY.has(layer.blend) ? [] : [colourBlock(layer)];
     params.replaceChildren(...[
       shape.length && section('shape', layer.type === 'image' ? t('Картинка') : t('Форма'),
@@ -84,7 +84,7 @@ export function createProps(pattern, schema, { changed, syncSwatch }) {
     const ctl = el('div', 'sheenb__rowctl');
     top.append(el('span', 'sheenb__lbl', t('Цвет')), ctl);
     box.append(top);
-    // Свои цвета картинки вместо цвета слоя: цветной логотип на оружии.
+    // Свои цвета картинки вместо цвета слоя: цветной логотип на оружии
     const own = el('label', 'check');
     const ownOn = Object.assign(el('input'), { type: 'checkbox', checked: picture });
     ownOn.addEventListener('change', () => {
@@ -152,7 +152,7 @@ export function createProps(pattern, schema, { changed, syncSwatch }) {
     return box;
   }
 
-  /** Начало и конец слоя в секундах - числами, точнее, чем мышью. */
+  /** Начало и конец слоя в секундах - числами, точнее, чем мышью */
   function timeRow(layer) {
     const num = (key) => {
       const input = Object.assign(el('input', 'input input--num sheenb__num'),
@@ -191,7 +191,7 @@ export function createProps(pattern, schema, { changed, syncSwatch }) {
         b.addEventListener('click', () => {
           layer[f.key] = c.value;
           tags.forEach((x) => x.classList.toggle('is-active', x === b));
-          // Смешивание меняет и секцию цвета, и метку слоя в списке.
+          // Смешивание меняет и секцию цвета, и метку слоя в списке
           changed(f.key === 'blend' ? { list: true } : { time: false });
         });
         return b;
@@ -230,7 +230,7 @@ export function createProps(pattern, schema, { changed, syncSwatch }) {
       thumb.addEventListener('error', () => { thumb.hidden = true; });
       const pick = button(layer.image ? t('Заменить') : t('Выбрать'), 'tag');
       pick.addEventListener('click', async () => {
-        // Только то, что читает сборка (Pillow): SVG и HEIC она не откроет.
+        // Только то, что читает сборка (Pillow): SVG и HEIC она не откроет
         const file = await chooseFile(IMAGE_TYPES);
         if (!file) return;
         layer.image = await api.upload(file);

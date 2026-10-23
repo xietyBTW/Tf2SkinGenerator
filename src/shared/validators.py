@@ -43,9 +43,9 @@ def validate_vpk_filename(filename: str) -> Tuple[bool, Optional[str]]:
 
 
 def vpk_file_name(name: Optional[str], default: str) -> str:
-    """Имя мода из поля страницы: набрали без «.vpk» — дописываем, а не
+    """Имя мода из поля страницы: набрали без «.vpk» - дописываем, а не
     отказываем в сборке (поле подсказывает имя с расширением, и человек его
-    стирает)."""
+    стирает)"""
     name = (name or '').strip() or default
     return name if name.lower().endswith('.vpk') else name + '.vpk'
 
@@ -55,25 +55,25 @@ SUGGEST_SUFFIX = '_mod.vpk'
 #: Режимы, которые предмет НЕ называют: это значение по умолчанию у раздела
 #: каталога (weapon -> normal, косметика -> hat, персонаж -> body, мод из
 #: файла -> custom). Их ставит `mode_for` ДО выбора предмета, и имя вида
-#: «normal_mod.vpk» подсказкой не является — пусть в поле останется прежнее.
+#: «normal_mod.vpk» подсказкой не является - пусть в поле останется прежнее
 UNNAMED_MODES = frozenset({'', 'normal', 'hat', 'body', 'custom'})
 
 
 def suggest_vpk_name(mode: str, key: str = '') -> str:
     """
-    Предлагаемое имя VPK для выбранного предмета: ``scattergun_mod.vpk``.
+    Предлагаемое имя VPK для выбранного предмета: ``scattergun_mod.vpk``
 
     Считает Python, а не страница: имя обязано пройти
-    ``validate_vpk_filename`` — там и лимит длины, и список запрещённых
+    ``validate_vpk_filename`` - там и лимит длины, и список запрещённых
     символов. Дублировать эти правила в разметке нельзя, иначе предложенное
-    имя не проходит собственную же проверку.
+    имя не проходит собственную же проверку
 
-    Ключ предмета бывает путём к модели (у косметики) — берём имя файла.
+    Ключ предмета бывает путём к модели (у косметики) - берём имя файла.
     Префикс ``c_``/``v_``/``w_`` в имени модели говорит, ГДЕ она видна
-    (в руках, вьюмодель, мировая), к моду это отношения не имеет.
+    (в руках, вьюмодель, мировая), к моду это отношения не имеет
 
     Пустая строка означает «подсказки нет»: режим раздела предмета не
-    называет (см. UNNAMED_MODES).
+    называет (см. UNNAMED_MODES)
     """
     if not key and mode in UNNAMED_MODES:
         return ''
@@ -83,7 +83,7 @@ def suggest_vpk_name(mode: str, key: str = '') -> str:
         if base.startswith(prefix):
             base = base[len(prefix):]
             break
-    # Всё, что не годится в имя файла (пробелы, кириллица, кавычки), — в '_'.
+    # Всё, что не годится в имя файла (пробелы, кириллица, кавычки), - в '_'
     base = ''.join(ch if (ch.isascii() and (ch.isalnum() or ch in '_-')) else '_'
                    for ch in base).strip('_').lower()
     room = ValidationLimits.MAX_FILENAME_LENGTH - len(SUGGEST_SUFFIX)
@@ -92,14 +92,14 @@ def suggest_vpk_name(mode: str, key: str = '') -> str:
 
 def sanitize_path(path: str, base_dir: str) -> str:
     """
-    Преобразует относительный путь в абсолютный внутри base_dir.
+    Преобразует относительный путь в абсолютный внутри base_dir
 
     Защита от path traversal: результат обязан лежать строго внутри
-    base_dir (сравнение через commonpath, а не префикс строки — иначе
-    'C:/base_evil' проходил бы проверку для базы 'C:/base').
+    base_dir (сравнение через commonpath, а не префикс строки - иначе
+    'C:/base_evil' проходил бы проверку для базы 'C:/base')
 
     Raises:
-        ValueError: Если путь выходит за пределы base_dir или содержит ':'.
+        ValueError: Если путь выходит за пределы base_dir или содержит ':'
     """
     base_dir_abs = os.path.abspath(base_dir)
     if path.startswith('/'):
@@ -110,7 +110,7 @@ def sanitize_path(path: str, base_dir: str) -> str:
     try:
         is_inside = os.path.commonpath([full_path, base_dir_abs]) == base_dir_abs
     except ValueError:
-        # Разные диски на Windows → точно за пределами базы
+        # Разные диски на Windows -> точно за пределами базы
         is_inside = False
     if not is_inside:
         raise ValueError(f"Недопустимый путь: {path}")
@@ -133,8 +133,8 @@ def validate_build_params(
     if not custom_vtf_path:
         if not image_path or not isinstance(image_path, str):
             return t['error_image_not_specified']
-        # Sentinel EXTRA_TEX_USE_GAME_ORIGINAL — не файл, а команда использовать
-        # оригинал из игры. Пропускаем проверку существования файла.
+        # Sentinel EXTRA_TEX_USE_GAME_ORIGINAL - не файл, а команда использовать
+        # оригинал из игры. Пропускаем проверку существования файла
         from src.shared.constants import EXTRA_TEX_USE_GAME_ORIGINAL
         if image_path != EXTRA_TEX_USE_GAME_ORIGINAL:
             if not os.path.exists(image_path):
@@ -168,7 +168,7 @@ def validate_build_params(
     if format_type not in VTF_FORMATS:
         return t['error_format_invalid'].format(format=format_type, formats=', '.join(VTF_FORMATS))
     # Только специальные режимы (спрей, крит и т.д.) не требуют TF2.
-    # Персонажи, руки и оружия — полный pipeline через VPK + Crowbar.
+    # Персонажи, руки и оружия - полный pipeline через VPK + Crowbar
     _no_tf2_needed = mode in SPECIAL_MODES
     if not _no_tf2_needed:
         if not tf2_root_dir or not isinstance(tf2_root_dir, str):

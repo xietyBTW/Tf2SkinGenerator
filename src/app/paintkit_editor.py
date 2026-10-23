@@ -1,12 +1,12 @@
 """
 War Paint на показанном оружии: список скинов, раскладка узора по
-материалам, предпросмотр и запекание в текстуры карточек.
+материалам, предпросмотр и запекание в текстуры карточек
 
-Своё состояние - только фоновая работа предпросмотра и кэши; карточки и
+Своё состояние - только фоновая работа предпросмотра и кэши, карточки и
 текстуры живут в состоянии превью сеанса, и запечённый War Paint дальше
-правится как обычная своя текстура (`set_texture`, история правок).
+правится как обычная своя текстура (`set_texture`, история правок)
 
-Доступ — `session().paintkits`; `api.py` зовёт его методы напрямую.
+Доступ - `session().paintkits`; `api.py` зовёт его методы напрямую
 """
 
 from __future__ import annotations
@@ -24,23 +24,23 @@ logger = get_logger(__name__)
 
 
 class PaintkitEditor:
-    """War Paint показанного оружия."""
+    """War Paint показанного оружия"""
 
     def __init__(self, host: "AppSession") -> None:
         self._host = host
-        #: Фоновая сборка предпросмотра; новая отменяет прежнюю.
+        #: Фоновая сборка предпросмотра, новая отменяет прежнюю
         self._paintkit_job = None
-        #: Какие материалы модели красятся War Paint: {модель: ...}.
+        #: Какие материалы модели красятся War Paint: {модель: ...}
         self._paintable_by_model: Dict[str, Any] = {}
         self._paintkit_preview_lock = threading.Lock()
 
     def _own_paintkits(self, tf2_root: str, lang: str = 'ru') -> List[dict]:
         """
-        War Paint игры для показанного оружия.
+        War Paint игры для показанного оружия
 
         На своей геометрии их нет: рецепт Valve кладёт узор по маскам под
         развёртку СТОКОВОЙ модели, и на чужой развёртке он лёг бы мимо. Там
-        работает универсальный режим — по частям самой модели.
+        работает универсальный режим - по частям самой модели
         """
         from src.data import paintkit_defs
         if self._host._custom_geometry():
@@ -49,14 +49,14 @@ class PaintkitEditor:
 
     def paintkits(self, lang: str = 'ru') -> Dict[str, Any]:
         """
-        War Paint для показанного оружия.
+        War Paint для показанного оружия
 
-        Есть свои в игре — отдаются они (``generic: False``). Нет (или модель
-        своя) — все War Paint с шаблоном в универсальном режиме
+        Есть свои в игре - отдаются они (``generic: False``). Нет (или модель
+        своя) - все War Paint с шаблоном в универсальном режиме
         (``generic: True``): узор раскладывается по частям модели, см.
-        paintkit_generic. Следом в обоих случаях — украшенное оружие
+        paintkit_generic. Следом в обоих случаях - украшенное оружие
         коллекций с других пушек (``decorated``): в игре каждый такой скин
-        есть только у своих, здесь он ложится по деталям.
+        есть только у своих, здесь он ложится по деталям
         """
         from src.data import paintkit_defs
 
@@ -75,17 +75,17 @@ class PaintkitEditor:
     def _paintkit_offer(self, paths: Dict[str, str], item: int,
                         real: bool) -> Tuple[List[str], List[str], List[str]]:
         """
-        (карточки, на которые War Paint может лечь; те из них, что красит
-        игра; те, на которые узор ляжет по деталям). ``real`` — War Paint
+        (карточки, на которые War Paint может лечь, те из них, что красит
+        игра, те, на которые узор ляжет по деталям). ``real`` - War Paint
         игры, а не универсальный режим: карточку игры рецепт красит и без
-        своего меша, по деталям — нет.
+        своего меша, по деталям - нет
 
         Карточке без своего меша (вставки HUD, материал $texturegroup вне
         модели, огоньки гирлянды мода) узор по деталям не положить: у
         одноматериальной модели она нашла бы единственный меш, и War Paint
-        лёг бы по чужой развёртке, у многоматериальной — не нашла бы ничего.
+        лёг бы по чужой развёртке, у многоматериальной - не нашла бы ничего.
         Материал части идёт за своим исходным: развёртка у них общая, и
-        картинка исходного ложится на него как есть.
+        картинка исходного ложится на него как есть
         """
         from src.domain.preview.texture_state import is_decor
         from src.services import mesh_parts_service
@@ -106,7 +106,7 @@ class PaintkitEditor:
             if not card or is_decor(card):
                 continue
             # У главной меш найдётся всегда: без своего узор ляжет по самому
-            # большому материалу модели (_paintkit_generic).
+            # большому материалу модели (_paintkit_generic)
             mesh = card == main or own_mesh(card)
             if mesh or card in game:
                 group = [card, *(p for p, src in t.part_cards.items() if src == card)]
@@ -120,8 +120,8 @@ class PaintkitEditor:
         """
         Карточки, на которые War Paint кладёт сама игра: материалы с прокси
         WeaponSkin у модели, куда игра его кладёт (items_game; у Детонатора
-        это ещё и гильза). Модель и её VMT за сеанс не меняются — ответ
-        запоминается.
+        это ещё и гильза). Модель и её VMT за сеанс не меняются - ответ
+        запоминается
         """
         from src.data import paintkit_defs
         from src.services.game_vpk_reader import GameVpkReader
@@ -141,21 +141,21 @@ class PaintkitEditor:
 
     def paintkit_materials(self, item: int = 0) -> Dict[str, Any]:
         """
-        Материалы оружия для панели War Paint: [{card, game, parts}].
+        Материалы оружия для панели War Paint: [{card, game, parts}]
 
-        ``game`` — War Paint на этот материал кладёт сама игра (у War Paint
-        игры они отмечены по умолчанию, остальные — по желанию, узором по
+        ``game`` - War Paint на этот материал кладёт сама игра (у War Paint
+        игры они отмечены по умолчанию, остальные - по желанию, узором по
         своим деталям). В универсальном режиме ``game`` нет ни у кого, и
-        отмечены все. ``parts`` — у материала есть своя геометрия, и узор по
+        отмечены все. ``parts`` - у материала есть своя геометрия, и узор по
         деталям на него ляжет. Спрашивается при открытии панели: у
-        многоматериальной модели материалы приходят позже самой модели.
+        многоматериальной модели материалы приходят позже самой модели
         """
         paths = self._host.tf2_paths()
         if 'error' in paths:
             return paths
         own = self._own_paintkits(paths['root'])
-        # Куда War Paint кладёт игра — по модели этой пушки: у скина с другой
-        # пушки ``item`` её, а не этой.
+        # Куда War Paint кладёт игра - по модели этой пушки: у скина с другой
+        # пушки ``item`` её, а не этой
         if own and not any(k['item'] == int(item) for k in own):
             item = own[0]['item']
         cards, game, spread = self._paintkit_offer(paths, item, bool(own))
@@ -163,24 +163,24 @@ class PaintkitEditor:
                               for c in cards]}
 
     def _paintkit_generic(self, card: str, layout: int, assign) -> Any:
-        """Универсальный режим для карточки: узор по её деталям — или ошибка.
+        """Универсальный режим для карточки: узор по её деталям - или ошибка
 
         Поверх игровой текстуры своей команды, а не поверх прошлой правки:
-        иначе War Paint накладывался бы на War Paint.
+        иначе War Paint накладывался бы на War Paint
         """
         from src.services import mesh_parts_service
 
         t = self._host.preview.textures
         # Не через _parts_model: тот отказывает при включённом переключателе
-        # (разбитая бутылка), а узору хватает геометрии в кадре — воркер
-        # разбирает ту же модель заново.
+        # (разбитая бутылка), а узору хватает геометрии в кадре - воркер
+        # разбирает ту же модель заново
         model = mesh_parts_service.load(self._host._obj_path, self._host.preview.part_cuts,
                                         self._host.preview.part_regions)
         found = (self._host.parts._mesh_of(model, card) if model
                  else {'error': 'Модель ещё не загружена'})
         if isinstance(found, dict) and card != t.stable_main():
-            # Чужой узор не подставляем: у главной запасной ход — самый
-            # большой материал модели, у второстепенной он лёг бы мимо.
+            # Чужой узор не подставляем: у главной запасной ход - самый
+            # большой материал модели, у второстепенной он лёг бы мимо
             return found
         return {'obj_path': self._host._obj_path, 'cuts': self._host.preview.part_cuts,
                 'regions': self._host.preview.part_regions, 'card': card,
@@ -192,22 +192,22 @@ class PaintkitEditor:
                         materials: Optional[List[str]] = None):
         """
         Что собрать: [(карточки, универсальный режим или None, forced, метка)]
-        — или ошибка.
+        - или ошибка
 
         War Paint игры собирается рецептом Valve один раз и ложится на
         карточки, которые красит игра. Остальные материалы, как и все
         материалы оружия без War Paint в игре, получают узор по своим
-        деталям — каждый отдельной сборкой: развёртка у каждого своя.
-        Материал части получает картинку своего исходного. ``materials`` —
-        что красить; None — что отмечено в панели по умолчанию
+        деталям - каждый отдельной сборкой: развёртка у каждого своя.
+        Материал части получает картинку своего исходного. ``materials`` -
+        что красить; None - что отмечено в панели по умолчанию
         (paintkit_materials). Раскладка человека относится к главной
-        карточке: её детали он и раскладывал.
+        карточке: её детали он и раскладывал
 
-        Метка — отпечаток всего, от чего зависит картинка, кроме аргументов в
+        Метка - отпечаток всего, от чего зависит картинка, кроме аргументов в
         имени: оружие, карточки, его OBJ, разрезы частей, базовая текстура.
         Без неё у универсального режима (донор у всех пушек один) с тем же
         сидом всплывала бы картинка с развёрткой прошлой пушки или прошлых
-        разрезов.
+        разрезов
         """
         import hashlib
         import json
@@ -225,7 +225,7 @@ class PaintkitEditor:
                     if k['id'] == int(kit) and k['item'] == int(item)), None)
         cards, game, spread = self._paintkit_offer(paths, item, own is not None)
         wanted = set((game if own else cards) if materials is None else materials)
-        # Рецепт под одну пушку по деталям других материалов не разложить.
+        # Рецепт под одну пушку по деталям других материалов не разложить
         by_parts = own is None or own.get('by_parts', False)
         chosen = [c for c in cards if c in wanted and (c in game or (by_parts and c in spread))]
         if not chosen:
@@ -238,7 +238,7 @@ class PaintkitEditor:
             forced = None
             if assign:
                 # Свой War Paint с раскладкой человека: группы Valve
-                # выбираются заново переменными select.
+                # выбираются заново переменными select
                 from src.services.paintkit_layout import own_forced, own_groups
                 defs = paintkit_defs.load(paths['root'])
                 kit_obj, item_obj = (paintkit_defs.find_item(defs, kit, item)
@@ -275,7 +275,7 @@ class PaintkitEditor:
 
     def _paintkit_job_for(self, kit: int, item: int, wear: int, seed: int, size: int,
                           generic, forced, out: str):
-        """Воркер War Paint под текущее оружие и команду."""
+        """Воркер War Paint под текущее оружие и команду"""
         from src.services.paintkit_worker import PaintkitWorker
         from src.shared.constants import Team
 
@@ -292,10 +292,10 @@ class PaintkitEditor:
         """
         Быстрый предпросмотр War Paint (512 px): страница кладёт его на модель
         временно, пока человек выбирает. В текстуры ничего не пишется.
-        Ответ — {images: {карточка: png}}.
+        Ответ - {images: {карточка: png}}
 
         Синхронно: при кэше текстур это доли секунды на материал, а страница
-        всё равно ждёт картинку, чтобы показать. Одновременно считается один.
+        всё равно ждёт картинку, чтобы показать. Одновременно считается один
         """
         seed = int(seed) & ((1 << 64) - 1)
         team = self._host.preview.textures.active_team
@@ -321,16 +321,16 @@ class PaintkitEditor:
                        materials: Optional[List[str]] = None) -> Dict[str, Any]:
         """
         Собирает War Paint в текстуры и кладёт их на карточки (см.
-        _paintkit_plans): War Paint игры — туда, куда его кладёт игра
+        _paintkit_plans): War Paint игры - туда, куда его кладёт игра
         (материалы с прокси WeaponSkin), и по желанию на остальные материалы
         узором по их деталям. У оружия без War Paint в игре узор ложится на
         каждый отмеченный материал по его деталям (``layout`` перемешивает,
-        какой узор на какой детали).
+        какой узор на какой детали)
 
         Собирается под активную команду: у War Paint с командными узорами RED
         и BLU разные, и человек накладывает второй, переключив команду. Дальше
-        это обычные свои текстуры — их можно дорисовать и собрать в мод.
-        Результат приходит событием ``paintkit_ready``.
+        это обычные свои текстуры - их можно дорисовать и собрать в мод.
+        Результат приходит событием ``paintkit_ready``
         """
         from src.services.paintkit_worker import PaintkitBatch
         from src.shared.constants import Team
@@ -356,15 +356,15 @@ class PaintkitEditor:
 
         def done(ok: bool, message: str) -> None:
             # Пока собиралось, человек мог уйти на другое оружие: чужой War
-            # Paint на новую пушку не кладём.
+            # Paint на новую пушку не кладём
             same = (self._host._shown_weapon() == weapon_key
                     and ('blue' if self._host.preview.textures.active_team == Team.BLU
                          else 'red') == team)
             applied = 0
             try:
                 if ok and same:
-                    # Один War Paint — один шаг отмены, сколько бы карточек
-                    # он ни покрасил.
+                    # Один War Paint - один шаг отмены, сколько бы карточек
+                    # он ни покрасил
                     self._host._edits_held = True
                     try:
                         for card, png in [(c, png) for cards, png in w.done for c in cards]:
@@ -381,9 +381,9 @@ class PaintkitEditor:
                 logger.error(f'[paintkit] {exc}', exc_info=True)
                 ok, message = False, str(exc)
             if applied and not ok:
-                # Не легло на одну карточку — снимаем и с остальных: War Paint
+                # Не легло на одну карточку - снимаем и с остальных: War Paint
                 # на половине оружия выглядел бы наложенным целиком. Шаг
-                # отмены ещё не записан, и последний снимок — то, что было до.
+                # отмены ещё не записан, и последний снимок - то, что было до
                 try:
                     self._host.undo_edits(0)
                 except Exception as exc:                  # noqa: BLE001
@@ -401,7 +401,7 @@ class PaintkitEditor:
         """
         Раскладка War Paint по деталям для углублённого режима: слои с
         плитками узоров, детали с их слоем и карта треугольников для вьювера.
-        См. paintkit_layout.describe.
+        См. paintkit_layout.describe
         """
         from src.data import paintkit_defs
         from src.services import paintkit_layout
@@ -439,7 +439,7 @@ class PaintkitEditor:
 
     def set_paintkit_layout(self, kit: int, assign: Optional[Dict[str, int]] = None
                             ) -> Dict[str, Any]:
-        """Раскладка человека для War Paint ``kit``: {деталь: слой}; пусто — автомат."""
+        """Раскладка человека для War Paint ``kit``: {деталь: слой}; пусто - автомат"""
         clean = {}
         for k, v in (assign or {}).items():
             try:
@@ -452,15 +452,15 @@ class PaintkitEditor:
             self._host.preview.paintkit_layouts[str(int(kit))] = clean
         else:
             self._host.preview.paintkit_layouts.pop(str(int(kit)), None)
-        # Раскладка — черновик до «Применить»: шагом отмены она не считается.
+        # Раскладка - черновик до «Применить»: шагом отмены она не считается
         self._host._autosave(step=False)
         return {'ok': True}
 
     def _paintkit_targets(self, paintable: List[str], main: str) -> List[str]:
-        """Карточки под War Paint: материалы WeaponSkin среди карточек, иначе главная.
+        """Карточки под War Paint: материалы WeaponSkin среди карточек, иначе главная
 
-        Синие пары (c_detonator_blue) карточек не имеют — их заполняет команда
-        BLU той же карточки, поэтому сравниваются только имена карточек.
+        Синие пары (c_detonator_blue) карточек не имеют - их заполняет команда
+        BLU той же карточки, поэтому сравниваются только имена карточек
         """
         wanted = {m.lower() for m in paintable or []}
         cards = [c for c in (self._host.preview.textures.material_names or [])

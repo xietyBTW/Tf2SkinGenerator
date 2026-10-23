@@ -36,14 +36,14 @@ class TextureBuildContextTests(unittest.TestCase):
 
     def test_material_gets_its_card_settings(self):
         # Голова тела и «Прочее» собирались общими настройками, хотя у
-        # карточки стояли свои.
+        # карточки стояли свои
         ctx = self._ctx()
         ctx.settings_for = lambda name: (
             ([128, 128], "DXT1", ["NOMIP"], {}) if name == "head" else ((512, 512), "DXT5", [], {}))
         head = ctx.for_material("head")
         self.assertEqual((head.size, head.format_type, head.flags), ((128, 128), "DXT1", ["NOMIP"]))
         self.assertEqual(ctx.for_material("body").format_type, "DXT5")
-        plain = self._ctx()                  # своих настроек нет — общие
+        plain = self._ctx()                  # своих настроек нет - общие
         self.assertIs(plain.for_material("head"), plain)
 
     def test_plain_creates_vtf(self):
@@ -87,7 +87,7 @@ class BuildContextTests(unittest.TestCase):
     def test_default_folder_is_short_and_swept_at_start(self):
         # Короткая папка прямо в %TEMP%: в прежней <данные>\tools\temp\build_…
         # пути материалов шапок упирались в 260 символов (vpk.exe, VTFCmd).
-        # Префикс tf2sg_ — брошенную папку снимет уборка %TEMP% при старте.
+        # Префикс tf2sg_ - брошенную папку снимет уборка %TEMP% при старте
         ctx = BuildContext.create("hat", "some_hat", debug_mode=False)
         try:
             self.assertEqual(ctx.temp_dir.parent, Path(tempfile.gettempdir()))

@@ -1,5 +1,5 @@
 """
-VMT материалов частей модели (src/services/part_materials.py).
+VMT материалов частей модели (src/services/part_materials.py)
 """
 
 import os
@@ -17,22 +17,22 @@ def write_part_materials(variants: dict, specs, ctx, slots,
                           blu_of: Optional[dict] = None,
                           strip_paints: bool = False) -> dict:
     """
-    VMT материалов частей (src/services/part_materials.py).
+    VMT материалов частей (src/services/part_materials.py)
 
-    Материал части — отдельный материал модели. В каждой строке скина его
+    Материал части - отдельный материал модели. В каждой строке скина его
     VMT начинается с ИГРОВОГО VMT материала, стоящего на его месте
     (главный, BLU, золото, стиль), и поверх ложится правка VMT части.
-    $basetexture — своя картинка части для её команды (`image` в строках
+    $basetexture - своя картинка части для её команды (`image` в строках
     исходного, `image_blu` в строках его синего, `blu_of`), её правка
     стиля в строке стиля (`style_images` по материалу строки), иначе
-    игровая текстура строки; выбранный человеком в правке — он. Картинку, правку и
+    игровая текстура строки, выбранный человеком в правке - он. Картинку, правку и
     карты исходного материал части получил копией при создании
     (PartsEditor._fork_card): то, что лежит на исходном сейчас, его не
-    касается.
+    касается
 
     Returns:
-        {имя строки: (картинка, материал части)} — что отрендерить в
-        `<имя строки>.vtf`; VMT уже лежит, рендер его не перезапишет.
+        {имя строки: (картинка, материал части)} - что отрендерить в
+        `<имя строки>.vtf`; VMT уже лежит, рендер его не перезапишет
     """
     from src.services import part_materials as pm
     from src.services.edited_vmt_service import EditedVMTService
@@ -52,13 +52,13 @@ def write_part_materials(variants: dict, specs, ctx, slots,
         owner = next((n for n in names if name == n or name.startswith(n + '_')), name)
         spec = by_name.get(owner, {})
         origin = str(spec.get('base') or source)
-        # Своего VMT у синего «сделать командным» в игре нет — тогда VMT
-        # исходного; мод сам его не пишет — тот, что записан для строки.
+        # Своего VMT у синего «сделать командным» в игре нет - тогда VMT
+        # исходного, мод сам его не пишет - тот, что записан для строки
         template = (game_source.find_original_vmt(source, ctx, slots)
                     or game_source.find_original_vmt(origin, ctx, slots)
                     or written.get(source.lower()))
         if not template or not os.path.exists(template):
-            logger.warning(f"[ЧАСТИ] {name}: нет VMT материала {source} — часть пропущена")
+            logger.warning(f"[ЧАСТИ] {name}: нет VMT материала {source} - часть пропущена")
             ctx.warn(f"Материал части «{name}» не записан: нет VMT «{source}»")
             continue
         text = read(template)
@@ -68,7 +68,7 @@ def write_part_materials(variants: dict, specs, ctx, slots,
             start = EditedVMTService.read_original_backup(owner)
             if start is None:
                 # Правка без сохранённого оригинала: сравниваем с игровым
-                # VMT исходного — с него правка и начиналась.
+                # VMT исходного - с него правка и начиналась
                 first = game_source.find_original_vmt(origin, ctx, slots)
                 start = read(first) if first else text
             mine = read(edited)

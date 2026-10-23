@@ -1,5 +1,5 @@
 /*
- * Панель свойств выбранной системы.
+ * Панель свойств выбранной системы
  *
  * Что показать - крутилки или файл как есть - решает переключатель режима.
  * Список параметров приходит из Python готовым: схема одна на панель
@@ -13,7 +13,7 @@ import { pairedField, colorField, editParam } from './fields.js';
 import { pfind, filterExpert, showExpert } from './expert.js';
 import { syncHistory } from './playback.js';
 
-/** Рисует панель параметров выбранной системы. */
+/** Рисует панель параметров выбранной системы */
 export async function showParams(system) {
   setSystem(system);
   const expert = pMode === 'expert';
@@ -23,7 +23,7 @@ export async function showParams(system) {
   if (expert) {
     pnote.hidden = true;
     await showExpert(system);
-    // Запрос переживает смену системы: ищут обычно одно и то же в разных.
+    // Запрос переживает смену системы: ищут обычно одно и то же в разных
     if (pfind.value) filterExpert(pfind.value);
     return;
   }
@@ -42,7 +42,7 @@ export async function showParams(system) {
     const box = row.querySelector('.params__in');
 
     // value = null означает «модуля под параметром нет». Если создать его
-    // нельзя (эмиттеры), поле не врём - гасим и говорим почему.
+    // нельзя (эмиттеры), поле не врём - гасим и говорим почему
     const shown = param.value === null ? param.placeholder : param.value;
     const dead = param.value === null && !param.creatable;
 
@@ -54,11 +54,11 @@ export async function showParams(system) {
       })));
     } else if (param.kind === 'range') {
       // Минимум и максимум - своя пара «дорожка + поле» у каждого: одной
-      // дорожкой на два конца управлять неудобно, а концы правят порознь.
+      // дорожкой на два конца управлять неудобно, а концы правят порознь
       shown.forEach((v, n) => box.append(pairedField(v, param, (x) => {
         const pair = shown.slice();
         pair[n] = x;
-        // Границы диапазона не должны переползать друг через друга.
+        // Границы диапазона не должны переползать друг через друга
         if (n === 0) pair[1] = Math.max(pair[1], x);
         else pair[0] = Math.min(pair[0], x);
         editParam(param, pair);
@@ -77,7 +77,7 @@ export async function showParams(system) {
   // Доступность отмены зависит от ЛЮБОЙ правки, а не только структурной:
   // сюда сходятся и смена системы, и правка параметра (editParam зовёт нас
   // следом). Без этого кнопки «Отменить»/«Вернуть» показывали состояние на
-  // момент загрузки файла.
+  // момент загрузки файла
   syncHistory();
 }
 

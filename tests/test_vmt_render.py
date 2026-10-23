@@ -1,16 +1,16 @@
 """
-Разбор VMT в свойства рисования для 3D-превью.
+Разбор VMT в свойства рисования для 3D-превью
 
 Превью рисовало каждый меш непрозрачным, поэтому стекло банки Мутировавшего
 молока выглядело серым бубликом: в его VMT стоит `$additive 1`, а базовая
-текстура — пузырьковый шлем пиро, который без смешивания читается как пластик.
+текстура - пузырьковый шлем пиро, который без смешивания читается как пластик
 
 Блик и отражения намеренно НЕ разбираются: в Source они ограничены маской из
-текстуры, а без неё покрывают модель белёсой плёнкой (см. vmt_render.py).
+текстуры, а без неё покрывают модель белёсой плёнкой (см. vmt_render.py)
 
 Фрагменты VMT ниже сняты с настоящих файлов игры. По стоку (2005 уникальных
 материалов оружия и шапок): $additive 101, $translucent 98, $alphatest 35,
-$alpha<1 2, $nocull 25.
+$alpha<1 2, $nocull 25
 """
 
 import unittest
@@ -19,7 +19,7 @@ from src.services.vmt_render import (
     BLEND_ADD, BLEND_ALPHA, BLEND_CUTOUT, BLEND_OPAQUE, RenderSpec, parse_render,
 )
 
-# c_breadmonster_glass.vmt — стекло банки Мутировавшего молока
+# c_breadmonster_glass.vmt - стекло банки Мутировавшего молока
 BREADMONSTER_GLASS = '''"VertexlitGeneric"
 {
 	"$nocull" 1
@@ -34,7 +34,7 @@ BREADMONSTER_GLASS = '''"VertexlitGeneric"
 }
 '''
 
-# c_madmilk_glass.vmt — и $translucent, и $additive разом
+# c_madmilk_glass.vmt - и $translucent, и $additive разом
 MADMILK_GLASS = '''"VertexlitGeneric"
 {
 	"$baseTexture" "models/workshop/weapons/c_models/c_madmilk/c_madmilk_glass"
@@ -43,7 +43,7 @@ MADMILK_GLASS = '''"VertexlitGeneric"
 }
 '''
 
-# c_madmilk_liquid.vmt — непрозрачная, но очень блестящая
+# c_madmilk_liquid.vmt - непрозрачная, но очень блестящая
 MADMILK_LIQUID = '''"VertexlitGeneric"
 {
 	"$baseTexture" "models/workshop/weapons/c_models/c_madmilk/c_madmilk_liquid"
@@ -63,7 +63,7 @@ class BlendModeTests(unittest.TestCase):
         self.assertTrue(spec.is_transparent)
 
     def test_additive_wins_over_translucent(self):
-        """Оба флага вместе — в игре решает сложение с фоном."""
+        """Оба флага вместе - в игре решает сложение с фоном"""
         self.assertEqual(parse_render(MADMILK_GLASS).blend, BLEND_ADD)
 
     def test_translucent_alone(self):
@@ -91,7 +91,7 @@ class BlendModeTests(unittest.TestCase):
                          BLEND_OPAQUE)
 
     def test_zero_flags_are_not_flags(self):
-        """«$translucent 0» — это выключено, а не включено."""
+        """«$translucent 0» - это выключено, а не включено"""
         self.assertEqual(
             parse_render('"VertexLitGeneric"{"$translucent" "0"}').blend, BLEND_OPAQUE)
 
@@ -101,7 +101,7 @@ class BlendModeTests(unittest.TestCase):
         self.assertTrue(spec.is_plain)
 
     def test_shiny_material_without_blending_is_plain(self):
-        """У 1972 материалов стока есть $phong — вьюверу о них знать незачем."""
+        """У 1972 материалов стока есть $phong - вьюверу о них знать незачем"""
         self.assertTrue(parse_render(MADMILK_LIQUID).is_plain)
 
     def test_broken_and_empty_input(self):
@@ -111,7 +111,7 @@ class BlendModeTests(unittest.TestCase):
 
 
 class WireFormatTests(unittest.TestCase):
-    """as_dict уходит в JS — лишних полей там быть не должно."""
+    """as_dict уходит в JS - лишних полей там быть не должно"""
 
     def test_plain_material_sends_only_the_blend(self):
         self.assertEqual(parse_render('"VertexLitGeneric"{}').as_dict(),
@@ -124,7 +124,7 @@ class WireFormatTests(unittest.TestCase):
         self.assertNotIn("opacity", data)        # непрозрачность не менялась
 
     def test_shine_is_not_sent(self):
-        """Блик без маски — та самая «серебряная оболочка»; его тут нет."""
+        """Блик без маски - та самая «серебряная оболочка», его тут нет"""
         for text in (BREADMONSTER_GLASS, MADMILK_LIQUID):
             data = parse_render(text).as_dict()
             self.assertNotIn("shininess", data)

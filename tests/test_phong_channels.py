@@ -1,8 +1,8 @@
-"""Phong-карта по каналам (skin_ps20b.fxc): R — размер блика, G — цвет блика
-от текстуры ($phongalbedotint), A — маска обводки ($rimmask); и конструктор
-градиента блика (phongwarp).
+"""Phong-карта по каналам (skin_ps20b.fxc): R - размер блика, G - цвет блика
+от текстуры ($phongalbedotint), A - маска обводки ($rimmask), и конструктор
+градиента блика (phongwarp)
 
-VTFCmd не зовём: create_vtf кладёт PNG под именем .vtf, rgba_from_vtf его читает.
+VTFCmd не зовём: create_vtf кладёт PNG под именем .vtf, rgba_from_vtf его читает
 """
 import io
 import tempfile
@@ -61,7 +61,7 @@ class PhongChannelsTests(unittest.TestCase):
         return fake_rgba((self.tmp / 'm9_exp.vtf').read_bytes())
 
     def test_own_phong_map_drops_phongexponent(self):
-        # $phongexponent > 0 перекрывает красный канал (skin_dx9_helper.cpp).
+        # $phongexponent > 0 перекрывает красный канал (skin_dx9_helper.cpp)
         doc, _ = self.build('', {'phongexp': {'image': str(self.base)}})
         self.assertIsNone(doc.get('$phongexponent'))
         self.assertEqual(doc.path('$phongexponenttexture'), 'models/w/m9_exp')
@@ -104,7 +104,7 @@ class PhongChannelsTests(unittest.TestCase):
         self.assertTrue(doc.flag('$rimmask'))                  # работа до маски
 
     def test_new_phong_map_from_exponent(self):
-        # Ни своей, ни родной Phong-карты: R из $phongexponent (1 + 149·R).
+        # Ни своей, ни родной Phong-карты: R из $phongexponent (1 + 149·R)
         self.build('', {'phongcolor': {'enabled': True, 'tint': 'albedo'}})
         self.assertEqual(int(self.exp()[0, 0, 0]), round((25 - 1) / 149 * 255))
 
@@ -121,7 +121,7 @@ class PhongChannelsTests(unittest.TestCase):
 
 
 class ReviewFixesTests(PhongChannelsTests):
-    """Случаи, что нашло ревью: каждый ломал материал молча."""
+    """Случаи, что нашло ревью: каждый ломал материал молча"""
 
     def test_removing_mod_highlight_colour_leaves_rim_alone(self):
         from src.services.vmt_service import VMTService
@@ -170,7 +170,7 @@ class ReviewFixesTests(PhongChannelsTests):
         self.assertEqual((int(exp[0, 0, 1]), int(exp[0, -1, 1])), (128, 0))
 
     def test_foreign_phong_file_is_not_revived(self):
-        # {mat}_exp из мода, с которого карту сняли, — не основа.
+        # {mat}_exp из мода, с которого карту сняли, - не основа
         (self.tmp / 'm9_exp.vtf').write_bytes(b'STOCK_EXP')
         self.build('', {'phongcolor': {'enabled': True, 'tint': 'albedo'}})
         self.assertEqual(int(self.exp()[0, 0, 0]), round((25 - 1) / 149 * 255))
@@ -210,17 +210,17 @@ class PhongwarpTests(unittest.TestCase):
     def test_angle_and_edge_row(self):
         red_blue = [[0, '#ff0000'], [1, '#0000ff']]
         down = phongwarp.image({'preset': 'custom', 'stops': red_blue, 'angle': 90})
-        self.assertEqual(tuple(down[0, 10]), (255, 0, 0))     # 90° — сверху вниз
+        self.assertEqual(tuple(down[0, 10]), (255, 0, 0))     # 90° - сверху вниз
         self.assertEqual(tuple(down[-1, 10]), (0, 0, 255))
         two = phongwarp.image({'preset': 'custom', 'stops': [[0, '#ffffff'], [1, '#ffffff']],
                                'edge_row': True,
                                'edge_stops': [[0, '#00ff00'], [1, '#00ff00']]})
-        self.assertEqual(tuple(two[0, 5]), (255, 255, 255))   # верх — первый ряд
-        self.assertEqual(tuple(two[-1, 5]), (0, 255, 0))      # низ — край модели
+        self.assertEqual(tuple(two[0, 5]), (255, 255, 255))   # верх - первый ряд
+        self.assertEqual(tuple(two[-1, 5]), (0, 255, 0))      # низ - край модели
         self.assertEqual(phongwarp.clean_params({'angle': -90})['angle'], 270)
 
     def test_rows_are_fresnel(self):
-        # Строка — френель: цвет края модели внизу, у зрителя вверху его нет.
+        # Строка - френель: цвет края модели внизу, у зрителя вверху его нет
         img = phongwarp.image({'preset': 'custom', 'stops': [[0, '#ffffff'], [1, '#ffffff']],
                                'edge': 100, 'edge_color': '#00ff00'})
         self.assertEqual(tuple(img[-1, 200]), (0, 255, 0))

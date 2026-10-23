@@ -1,9 +1,9 @@
-"""Снятие покраски игры с материалов мода перед упаковкой."""
+"""Снятие покраски игры с материалов мода перед упаковкой"""
 
 from src.services import vmt_parse, vmt_tint
 from src.services.vpk_service import VPKService
 
-# Как у Коровьего Мангла в игре: цвет в VMT, маска — альфа текстуры.
+# Как у Коровьего Мангла в игре: цвет в VMT, маска - альфа текстуры
 MANGLER = """"VertexlitGeneric"
 {
 	"$basetexture"	"console/models/c_test/c_test"
@@ -55,14 +55,14 @@ def test_strips_tint_where_texture_is_in_the_mod(tmp_path):
     text = vmt.read_text(encoding="utf-8")
     assert vmt_tint.parse_tint(text) is None
     assert "ItemTintColor" not in text and "colortint_base" not in text
-    # Банкате остаётся: жёлтый теперь идёт в $color2 напрямую.
+    # Банкате остаётся: жёлтый теперь идёт в $color2 напрямую
     assert "YellowLevel" in text and "$yellow" in text
     assert vmt_parse.parse(text).path("basetexture") == "console/models/c_test/c_test"
 
 
 def test_keeps_tint_on_game_texture(tmp_path):
-    # Служебный материал пишется оригиналом: текстура — игровым путём, её в
-    # моде нет, и покраску трогать нельзя.
+    # Служебный материал пишется оригиналом: текстура - игровым путём, её в
+    # моде нет, и покраску трогать нельзя
     vmt = _put(tmp_path, "materials/console/models/c_test/c_test.vmt",
                MANGLER.replace("console/models/c_test/c_test", "models/c_test/c_test"))
 

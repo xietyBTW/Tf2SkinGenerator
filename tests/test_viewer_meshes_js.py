@@ -1,11 +1,11 @@
 """
-Выбор меша под курсором (viewer_meshes.js) через Node.
+Выбор меша под курсором (viewer_meshes.js) через Node
 
 Эта проверка появилась после настоящего бага: пользовательская текстура
-ложилась и на руки класса. Python-тесты его не видят — решение принимается уже
-в сцене, по тому, какой меш попал под луч.
+ложилась и на руки класса. Python-тесты его не видят - решение принимается уже
+в сцене, по тому, какой меш попал под луч
 
-Тест пропускается, если node недоступен.
+Тест пропускается, если node недоступен
 """
 
 import json
@@ -21,7 +21,7 @@ pytestmark = pytest.mark.skipif(
     shutil.which("node") is None or not MODULE.exists(),
     reason="node недоступен или viewer_meshes.js не найден")
 
-# Сцена вида от первого лица: руки ближе к камере, оружие за ними.
+# Сцена вида от первого лица: руки ближе к камере, оружие за ними
 SCENE = """
 const weapon = { name: 'c_scattergun', material: { name: 'c_scattergun' } };
 const hands  = { name: 'scout_hands',  material: { name: 'scout_hands' } };
@@ -44,7 +44,7 @@ console.log(JSON.stringify(out));
 
 
 def test_without_a_limit_everything_is_editable():
-    """Обычное превью: вся модель принадлежит пользователю."""
+    """Обычное превью: вся модель принадлежит пользователю"""
     out = _run("""return {
         weapon: isEditableMesh(weapon, null),
         hands:  isEditableMesh(hands, null),
@@ -74,9 +74,9 @@ def test_multi_material_mesh_without_a_matching_name_is_refused():
 
 
 def test_hands_in_front_do_not_block_the_weapon_behind_them():
-    """Закрытая рукой часть ствола обязана принимать текстуру.
+    """Закрытая рукой часть ствола обязана принимать текстуру
 
-    Иначе половина оружия оказалась бы «мёртвой» для перетаскивания.
+    Иначе половина оружия оказалась бы «мёртвой» для перетаскивания
     """
     out = _run("""const hit = firstEditableHit(
         [{ object: hands }, { object: weapon }], onlyWeapon);
@@ -85,7 +85,7 @@ def test_hands_in_front_do_not_block_the_weapon_behind_them():
 
 
 def test_hit_on_the_hands_alone_gives_nothing():
-    """Не «красим руки» и не «красим первое попавшееся» — просто мимо."""
+    """Не «красим руки» и не «красим первое попавшееся» - просто мимо"""
     out = _run("""const hit = firstEditableHit([{ object: hands }], onlyWeapon);
         return hit === null;""")
     assert out is True

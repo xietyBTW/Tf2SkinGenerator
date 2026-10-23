@@ -1,11 +1,11 @@
 /*
- * Вкладки материалов, альбом текстур (и в узкой половине), вьюпорт.
+ * Вкладки материалов, альбом текстур (и в узкой половине), вьюпорт
  *
  * Часть стилей страницы: файлы подключены в index.html в порядке каскада
  * (style.css первым), порядок менять нельзя.
  */
 
-/* ── Вкладки материалов ──────────────────────────────────────────────── */
+/* Вкладки материалов */
 .mattabs {
   display: flex;
   gap: 16px;
@@ -34,9 +34,9 @@
 .mattab.is-active { color: var(--ink); border-bottom-color: var(--accent); }
 .mattab__mark { width: 4px; height: 4px; background: var(--accent); }
 
-/* ── Альбом текстур ──────────────────────────────────────────────────────
+/* Альбом текстур
    Материалов бывает много, каждый нужен в полный размер. Лента квадратов с
-   защёлкиванием: листается колесом, стрелками и вкладками. */
+   защёлкиванием: листается колесом, стрелками и вкладками */
 .album__box {
   position: relative;
   flex: 1;
@@ -59,7 +59,7 @@
 .album::-webkit-scrollbar { display: none; }
 
 /* Подпись входит В кадр: контейнер прокрутки режет всё, что вылезает.
-   --cap — её высота, на неё же уменьшается сторона квадрата. */
+   --cap - её высота, на неё же уменьшается сторона квадрата */
 .frame {
   --cap: 26px;
   position: relative;
@@ -77,8 +77,8 @@
   aspect-ratio: 1;               /* текстуры всегда квадратные */
   border: 1px solid var(--hairline-strong);
   /* Шахматка под текстурой: у игровых текстур есть альфа, и на сплошном белом
-     они выглядят выцветшими — непонятно, где прозрачность, а где светлый
-     пиксель. */
+     они выглядят выцветшими - непонятно, где прозрачность, а где светлый
+     пиксель */
   background:
     conic-gradient(var(--hairline) 25%, transparent 0 50%,
                    var(--hairline) 0 75%, transparent 0)
@@ -88,7 +88,7 @@
   overflow: hidden;
 }
 
-/* Текстуру показываем целиком: обрезать её значило бы врать про содержимое. */
+/* Текстуру показываем целиком: обрезать её значило бы врать про содержимое */
 .frame__img img {
   width: 100%;
   height: 100%;
@@ -96,7 +96,7 @@
   display: block;
 }
 /* Подсказка в пустой карточке: что сюда класть. Сквозь неё проходит и
-   указатель, и перенос файла — карточка остаётся целью. */
+   указатель, и перенос файла - карточка остаётся целью */
 .frame__hint {
   position: absolute;
   inset: 0;
@@ -113,18 +113,53 @@
 
 /* Новая картинка в карточке проявляется. Класс ставит страница ТОЛЬКО когда
    картинка сменилась: альбом пересобирается на каждое обновление состояния,
-   и проявление всех карточек подряд было бы мерцанием. */
-.frame__img img.is-new { animation: fade-in var(--dur-panel); }
-/* Без fill-mode НАМЕРЕННО: удержанная анимацией прозрачность — это stacking
-   context навсегда, и меню инструментов из заголовка уезжало под кадр. */
+   и проявление всех карточек подряд было бы мерцанием */
+.frame__img img.is-new { animation: frame-land 520ms cubic-bezier(.2, .7, .2, 1); }
+@keyframes frame-land {
+  from { opacity: 0; transform: scale(1.04); filter: blur(8px); }
+}
+/* И рамка отвечает: по ней пробегает акцентная обводка и гаснет - видно, что
+   картинка легла именно сюда. Ставится вместе с новой картинкой (:has) */
+.frame__img:has(img.is-new)::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border: 2px solid var(--accent);
+  pointer-events: none;
+  opacity: 0;
+  animation: frame-ring 760ms cubic-bezier(.65, 0, .25, 1);
+}
+@keyframes frame-ring {
+  0%   { opacity: 1; clip-path: inset(0 100% 0 0); }
+  45%  { opacity: 1; clip-path: inset(0 0 0 0); }
+  100% { opacity: 0; clip-path: inset(0 0 0 0); }
+}
+[data-motion="off"] .frame__img:has(img.is-new)::after,
+[data-motion="off"] .frame__img img.is-new { animation: none; }
+/* Без fill-mode НАМЕРЕННО: удержанная анимацией прозрачность - это stacking
+   context навсегда, и меню инструментов из заголовка уезжало под кадр */
 @keyframes fade-in { from { opacity: 0; } }
 .frame:hover .frame__img { border-color: var(--ink); }
 .frame.is-current .frame__img { border-color: var(--accent); }
-/* Кадр под перетаскиванием: рамка акцентом, чтобы было видно, куда упадёт. */
-.frame.is-drop .frame__img { border-color: var(--accent); border-style: dashed; }
+/* Кадр под перетаскиванием: рамка акцентом, чтобы было видно, куда упадёт */
+.frame.is-drop .frame__img {
+  border-color: var(--accent);
+  border-style: dashed;
+  animation: frame-breathe 1100ms ease-in-out infinite;
+}
+/* Под перетаскиванием карточка «дышит» акцентом: сюда и упадёт */
+@keyframes frame-breathe {
+  0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent) 0%, transparent); }
+  50%      { box-shadow: 0 0 0 6px color-mix(in srgb, var(--accent) 18%, transparent); }
+}
+[data-motion="off"] .frame.is-drop .frame__img { animation: none; }
+@media (prefers-reduced-motion: reduce) {
+  .frame.is-drop .frame__img, .frame__img:has(img.is-new)::after,
+  .frame__img img.is-new { animation: none; }
+}
 
-/* Инструменты кадра проявляются по наведению — в покое ничто не мешает
-   смотреть на текстуру. */
+/* Инструменты кадра проявляются по наведению - в покое ничто не мешает
+   смотреть на текстуру */
 .frame__tools {
   position: absolute;
   top: 10px;
@@ -141,10 +176,10 @@
   place-items: center;
   width: 22px;
   height: 22px;
-  /* Своё поле у кнопки браузер ставит сам (1px 6px). Знаку оно не мешало —
-     его центрует text-align, — а значок в оставшиеся 8 точек не влезал, и
+  /* Своё поле у кнопки браузер ставит сам (1px 6px). Знаку оно не мешало -
+     его центрует text-align, - а значок в оставшиеся 8 точек не влезал, и
      выравнивание по центру откатывалось к левому краю: иконка стояла на
-     четыре точки правее середины. */
+     четыре точки правее середины */
   padding: 0;
   border: 1px solid var(--hairline-strong);
   background: var(--surface);
@@ -155,24 +190,24 @@
   transition: color var(--dur), border-color var(--dur);
 }
 .frame__tool:hover { color: var(--accent); border-color: var(--accent); }
-/* Шестерёнка материала в правке: горит и не прячется, пока правка открыта. */
+/* Шестерёнка материала в правке: горит и не прячется, пока правка открыта */
 .frame__tool.is-on { color: var(--accent); border-color: var(--accent); }
 .frame:has(.frame__tool.is-on) .frame__tools { opacity: 1; }
-/* Одна текстура — её настройки и есть общие: вторая дверь в то же место
-   только путает. Своя запись (значок) у неё бывает от прошлых правок —
-   тогда шестерёнка остаётся, иначе запись не сбросить. */
+/* Одна текстура - её настройки и есть общие: вторая дверь в то же место
+   только путает. Своя запись (значок) у неё бывает от прошлых правок -
+   тогда шестерёнка остаётся, иначе запись не сбросить */
 .frame:only-child:not(:has(.frame__badge)) .frame__tool:not(.frame__off) { display: none; }
 
 /* Наверху, а не внизу: снизу справа стоит размер, и в узком кадре они
-   наезжали друг на друга. */
+   наезжали друг на друга */
 .frame__badge {
   position: absolute;
   left: 10px;
   top: 10px;
   padding: 3px 7px;
   border: 1px solid var(--accent);
-  /* Пометка ложится поверх текстуры — без фона она читается через светлые
-     пиксели как каша. */
+  /* Пометка ложится поверх текстуры - без фона она читается через светлые
+     пиксели как каша */
   background: var(--surface);
   color: var(--accent);
   font-size: 9px;
@@ -224,16 +259,16 @@
 .album__step--prev { left: -1px; }
 .album__step--next { right: -1px; }
 
-/* ── Узкая половина: альбом листается сверху вниз ─────────────────────────
-   Кадр — квадрат со стороной min(ширина, высота − подпись). Как только
+/* Узкая половина: альбом листается сверху вниз
+   Кадр - квадрат со стороной min(ширина, высота − подпись). Как только
    половина становится выше, чем шире (границу двигают мышью, см. split.js),
    сторону задаёт ШИРИНА, и над кадром с под ним остаётся пустое место, а
-   листать его всё равно предлагают вбок — колесом вниз влево.
+   листать его всё равно предлагают вбок - колесом вниз влево
 
    Порог 1:1 и есть тот самый момент: пока половина шире, кадр упирается в
-   высоту и рядом помещается следующий; как только уже — в ширину, и место
+   высоту и рядом помещается следующий, как только уже - в ширину, и место
    есть только по вертикали. Порог считает CSS, а не JS: контейнер уже
-   объявлен (`container-type: size`), и второй копии правила не нужно. */
+   объявлен (`container-type: size`), и второй копии правила не нужно */
 @container (max-aspect-ratio: 1 / 1) {
   .album {
     flex-direction: column;
@@ -245,11 +280,11 @@
     overscroll-behavior-y: contain;
   }
   /* Сторона кадра НЕ меняется: та же `min(ширина, высота − подпись)`. Ниже
-     порога она равна ширине — текстура и так занимает столбец целиком, — а у
-     самого порога формула не даёт кадру вылезти за высоту и обрезаться. */
+     порога она равна ширине - текстура и так занимает столбец целиком, - а у
+     самого порога формула не даёт кадру вылезти за высоту и обрезаться */
 
   /* Стрелки переезжают под верх и низ. Знак тот же, только повёрнут: своей
-     разметки под «вверх/вниз» для этого не нужно. */
+     разметки под «вверх/вниз» для этого не нужно */
   .album__step {
     top: auto;
     right: auto;
@@ -267,14 +302,14 @@
 }
 
 /* Счётчик не сжимается: при узкой колонке «01 / 01» ломался в столбик. Место
-   уступают кнопки — они переносятся (.acts). */
+   уступают кнопки - они переносятся (.acts) */
 /* Когда кнопки ушли в несколько строк, счётчик стоит у первой, а не
-   посередине столбика. */
+   посередине столбика */
 .album__count { flex: none; white-space: nowrap; align-self: flex-start;
                 font-family: var(--mono); font-size: 10.5px; color: var(--ink-mute); }
 .album__count b { color: var(--ink); font-weight: 600; }
 
-/* ── Вьюпорт ─────────────────────────────────────────────────────────── */
+/* Вьюпорт */
 .viewport {
   position: relative;
   flex: 1;
@@ -296,7 +331,7 @@
 }
 
 /* Подпись поверх вьювера: пока модели нет, он пустой, а сказать что-то надо.
-   Указатель сквозь неё проходит — иначе она мешала бы вращать модель. */
+   Указатель сквозь неё проходит - иначе она мешала бы вращать модель */
 .viewport__hint {
   position: relative;
   z-index: 1;
@@ -309,4 +344,92 @@
   pointer-events: none;
 }
 .viewport__hint[hidden] { display: none; }
+/* стадия работы: по буквам бежит блик, плашка не нужна - кадр под ней пустой */
+/* В светлой теме - тон темнее: --ink-mute на светлом кадре почти не виден */
+.viewport__hint.is-busy { --hint-ink: var(--ink-soft); }
+[data-theme="dark"] .viewport__hint.is-busy { --hint-ink: var(--ink-mute); }
+.viewport__hint.is-busy {
+  background: linear-gradient(100deg, var(--hint-ink) 40%, var(--accent) 50%, var(--hint-ink) 60%)
+              0 0 / 250% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: hint-shine 2.2s ease-in-out infinite;
+}
+@keyframes hint-shine { from { background-position-x: 95%; } 70%, to { background-position-x: 5%; } }
+[data-motion="off"] .viewport__hint.is-busy { animation: none; }
+@media (prefers-reduced-motion: reduce) { .viewport__hint.is-busy { animation: none; } }
+
+/* Уведомление в левом нижнем углу кадра (stage.js): тонкая черта рода
+   (сделано, подсказка, ошибка) и подпись в тон кадра. Без фона и рамки:
+   крупная плашка по центру спорила с моделью */
+.viewport__toast {
+  --kind: var(--accent);
+  position: absolute;
+  left: 12px;
+  /* над подсказкой вьювера про мышь: она внизу по центру, и в узком окне
+     они ложились друг на друга */
+  bottom: 34px;
+  z-index: 2;
+  max-width: 70%;
+  padding-left: 10px;
+  border-left: 1px solid var(--kind);
+  font-size: 10px;
+  line-height: 1.5;
+  letter-spacing: .14em;
+  text-transform: uppercase;
+  color: var(--ink-soft);
+  pointer-events: none;
+  opacity: 0;
+  visibility: hidden;
+  transform: translateY(4px);
+  transition: opacity .25s, transform .3s ease-out, visibility 0s .3s;
+}
+.viewport__toast.is-info { --kind: var(--ink-mute); }
+.viewport__toast.is-error { --kind: #c94440; color: color-mix(in srgb, #c94440 55%, var(--ink-soft)); }
+.viewport__toast.is-on {
+  opacity: 1;
+  visibility: visible;
+  transform: none;
+  transition: opacity .25s, transform .3s ease-out;
+}
+[data-motion="off"] .viewport__toast { transition: none; }
+@media (prefers-reduced-motion: reduce) { .viewport__toast { transition: none; } }
+
+/* Каркас сборки сцены поверх прошлой модели (stage.js). Модель приглушена,
+   кубик стоит над подписью, там же, где кубик загрузки модели во вьювере */
+.viewport__build {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background: color-mix(in srgb, var(--viewport) 55%, transparent);
+  pointer-events: none;
+  animation: fade-in 200ms ease-out;
+}
+.viewport__build[hidden] { display: none; }
+.viewport__build svg { width: 44px; height: 44px; margin-bottom: 96px; overflow: visible; }
+.viewport__build path {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 1.2;
+  stroke-linejoin: round;
+  stroke-dasharray: 60;
+  stroke-dashoffset: 60;
+  animation: build-edge 2.4s ease-in-out infinite;
+}
+.viewport__build path:nth-child(2) { animation-delay: .2s; }
+.viewport__build path:nth-child(3) { animation-delay: .4s; }
+.viewport__build path:nth-child(4) { animation-delay: .6s; }
+.viewport__build path:nth-child(5) { animation-delay: .8s; }
+.viewport__build path:nth-child(6) { animation-delay: 1s; }
+@keyframes build-edge {
+  40%, 60% { stroke-dashoffset: 0; opacity: 1; }
+  90%, 100% { stroke-dashoffset: 0; opacity: 0; }
+}
+[data-motion="off"] .viewport__build,
+[data-motion="off"] .viewport__build path { animation: none; stroke-dashoffset: 0; }
+@media (prefers-reduced-motion: reduce) {
+  .viewport__build, .viewport__build path { animation: none; stroke-dashoffset: 0; }
+}
 

@@ -7,7 +7,7 @@ import * as api from './api.js';
 import { t } from './i18n.js';
 import { el, button, card, glyph, clone, fillCss } from './sheen-ui.js';
 
-//: Слой, который не светит сам, а режет слои под ним: метка в списке.
+//: Слой, который не светит сам, а режет слои под ним: метка в списке
 const BLEND_BADGES = { mask: 'маска', cut: 'вырезает' };
 
 /**
@@ -38,7 +38,7 @@ export function createLayers(pattern, schema, dlg, { changed, select, refresh, o
     addBtn.classList.toggle('is-active', !addMenu.hidden);
   });
 
-  // Шаблоны - карточки с кадром узора, на месте списка слоёв.
+  // Шаблоны - карточки с кадром узора, на месте списка слоёв
   const presetsBtn = button(t('Шаблоны'), 'tag sheenb__presets-btn');
   const presets = el('div', 'sheenb__presets');
   presets.hidden = true;
@@ -75,7 +75,7 @@ export function createLayers(pattern, schema, dlg, { changed, select, refresh, o
   const list = el('div', 'sheenb__list');
   layersCard.content.append(presets, addMenu, list);
 
-  /** Образец цвета слоя - только показ: цвет меняется в свойствах слоя. */
+  /** Образец цвета слоя - только показ: цвет меняется в свойствах слоя */
   function swatchFor(layer) {
     const chip = el('span', 'sheenb__swatch');
     chip.style.background = fillCss(layer);
@@ -83,7 +83,7 @@ export function createLayers(pattern, schema, dlg, { changed, select, refresh, o
     return chip;
   }
 
-  /** Меню «⋯» строки слоя: только этот слой, копия, удалить. */
+  /** Меню «⋯» строки слоя: только этот слой, копия, удалить */
   let openMenu = null;
   const closeMenu = () => { if (openMenu) openMenu.hidden = true; openMenu = null; };
   dlg.addEventListener('click', closeMenu);
@@ -164,7 +164,7 @@ export function createLayers(pattern, schema, dlg, { changed, select, refresh, o
     changed({ list: true });
   }
 
-  /** Образец выбранного слоя - по его цвету, без перерисовки списка. */
+  /** Образец выбранного слоя - по его цвету, без перерисовки списка */
   function syncSwatch() {
     const layer = pattern.layers[pattern.selected];
     const sw = list.children[pattern.selected]?.querySelector('.sheenb__swatch');

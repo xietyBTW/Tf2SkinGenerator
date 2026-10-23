@@ -1,5 +1,5 @@
-"""Конструктор узора блеска (src/services/sheen_builder.py): слои → кадры,
-библиотека своих узоров и сборка маски по имени из VMT."""
+"""Конструктор узора блеска (src/services/sheen_builder.py): слои -> кадры,
+библиотека своих узоров и сборка маски по имени из VMT"""
 import tempfile
 import unittest
 from pathlib import Path
@@ -38,7 +38,7 @@ class SpecTests(unittest.TestCase):
         self.assertEqual(len(spec["layers"]), sb.MAX_LAYERS)
         stripe = spec["layers"][0]
         self.assertEqual(stripe["width"], 1.5)
-        self.assertEqual(stripe["angle"], 0)             # мусорное направление — вперёд
+        self.assertEqual(stripe["angle"], 0)             # мусорное направление - вперёд
         self.assertGreater(stripe["end"], stripe["start"])
         self.assertEqual(sb.clean_spec(None), {"layers": [], "quality": "medium"})
 
@@ -56,7 +56,7 @@ class SpecTests(unittest.TestCase):
             frames = sb.render({"layers": [layer]}, 30, 3.0)
             if kind != "image":
                 self.assertGreater(max(f[..., 0].max() for f in frames), 100, kind)
-        # Полоса под 90° идёт сверху вниз: в начале прохода горит верх.
+        # Полоса под 90° идёт сверху вниз: в начале прохода горит верх
         layer = sb.new_layer("stripe") | {"angle": 90, "wave": 0, "fade": 0, "width": 0.3}
         early = sb.render({"layers": [layer]}, 41, 3.0)[16][..., 0].astype(int)
         self.assertGreater(early[:40].sum(), early[-40:].sum())
@@ -90,13 +90,13 @@ class SpecTests(unittest.TestCase):
         self.assertGreater(max(f[..., 0].max() for f in frames[30:]), 100)
 
     def test_sparkles_round_on_the_weapon(self):
-        # В маске искра сжата по X в A раз — на оружии игра растянет её обратно.
+        # В маске искра сжата по X в A раз - на оружии игра растянет её обратно
         spec = sb.clean_spec({"layers": [sb.new_layer("sparkle") | {"size": 0.2, "star": 0, "life": 1}]})
         layer = sb._Layer(spec["layers"][0], 128, 512, 4.0)
         layer.pos, layer.birth = np.array([[2.0, 0.5]]), np.array([0.0])
         ys, xs = np.nonzero(layer._sparkles(0.5) > 0.25)
         width, height = np.ptp(xs) + 1, np.ptp(ys) + 1
-        # Маска 128×512 на оружии 4:1 — точка маски квадратная, искра тоже.
+        # Маска 128×512 на оружии 4:1 - точка маски квадратная, искра тоже
         self.assertAlmostEqual(width / height, 1.0, delta=0.35)
 
     def test_image_layer_reveals_picture(self):
@@ -115,7 +115,7 @@ class SpecTests(unittest.TestCase):
 
 
 def _picture(tmp: str, name: str = "logo.png", rgb=(255, 255, 255)) -> str:
-    """Квадрат 20×20 цвета rgb в центре прозрачной картинки 40×40."""
+    """Квадрат 20×20 цвета rgb в центре прозрачной картинки 40×40"""
     from PIL import Image
     img = np.zeros((40, 40, 4), np.uint8)
     img[10:30, 10:30] = (*rgb, 255)
@@ -125,7 +125,7 @@ def _picture(tmp: str, name: str = "logo.png", rgb=(255, 255, 255)) -> str:
 
 
 class LayerOptionsTests(unittest.TestCase):
-    """Смешивание, повторы и настройки картинки."""
+    """Смешивание, повторы и настройки картинки"""
 
     @staticmethod
     def flash(**kw) -> dict:
@@ -137,7 +137,7 @@ class LayerOptionsTests(unittest.TestCase):
 
     def test_mask_shows_layers_below_only_through_it(self):
         with tempfile.TemporaryDirectory() as tmp:
-            # Список сверху вниз: маска над вспышкой.
+            # Список сверху вниз: маска над вспышкой
             spec = {"layers": [self.still(tmp, blend="mask"), self.flash()]}
             mid = sb.render(spec, 30, 1.0)[15][..., 0]
             self.assertGreater(mid[64, 64], 150)                 # сквозь квадрат видно
@@ -178,7 +178,7 @@ class LayerOptionsTests(unittest.TestCase):
             left = frame(pos_x=0.25)
             self.assertGreater(left[64, 32], 150)
             self.assertEqual(left[64, 96], 0)
-            # Негатив: белый квадрат гаснет, прозрачное остаётся тёмным.
+            # Негатив: белый квадрат гаснет, прозрачное остаётся тёмным
             inv = frame(invert="yes")
             self.assertEqual((inv[64, 64], inv[5, 5]), (0, 0))
 
@@ -188,13 +188,13 @@ class LayerOptionsTests(unittest.TestCase):
             mid = sb.render({"layers": [layer]}, 30, 1.0)[15]
             self.assertGreater(mid[64, 64, 0], 150)
             self.assertEqual(int(mid[64, 64, 2]), 0)
-        # Цвета картинки - только у слоя-картинки.
+        # Цвета картинки - только у слоя-картинки
         self.assertEqual(sb.clean_spec({"layers": [{"type": "flash", "fill": "image"}]})
                          ["layers"][0]["fill"], "solid")
 
 
 class PreviewTests(unittest.TestCase):
-    """Превью конструктора: отмена устаревшего расчёта, кэш листа и картинок."""
+    """Превью конструктора: отмена устаревшего расчёта, кэш листа и картинок"""
 
     def test_cancel_stops_rendering(self):
         asked = []
@@ -256,7 +256,7 @@ class LibraryTests(unittest.TestCase):
         self.assertRegex(pid, sl.ID_RE)
         data = sl.load(pid)
         self.assertEqual((data["name"], data["length"]), ("Логотип", 3.0))
-        # Странице — абсолютный путь (миниатюра), на диске — относительный.
+        # Странице - абсолютный путь (миниатюра), на диске - относительный
         stored = Path(data["spec"]["layers"][0]["image"])
         self.assertEqual(stored.parent, sb.library_dir() / "images")
         self.assertIn('"images/', (sb.library_dir() / f"{pid}.json").read_text(encoding="utf-8"))
@@ -281,12 +281,12 @@ class LibraryTests(unittest.TestCase):
         mat.mkdir(parents=True)
         (mat / "gun.vmt").write_text(out, encoding="utf-8")
         self.assertEqual(sp.materialize(root, "console"), 2)
-        # В моде — с отпечатком содержимого узора.
+        # В моде - с отпечатком содержимого узора
         digest = sl.content_hash(pid)
         vtf = root / "materials" / "console" / "tf2sg" / "sheen" / f"{pid}_h{digest}_a30_51.vtf"
         self.assertTrue(vtf.is_file())
         self.assertIn(f"console/tf2sg/sheen/{pid}_h{digest}_a30_51", (mat / "gun.vmt").read_text())
-        # Правка узора — другой отпечаток, другой путь.
+        # Правка узора - другой отпечаток, другой путь
         sl.save(pid, "Две", sb.PRESETS["running"]["spec"], 2.0)
         self.assertNotEqual(sl.content_hash(pid), digest)
         from src.services.vtflib_wrapper import VTFLib
@@ -294,9 +294,9 @@ class LibraryTests(unittest.TestCase):
         self.assertEqual((len(frames), h, w), (51, *sb.mask_shape(3.0, "medium")))
 
     def test_image_survives_relative_work_dir(self):
-        # Баг 2026-10-13: в приложении папка работ относительная ("work"),
+        # В приложении папка работ относительная ("work"),
         # путь картинки уходил странице относительным и при следующем превью
-        # искался внутри библиотеки - картинка пропадала из превью и игры.
+        # искался внутри библиотеки - картинка пропадала из превью и игры
         import os
         from PIL import Image
         pic = Path(self.tmp.name) / "photo.png"
@@ -338,7 +338,7 @@ class LibraryTests(unittest.TestCase):
 
     def test_vertical_weapon_gets_rotated_side_stencil(self):
         # Кунай: длина по Z. Своя маска - трафарет сбоку (направление 0, X и Z),
-        # повёрнутый; раскладка закреплена своими прокси после игрового.
+        # повёрнутый, раскладка закреплена своими прокси после игрового
         import struct
         mdl = bytearray(300)
         mdl[:4] = b'IDST'
@@ -385,7 +385,7 @@ class LibraryTests(unittest.TestCase):
         bad.write_text("<svg></svg>")
         with self.assertRaises(ValueError):
             sl.save("", "x", {"layers": [sb.new_layer("image") | {"image": str(bad)}]}, 2.0)
-        # В отрисовке — пустой слой, а не упавшая сборка.
+        # В отрисовке - пустой слой, а не упавшая сборка
         frames = sb.render({"layers": [sb.new_layer("image") | {"image": str(bad)}]}, 30, 3.0)
         self.assertEqual(max(f[..., 0].max() for f in frames), 0)
 

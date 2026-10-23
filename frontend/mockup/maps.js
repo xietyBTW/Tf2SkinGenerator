@@ -1,16 +1,16 @@
 /*
- * Карты материала: normal, phong, самосвечение и прочее поверх базовой текстуры.
+ * Карты материала: normal, phong, самосвечение и прочее поверх базовой текстуры
  *
  * Схему - какие карты бывают и что у каждой настраивается - отдаёт Python.
  * Список параметров и форматов на странице НЕ дублируется, иначе он разъедется
- * с генератором VTF.
+ * с генератором VTF
  *
  * Окно в две колонки: слева все карты строкой (галка, название, откуда
  * карта), справа одна выбранная целиком. Откуда карта берётся - один
- * переключатель «Файл / Авто / Конструктор / Из мода»: раньше это были три
- * разные галки и поле файла, и было неясно, что из них победит.
+ * переключатель «Файл / Авто / Конструктор / Из мода», чтобы не гадать, какая
+ * из галок победит
  *
- * Запись карты для сессии та же, что и раньше (`collect`): {image} | {derive,
+ * Запись карты для сессии (`collect`): {image} | {derive,
  * threshold} | {generate} | {mod} | {enabled} плюс числа карты и её свои
  * настройки (`settings`: цвет блика, маска обводки).
  */
@@ -28,12 +28,12 @@ export const mapsDlg = document.getElementById('maps');
 const nav = document.getElementById('maps-nav');
 const pane = document.getElementById('maps-pane');
 
-//: Последняя выбранная карта: окно открывают, чтобы поправить ту же.
+//: Последняя выбранная карта: окно открывают, чтобы поправить ту же
 let lastSelected = null;
-//: Материал открытого окна - превью свечения берёт его текстуру.
+//: Материал открытого окна - превью свечения берёт его текстуру
 let openMaterial = '';
 
-/** Состояние одной карты из сохранённой записи. */
+/** Состояние одной карты из сохранённой записи */
 function stateOf(spec, saved) {
   const sources = [];
   if (!spec.vmt_only) {
@@ -55,7 +55,7 @@ function stateOf(spec, saved) {
   // Своя настройка, которой нет в сохранённой записи, у уже включённой карты
   // (старая работа, карта мода) - «как у материала», а не значение по
   // умолчанию: иначе первое же «Применить» поменяло бы материал, хотя
-  // человек этого не выбирал (rim light снял бы родную маску обводки).
+  // человек этого не выбирал (rim light снял бы родную маску обводки)
   const fresh = !Object.keys(saved).length;
   const settings = {};
   for (const f of spec.settings) settings[f.key] = saved[f.key] ?? (fresh ? f.default : undefined);
@@ -70,7 +70,7 @@ function stateOf(spec, saved) {
     threshold: saved.threshold ?? '',
     numbers,
     // Числа, что уже стояли в записи или тронуты руками. У карты мода уходят
-    // только они: умолчание страницы ($phongboost 2) удвоило бы блик мода.
+    // только они: умолчание страницы ($phongboost 2) удвоило бы блик мода
     touched: new Set(Object.keys(saved).filter((k) => k.startsWith('$'))),
     settings,
     generate: saved.generate || null,
@@ -78,12 +78,12 @@ function stateOf(spec, saved) {
   };
 }
 
-/** Запись карты для сессии или null (выключена / включена без источника). */
+/** Запись карты для сессии или null (выключена / включена без источника) */
 function collect(st) {
   if (!st.on) return null;
   let entry;
   if (st.spec.vmt_only) {
-    // Карта мода, которую не правили, остаётся как в моде; правленая - своя.
+    // Карта мода, которую не правили, остаётся как в моде, правленая - своя
     entry = st.mod ? { enabled: true, mod: true } : { enabled: true, ...visibleSettings(st) };
   }
   else if (st.source === 'auto') {
@@ -103,12 +103,12 @@ function collect(st) {
   return entry;
 }
 
-/** Видна ли настройка при текущих значениях остальных (`show_if`). */
+/** Видна ли настройка при текущих значениях остальных (`show_if`) */
 const shown = (st, field) => !field.show_if
   || Object.entries(field.show_if).every(([key, value]) => (Array.isArray(value)
     ? value.includes(st.settings[key]) : st.settings[key] === value));
 
-/** Настройки, которые сейчас имеют смысл: скрытые (не тот режим) не уходят. */
+/** Настройки, которые сейчас имеют смысл: скрытые (не тот режим) не уходят */
 function visibleSettings(st) {
   const out = {};
   for (const f of st.spec.settings) {
@@ -118,13 +118,13 @@ function visibleSettings(st) {
   return out;
 }
 
-/** Подпись выбранного варианта первой настройки-выбора - для строки списка. */
+/** Подпись выбранного варианта первой настройки-выбора - для строки списка */
 function choiceLabel(st) {
   const field = st.spec.settings.find((f) => f.kind === 'choice');
   return field?.choices.find((c) => c.value === st.settings[field.key])?.label;
 }
 
-/** Короткое «откуда карта» для строки списка. */
+/** Короткое «откуда карта» для строки списка */
 function statusOf(st, ui, schema) {
   if (!st.on) return ui.off;
   if (st.spec.vmt_only) return st.mod ? schema.from_mod : (choiceLabel(st) || ui.on);
@@ -141,10 +141,10 @@ function el(tag, className, text) {
   return node;
 }
 
-/** Левая колонка: строка на карту. Щелчок выбирает, галка включает. */
+/** Левая колонка: строка на карту. Щелчок выбирает, галка включает */
 function renderNav(states, schema, select) {
   nav.replaceChildren(...states.map((st) => {
-    // `check` - та же галочка, что во всём приложении, а не браузерная.
+    // `check` - та же галочка, что во всём приложении, а не браузерная
     const row = el('div', 'check maprow' + (st === select.current ? ' is-active' : '')
                           + (st.on ? ' is-on' : ''));
     const check = el('input');
@@ -166,7 +166,7 @@ function renderNav(states, schema, select) {
   }));
 }
 
-/** Правая колонка: выбранная карта целиком. */
+/** Правая колонка: выбранная карта целиком */
 function renderPane(st, schema, touch) {
   const ui = schema.ui;
   const head = el('div', 'mappane__head');
@@ -183,7 +183,7 @@ function renderPane(st, schema, touch) {
   const body = el('div', 'mappane__body' + (st.on ? '' : ' is-off'));
   if (st.spec.tip) body.append(el('p', 'mapcard__tip mappane__tip', st.spec.tip));
 
-  // Любая правка включает карту: человек настраивает её, чтобы она была.
+  // Любая правка включает карту: человек настраивает её, чтобы она была
   const edit = () => { if (!st.on) { st.on = true; on.checked = true; body.classList.remove('is-off'); } touch(true); };
 
   if (st.sources.length > 1) {
@@ -202,8 +202,8 @@ function renderPane(st, schema, touch) {
 
   if (!st.spec.vmt_only) body.append(sourceView(st, schema, edit, () => touch(false)));
   if (st.spec.settings.length) {
-    // У параметрической карты из мода правка делает её своей; у карты с
-    // текстурой источник «из мода» остаётся - меняются только настройки.
+    // У параметрической карты из мода правка делает её своей, у карты с
+    // текстурой источник «из мода» остаётся - меняются только настройки
     body.append(settingsView(st, schema, () => {
       if (st.spec.vmt_only) st.mod = null;
       edit();
@@ -238,7 +238,7 @@ function renderPane(st, schema, touch) {
     }
     body.append(params);
   }
-  // Превью карты - после всех полей: оно читает их на каждом кадре.
+  // Превью карты - после всех полей: оно читает их на каждом кадре
   const preview = mapPreview(st, schema, openMaterial);
   if (preview) {
     body.append(preview.node);
@@ -248,7 +248,7 @@ function renderPane(st, schema, touch) {
 }
 
 /** Содержимое выбранного источника. `redraw` - перерисовать панель целиком
- * (новый файл - новое превью). */
+ * (новый файл - новое превью) */
 function sourceView(st, schema, edit, redraw) {
   const ui = schema.ui;
   if (st.source === 'mod') {
@@ -275,7 +275,7 @@ function sourceView(st, schema, edit, redraw) {
     return box;
   }
   if (st.source === 'gen') {
-    // Конструктор живёт, пока открыто окно: переключение карт его не сбрасывает.
+    // Конструктор живёт, пока открыто окно: переключение карт его не сбрасывает
     if (!st.editor) {
       st.editor = st.spec.generator === 'phongwarp'
         ? phongwarpEditor(schema.phongwarp, st.generate, () => edit())
@@ -288,11 +288,11 @@ function sourceView(st, schema, edit, redraw) {
 }
 
 /** Свои настройки карты: выбор - переключателем, сила - ползунком, порог -
- * числом, цвет - палитрой, файл - полем с превью. */
+ * числом, цвет - палитрой, файл - полем с превью */
 function settingsView(st, schema, edit, redraw) {
   const box = el('div', 'mappane__settings');
   // Соседние простые поля (числа, ползунки, цвет) - одной строкой, а не
-  // столбиком; переключатель или поле файла начинают новую.
+  // столбиком, переключатель или поле файла начинают новую
   let line = null;
   for (const f of st.spec.settings) {
     if (!shown(st, f)) continue;
@@ -303,7 +303,7 @@ function settingsView(st, schema, edit, redraw) {
       for (const c of f.choices) {
         const b = el('button', c.value === value ? 'is-active' : '', c.label);
         b.type = 'button';
-        // Выбор меняет набор полей ниже - панель перерисовывается.
+        // Выбор меняет набор полей ниже - панель перерисовывается
         b.addEventListener('click', () => { st.settings[f.key] = c.value; edit(); redraw(); });
         seg.append(b);
       }
@@ -311,7 +311,7 @@ function settingsView(st, schema, edit, redraw) {
       row.append(el('span', 'label label--inline', f.label), seg);
       row.title = f.tip || '';
       box.append(row);
-      // Пояснение о последствиях выбора - видно сразу, а не только при наведении.
+      // Пояснение о последствиях выбора - видно сразу, а не только при наведении
       if (f.note && value && value !== f.default) box.append(el('p', 'mapcard__tip mappane__warn', f.note));
     } else if (f.kind === 'file') {
       const row = el('div', 'mappane__auto');
@@ -325,7 +325,7 @@ function settingsView(st, schema, edit, redraw) {
       cell.append(el('span', 'label label--inline', f.label));
       cell.title = f.tip || '';
       // Не тронутое («как у материала») показывается подсказкой `display`,
-      // но в запись не уходит.
+      // но в запись не уходит
       const untouched = value === undefined || String(value).trim() === '';
       const shownValue = String(untouched ? (f.display ?? f.default ?? '') : value);
       let input;
@@ -341,7 +341,7 @@ function settingsView(st, schema, edit, redraw) {
         input.max = String(f.max);
         input.step = String(f.step || 1);
         input.value = shownValue;
-        // Не тронут - значение приглушено: в материал оно не пишется.
+        // Не тронут - значение приглушено: в материал оно не пишется
         const out = el('span', 'mono lwarp__value' + (untouched ? ' is-default' : ''), shownValue);
         input.addEventListener('input', () => {
           out.textContent = input.value;
@@ -354,7 +354,7 @@ function settingsView(st, schema, edit, redraw) {
         input.min = String(f.min);
         input.max = String(f.max);
         input.step = String(f.step || 1);
-        // Пустое - как у материала; подсказка показывает обычное значение.
+        // Пустое - как у материала, подсказка показывает обычное значение
         input.placeholder = untouched ? String(f.display ?? `${f.min}-${f.max}`) : '';
         input.value = untouched ? '' : shownValue;
         cell.append(input);
@@ -376,7 +376,7 @@ function settingsView(st, schema, edit, redraw) {
   return box;
 }
 
-/** Шар карточки «Блик»: края блика и цвет - из текущих настроек. */
+/** Шар карточки «Блик»: края блика и цвет - из текущих настроек */
 function phongPreview(st, schema) {
   const num = (key, fallback) => {
     const v = parseFloat(st.settings[key]);
@@ -392,7 +392,7 @@ function phongPreview(st, schema) {
   return sphere.node;
 }
 
-/** Поле файла: превью, «Выбрать», «Убрать»; картинку можно бросить на поле. */
+/** Поле файла: превью, «Выбрать», «Убрать», картинку можно бросить на поле */
 function fileZone(path, dropText, onSet) {
   const zone = el('div', 'mappane__drop' + (path ? ' has-file' : ''));
   if (path) zone.append(thumb(api.fileUrl(path, true)));
@@ -451,7 +451,7 @@ export async function openMaterialMaps() {
       lastSelected = st.spec.id;
       renderNav(states, schema, select);
       renderPane(st, schema, (repaint) => {
-        // Правка поля - только строка слева; смена источника - и правая.
+        // Правка поля - только строка слева, смена источника - и правая
         if (repaint) renderNav(states, schema, select);
         else select.show(st);
       });

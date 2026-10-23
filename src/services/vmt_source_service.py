@@ -1,14 +1,11 @@
 """
-Откуда берётся VMT для правки и как сохраняется правка (без Qt).
+Откуда берётся VMT для правки и как сохраняется правка
 
-Раньше это жило в ``MainWindowVmtMixin`` вперемешку с показом предупреждений,
-а сохранение — в теле диалога. Логика при этом не про виджеты: какой ключ у
-предмета, где лежит оригинал в игровых VPK, что дописать при сохранении.
-Вынесено сюда, чтобы тем же путём пользовалась веб-страница — иначе правила
-пришлось бы написать второй раз и они разъехались бы.
+Логика не про виджеты: какой ключ у предмета, где лежит оригинал в игровых
+VPK, что дописать при сохранении
 
-Хранение правок остаётся в ``EditedVMTService``; здесь — их источник и
-политика сохранения.
+Хранение правок остаётся в ``EditedVMTService``; здесь - их источник и
+политика сохранения
 """
 
 from __future__ import annotations
@@ -22,7 +19,7 @@ from src.shared.logging_config import get_logger
 logger = get_logger(__name__)
 
 #: Дописывается один раз при сохранении. Не косметика: по нему в чужом моде
-#: видно, чем он собран.
+#: видно, чем он собран
 WATERMARK = ("// made on Tf2SkinGenerator "
              "https://steamcommunity.com/id/sosatihackeri - Developer(xiety)")
 
@@ -30,12 +27,12 @@ WATERMARK = ("// made on Tf2SkinGenerator "
 def resolve_target(mode: str, hat_mdl: Optional[str] = None,
                    hat_display: Optional[str] = None) -> Optional[Tuple[str, str]]:
     """
-    (ключ, отображаемое имя) для правки VMT — либо None, если режим не годится.
+    (ключ, отображаемое имя) для правки VMT - либо None, если режим не годится
 
-    Ключ у каждого вида предмета свой: у шапки — нормализованный путь MDL, у
-    рук — модель предплечья, у персонажа — путь MDL, у оружия — ключ из режима.
+    Ключ у каждого вида предмета свой: у шапки - нормализованный путь MDL, у
+    рук - модель предплечья, у персонажа - путь MDL, у оружия - ключ из режима.
     По нему же ищется сохранённая правка, поэтому ошибка тут означает «правка
-    потерялась».
+    потерялась»
     """
     from src.data.player_characters import PLAYER_BODY_MODE_KEYS, PLAYER_CHARACTERS
     from src.data.player_hands import HAND_MODE_KEYS, HAND_MODES
@@ -57,8 +54,8 @@ def resolve_target(mode: str, hat_mdl: Optional[str] = None,
     if mode in PLAYER_BODY_MODE_KEYS:
         # Путь MDL: под ним превью кладёт разобранную модель в кэш
         # (model_key_for), и по нему же редактор находит $cdmaterials. Поле
-        # `mdl_key`, которое тут читалось, из данных персонажей давно убрали —
-        # и у тел классов редактор VMT молча был недоступен.
+        # `mdl_key`, которое тут читалось, из данных персонажей давно убрали -
+        # и у тел классов редактор VMT молча был недоступен
         mdl = PLAYER_CHARACTERS.get(mode, {}).get('mdl_path', '')
         return (mdl, mdl) if mdl else None
 
@@ -69,7 +66,7 @@ def resolve_target(mode: str, hat_mdl: Optional[str] = None,
 def extract_original(mode: str, weapon_key: str, tf2_root_dir: str,
                      material_name: Optional[str] = None,
                      language: str = 'en') -> Optional[str]:
-    """Путь к извлечённому из игры оригиналу VMT (шапки и остальное)."""
+    """Путь к извлечённому из игры оригиналу VMT (шапки и остальное)"""
     if mode == 'hat':
         return _extract_hat_vmt(weapon_key, tf2_root_dir, material_name)
     return extract_weapon_vmt(weapon_key, tf2_root_dir, material_name, language)
@@ -79,10 +76,10 @@ def original_content(mode: str, weapon_key: str, tf2_root_dir: str,
                      material_name: Optional[str] = None,
                      language: str = 'en') -> Optional[str]:
     """
-    СОДЕРЖИМОЕ игрового оригинала.
+    СОДЕРЖИМОЕ игрового оригинала
 
     Нужно для «вернуть как в игре», когда открыта уже сохранённая правка: без
-    него сбросом вернулась бы сама правка.
+    него сбросом вернулась бы сама правка
     """
     path = extract_original(mode, weapon_key, tf2_root_dir, material_name, language)
     if not (path and os.path.exists(path)):
@@ -97,13 +94,13 @@ def original_content(mode: str, weapon_key: str, tf2_root_dir: str,
 def _extract_hat_vmt(hat_mdl: str, tf2_root_dir: str,
                      material_name: Optional[str] = None) -> Optional[str]:
     """
-    VMT шапки через $cdmaterials из кэшированного QC (общий путь с оружием).
+    VMT шапки через $cdmaterials из кэшированного QC (общий путь с оружием)
     """
     from src.services import decompile_cache, qc_skin_parser
 
     qc_path = decompile_cache.find_cached_qc_for_weapon(hat_mdl)
     if not qc_path:
-        # Нет кэша — без декомпиляции путь к материалам неизвестен.
+        # Нет кэша - без декомпиляции путь к материалам неизвестен
         return None
 
     rows = qc_skin_parser.parse_texturegroup_rows(qc_path)
@@ -124,10 +121,10 @@ def extract_weapon_vmt(weapon_key: str, tf2_root_dir: str,
                        material_name: Optional[str] = None,
                        language: str = 'en') -> Optional[str]:
     """
-    Оригинальный VMT оружия через $cdmaterials из QC.
+    Оригинальный VMT оружия через $cdmaterials из QC
 
     Папки материалов берём из декомпилированной модели (авторитетно), а не
-    угадываем: QC обычно уже в кэше после превью, иначе декомпилируем на месте.
+    угадываем: QC обычно уже в кэше после превью, иначе декомпилируем на месте
     """
     import glob
 
@@ -135,7 +132,7 @@ def extract_weapon_vmt(weapon_key: str, tf2_root_dir: str,
 
     qc_path = decompile_cache.find_cached_qc_for_weapon(weapon_key)
     if not qc_path:
-        # Класс в имени режима здесь не важен — нужна только модель.
+        # Класс в имени режима здесь не важен - нужна только модель
         try:
             from src.services.extract_model_service import ExtractModelService
             ok, _msg, _cancel, data = (
@@ -164,10 +161,10 @@ def extract_weapon_vmt(weapon_key: str, tf2_root_dir: str,
 
 def _material_order(material_name: Optional[str], skin0: List[str]) -> List[str]:
     """
-    Порядок поиска VMT: сначала свой материал, потом материалы skin0.
+    Порядок поиска VMT: сначала свой материал, потом материалы skin0
 
     Так работает правило наследования: у добавленной пользователем текстуры
-    своего VMT в игре нет, и основой становится VMT главного материала.
+    своего VMT в игре нет, и основой становится VMT главного материала
     """
     if not material_name:
         return list(skin0)
@@ -177,7 +174,7 @@ def _material_order(material_name: Optional[str], skin0: List[str]) -> List[str]
 
 def _extract_from_qc(qc_path: str, tf2_root_dir: str,
                      mat_names: List[str]) -> Optional[str]:
-    """Ищет VMT в игровых VPK по $cdmaterials модели и кладёт во временный файл."""
+    """Ищет VMT в игровых VPK по $cdmaterials модели и кладёт во временный файл"""
     from src.services import qc_skin_parser
     from src.services.game_vpk_reader import GameVpkReader
     from src.services.tf2_paths import TF2Paths
@@ -195,7 +192,7 @@ def _extract_from_qc(qc_path: str, tf2_root_dir: str,
     textures_vpk = TF2Paths.resolve_textures_vpk(tf2_root_dir)
 
     # Хэндлы VPK берутся из общего кэша: каталог парсится один раз на поток,
-    # повторные открытия редактора мгновенны. Закрывать их нельзя.
+    # повторные открытия редактора мгновенны. Закрывать их нельзя
     vmt_content: Optional[str] = None
     vmt_filename = 'material.vmt'
     with GameVpkReader([misc_vpk, textures_vpk]) as reader:
@@ -211,7 +208,7 @@ def _extract_from_qc(qc_path: str, tf2_root_dir: str,
         return None
 
     # Папка данных, а не текущая: в собранном приложении они разные, и
-    # относительный путь писал бы туда, откуда запустили (или падал).
+    # относительный путь писал бы туда, откуда запустили (или падал)
     from src.shared.constants import DirectoryPaths
     temp_dir = str(DirectoryPaths.TEMP_VMT_EXTRACT_DIR)
     os.makedirs(temp_dir, exist_ok=True)
@@ -220,7 +217,7 @@ def _extract_from_qc(qc_path: str, tf2_root_dir: str,
         # newline='' - перевод строки как в игре (CRLF). В текстовом режиме
         # Windows дописывал свой CR: выходило CR CR LF, и при чтении каждая
         # строка VMT удваивалась - редактор показывал файл через строку, и
-        # так же сохранялась правка.
+        # так же сохранялась правка
         with open(out_path, 'w', encoding='utf-8', newline='') as f:
             f.write(vmt_content)
         return out_path
@@ -232,16 +229,16 @@ def save_edit(edit_key: str, content: str,
               original: Optional[str] = None,
               lang: str = 'ru') -> Tuple[bool, str, str]:
     """
-    Сохраняет правку VMT.
+    Сохраняет правку VMT
 
     Сломанный синтаксис не сохраняем: в игре такой материал становится
-    невидимым, а причина находится далеко от места ошибки.
+    невидимым, а причина находится далеко от места ошибки
 
-    Игровой оригинал фиксируется бэкапом ОДИН раз — иначе «вернуть как в игре»
-    после второй правки вернуло бы первую.
+    Игровой оригинал фиксируется бэкапом ОДИН раз - иначе «вернуть как в игре»
+    после второй правки вернуло бы первую
 
     Returns:
-        (успех, сообщение об ошибке, содержимое с ватермарком).
+        (успех, сообщение об ошибке, содержимое с ватермарком)
     """
     from src.services.edited_vmt_service import EditedVMTService
     from src.services.vmt_service import VMTService

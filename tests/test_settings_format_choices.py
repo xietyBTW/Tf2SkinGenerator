@@ -1,8 +1,8 @@
-"""Пер-режимный фильтр списка VTF-форматов (src/domain/format_choices.py).
+"""Пер-режимный фильтр списка VTF-форматов (src/domain/format_choices.py)
 
-Чистая логика без Qt: резолвер допустимого набора (источник истины — сервис
+Чистая логика без Qt: резолвер допустимого набора (источник истины - сервис
 режима) + план перезаполнения комбобокса, включая edge-case «crit после skybox»
-(полный список должен вернуться, иначе DXT5 недоступен).
+(полный список должен вернуться, иначе DXT5 недоступен)
 """
 import unittest
 
@@ -35,7 +35,7 @@ class AllowedFormatsForModeTests(unittest.TestCase):
 class AllowedFlagsForModeTests(unittest.TestCase):
     def test_skybox_shows_only_pointsample(self):
         """Остальные флаги/опции к граням неба не относятся: CLAMP и мипы
-        сервис ставит сам, normal/reflectivity/gamma не про шейдер sky."""
+        сервис ставит сам, normal/reflectivity/gamma не про шейдер sky"""
         allowed = allowed_flags_for_mode(SKYBOX_MODE)
         self.assertEqual(allowed, ["POINTSAMPLE"])
         self.assertEqual(allowed, list(SKYBOX_ALLOWED_FLAGS))
@@ -52,7 +52,7 @@ class PlanFormatChoicesTests(unittest.TestCase):
         plan = plan_format_choices(VTF_FORMATS, "DXT5", list(SKYBOX_ALLOWED_FORMATS))
         target, idx = plan
         self.assertEqual(target, list(SKYBOX_ALLOWED_FORMATS))
-        # DXT5 не входит в skybox-набор → первый элемент
+        # DXT5 не входит в skybox-набор -> первый элемент
         self.assertEqual(idx, 0)
 
     def test_preserves_valid_selection(self):

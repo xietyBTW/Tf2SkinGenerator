@@ -18,29 +18,28 @@ def _normal_settings(options):
 
 
 class TextureService:
-    # Маппинг читаемых имён форматов → внутренние идентификаторы.
-    # Используется и VTFLib-путём (_map_format_to_vtflib) и VTFCmd-путём (create_vtf).
+    # Маппинг читаемых имён форматов -> внутренние идентификаторы.
+    # Используется и VTFLib-путём (_map_format_to_vtflib) и VTFCmd-путём (create_vtf)
     _FORMAT_ALIASES: dict = {
         "RGB888 Bluescreen":    "RGB888_BLUESCREEN",
         "BGR888 Bluescreen":    "BGR888_BLUESCREEN",
         "DXT1 With One Bit Alpha": "DXT1_ONEBITALPHA",
     }
 
-    # UI-имя флага → бит VTFImageFlags (VTFLib-путь). Флаги вне таблицы
-    # игнорируются — как и раньше в elif-цепочке.
+    # UI-имя флага -> бит VTFImageFlags (VTFLib-путь). Флаги вне таблицы
+    # игнорируются
     _VTFLIB_FLAG_BITS: dict = {
         "CLAMPS": VTFImageFlags.CLAMPS,
         "CLAMPT": VTFImageFlags.CLAMPT,
         "NOMIP": VTFImageFlags.NOMIP,
         "NOLOD": VTFImageFlags.NOLOD,
-        # «No Minimum Mipmap» = TEXTUREFLAGS_ALL_MIPS (0x400). Раньше в
-        # VTFLib-пути не обрабатывался → галка была пустышкой.
+        # «No Minimum Mipmap» = TEXTUREFLAGS_ALL_MIPS (0x400)
         "NOMINMIP": VTFImageFlags.ALL_MIPS,
         "POINTSAMPLE": VTFImageFlags.POINTSAMPLE,
         "TRILINEAR": VTFImageFlags.TRILINEAR,
         "ANISOTROPIC": VTFImageFlags.ANISOTROPIC,
         "SRGB": VTFImageFlags.SRGB,
-        # Нормаль: без флага VTFLib-путь (анимация) писал её как цвет.
+        # Нормаль: без флага VTFLib-путь (анимация) писал её как цвет
         "NORMAL": VTFImageFlags.NORMAL,
         "NODEBUGOVERRIDE": VTFImageFlags.NODEBUGOVERRIDE,
         "SINGLECOPY": VTFImageFlags.SINGLECOPY,
@@ -51,8 +50,8 @@ class TextureService:
         "BORDER": VTFImageFlags.BORDER,
     }
 
-    # UI-имя флага → аргумент VTFCmd -flag. Всё, чего нет в таблице,
-    # передаётся как flag.lower() (совпадает для остальных флагов).
+    # UI-имя флага -> аргумент VTFCmd -flag. Всё, чего нет в таблице,
+    # передаётся как flag.lower() (совпадает для остальных флагов)
     _VTFCMD_FLAG_ALIASES: dict = {
         "NOMINMIP": "minmip",
     }
@@ -71,17 +70,17 @@ class TextureService:
         contrast: bool = True,
     ) -> str:
         """
-        Строит карту эффекта ИЗ базовой текстуры (без участия пользователя).
+        Строит карту эффекта ИЗ базовой текстуры (без участия пользователя)
 
         kind:
-          • "phong"     → RGBA: RGB = яркость (карта экспоненты: светлое → острый
-                          блик), ALPHA = 255 (маска rim light). Маска блеска —
+          • "phong"     -> RGBA: RGB = яркость (карта экспоненты: светлое -> острый
+                          блик), ALPHA = 255 (маска rim light). Маска блеска -
                           в альфе нормали, не здесь.
-          • "selfillum" → L (grayscale): маска свечения по яркости / порогу.
+          • "selfillum" -> L (grayscale): маска свечения по яркости / порогу
 
-        threshold: 0..255 — если задан, маска бинаризуется по этому порогу
-                   (блестит/светится только то, что ярче). None → плавно.
-        contrast:  авто-контраст яркости (растягивает динамику).
+        threshold: 0..255 - если задан, маска бинаризуется по этому порогу
+                   (блестит/светится только то, что ярче). None -> плавно.
+        contrast:  авто-контраст яркости (растягивает динамику)
         """
         img = Image.open(base_image_path).convert("RGB")
         if size:
@@ -96,16 +95,16 @@ class TextureService:
             return src.point(lambda p: 255 if p >= threshold else 0)
 
         if kind == "phong":
-            # $phongexponenttexture (вики Valve): R — размер блика, G — маска
-            # $phongalbedotint, A — маска rim light ($rimmask). ГДЕ блестит —
-            # не здесь, а в альфе нормали (её кладёт сборка). Альфа 255 —
-            # обводка не обрезается.
+            # $phongexponenttexture (вики Valve): R - размер блика, G - маска
+            # $phongalbedotint, A - маска rim light ($rimmask). ГДЕ блестит -
+            # не здесь, а в альфе нормали (её кладёт сборка). Альфа 255 -
+            # обводка не обрезается
             full = Image.new("L", gray.size, 255)
             out = Image.merge("RGBA", (gray, gray, gray, full))
         elif kind == "selfillum":
             out = _mask(gray).convert("L")
         elif kind == "envmapmask":
-            # Маска отражения кубмапа: светлое/металл (или ярче порога) блестит сильнее.
+            # Маска отражения кубмапа: светлое/металл (или ярче порога) блестит сильнее
             out = _mask(gray).convert("L")
         else:
             out = gray
@@ -117,10 +116,10 @@ class TextureService:
     def write_normal_vtf(image_path, vtf_output_path: Path, normal_base: str,
                          format_type: str, options: Optional[dict] = None,
                          stock_normal=None) -> Optional[Path]:
-        """{normal_base}_normal.vtf из картинки (normal_map) — путь или None.
+        """{normal_base}_normal.vtf из картинки (normal_map) - путь или None
 
-        Флаг NORMAL — как у нормалей Valve: движок не трактует её как цвет.
-        Формат свой (DXT5/без потерь), а не как у базы.
+        Флаг NORMAL - как у нормалей Valve: движок не трактует её как цвет.
+        Формат свой (DXT5/без потерь), а не как у базы
         """
         from src.services import normal_map
 
@@ -142,7 +141,7 @@ class TextureService:
 
     @staticmethod
     def write_normal_png(image_path, out_png_path, settings=None, stock_normal=None) -> str:
-        """Карта нормалей картинки в PNG (normal_map) — для сборки и авто-нормали."""
+        """Карта нормалей картинки в PNG (normal_map) - для сборки и авто-нормали"""
         import numpy as np
         from src.services import normal_map
 
@@ -172,10 +171,10 @@ class TextureService:
 
     @staticmethod
     def _animation_info(input_path: str, max_frames: int = 512) -> Tuple[int, bool]:
-        """(сколько кадров берём, есть ли прозрачность) — по метаданным, без декода.
+        """(сколько кадров берём, есть ли прозрачность) - по метаданным, без декода
 
         Альфа определяется по источнику, а не по декодированным кадрам: иначе
-        пришлось бы держать их все в памяти ради одного bool.
+        пришлось бы держать их все в памяти ради одного bool
         """
         with Image.open(input_path) as img:
             n_frames = int(getattr(img, "n_frames", 1))
@@ -197,20 +196,20 @@ class TextureService:
         normal_settings=None,
         stock_normal=None,
     ) -> "object":
-        """Отдаёт кадры RGBA по одному (пик памяти — один кадр, не вся гифка).
+        """Отдаёт кадры RGBA по одному (пик памяти - один кадр, не вся гифка)
 
         Задержки кадров дописываются в durations_out: в VTF частота одна на всю
-        анимацию, поэтому fps считается по ним ПОСЛЕ обхода (см. _fps_from_durations).
+        анимацию, поэтому fps считается по ним ПОСЛЕ обхода (см. _fps_from_durations)
 
-        as_normal=True — каждый кадр превращается в карту нормалей (normal_map,
-        уже после ресайза — как и в статичном пути).
+        as_normal=True - каждый кадр превращается в карту нормалей (normal_map,
+        уже после ресайза - как и в статичном пути)
         """
         import numpy as np
         from src.services import normal_map
 
         settings = normal_settings or normal_map.NormalSettings()
         if as_normal and stock_normal is not None:
-            # Родная нормаль к размеру кадра — один раз, а не на каждом кадре.
+            # Родная нормаль к размеру кадра - один раз, а не на каждом кадре
             stock_normal = np.asarray(Image.fromarray(stock_normal, "RGBA").resize(
                 tuple(size), Image.BILINEAR))
         with Image.open(input_path) as img:
@@ -225,11 +224,11 @@ class TextureService:
 
     @staticmethod
     def _fps_from_durations(durations: list) -> int:
-        """Средний fps по задержкам кадров.
+        """Средний fps по задержкам кадров
 
-        Раньше брался duration ПЕРВОГО кадра — у гифок с переменными задержками
-        скорость в игре получалась неверной. Задержка < 20 мс трактуется как
-        100 мс: так делают браузеры и так размечена масса гифок в вебе.
+        Не по первому кадру: у гифок с переменными задержками скорость в игре
+        вышла бы неверной. Задержка < 20 мс трактуется как
+        100 мс: так делают браузеры и так размечена масса гифок в вебе
         """
         vals = [d if d >= 20 else 100 for d in durations] or [100]
         avg_ms = sum(vals) / len(vals)
@@ -270,21 +269,21 @@ class TextureService:
         if options is None:
             options = {}
 
-        # options["normal"] → на выходе многокадровая КАРТА НОРМАЛЕЙ той же
-        # анимации (VTFCmd -normal тут неприменим: он умеет только один кадр).
+        # options["normal"] -> на выходе многокадровая КАРТА НОРМАЛЕЙ той же
+        # анимации (VTFCmd -normal тут неприменим: он умеет только один кадр)
         as_normal = bool(options.get("normal", False))
 
         count, has_alpha = TextureService._animation_info(input_path)
         if count < 1:
             raise RuntimeError("No frames extracted")
         if as_normal:
-            # Альфа нормали — маска блеска родной нормали, если она есть.
+            # Альфа нормали - маска блеска родной нормали, если она есть
             has_alpha = stock_normal is not None
 
         dest_format = TextureService._map_format_to_vtflib(format_type, has_alpha=has_alpha)
         vtf_flags = TextureService._map_flags_to_vtflib(flags, options)
         # Многокадровая VTF создаётся без мип-уровней (vlImageCreate, bMipmaps=0),
-        # поэтому движку это надо сообщить флагами — иначе он ждёт мипы, которых нет.
+        # поэтому движку это надо сообщить флагами - иначе он ждёт мипы, которых нет
         vtf_flags |= VTFImageFlags.NOMIP | VTFImageFlags.NOLOD
         generate_thumbnail = not options.get("nothumbnail", False)
 
@@ -323,11 +322,11 @@ class TextureService:
         flags: List[str], vtf_options: dict = None, drop_normal: bool = False
     ) -> Tuple[List[str], dict]:
         """
-        Парсит флаги VTF и сливает их с UI-опциями.
+        Парсит флаги VTF и сливает их с UI-опциями
 
-        UI-опции применяются первыми, опции из флагов — поверх (могут
-        переопределить). drop_normal=True убирает ключ 'normal' — для
-        доп./BLU/variant материалов, где normal-map не применяется.
+        UI-опции применяются первыми, опции из флагов - поверх (могут
+        переопределить). drop_normal=True убирает ключ 'normal' - для
+        доп./BLU/variant материалов, где normal-map не применяется
 
         Returns:
             (vtf_flags, merged_options)
@@ -351,24 +350,25 @@ class TextureService:
         flags: List[str],
         vtf_options: dict = None,
         stock_normal=None,
+        jobs=None,
     ) -> Tuple[Optional[float], bool]:
         """
-        Рендерит изображение в VTF: анимированный / normal-map / обычный.
+        Рендерит изображение в VTF: анимированный / normal-map / обычный
 
-        ``stock_normal`` — родная нормаль материала (RGBA): рельеф картинки
-        ляжет поверх неё, её альфа (маска блеска) сохранится.
+        ``stock_normal`` - родная нормаль материала (RGBA): рельеф картинки
+        ляжет поверх неё, её альфа (маска блеска) сохранится
 
         Единый рендер главной текстуры для обычной сборки и спец-режимов
-        (раньше дублировался в двух местах).
 
         Args:
             out_vtf_path:   полный путь к итоговому .vtf (для анимированного).
             temp_png_path:  временный PNG для конвертации обычной текстуры.
             normal_base:    стем для файлов normal-map ('{normal_base}_normal.vtf').
             vtf_output_path: директория, куда VTFCmd кладёт .vtf.
+            jobs:           VtfJobs - сжать в фоне (кроме анимации)
 
         Returns:
-            (animated_fps, is_normal_map). animated_fps != None — анимация.
+            (animated_fps, is_normal_map). animated_fps != None - анимация
         """
         vtf_flags, merged = TextureService.resolve_vtf_flags_and_options(flags, vtf_options)
         is_normal_map = merged.get("normal", False)
@@ -381,8 +381,8 @@ class TextureService:
                 image_path, str(out_vtf_path), size, format_type, vtf_flags, base_options
             )
             logger.info(f"Создана анимированная VTF текстура: {out_vtf_path.name}")
-            # Нормаль включена + анимация → бамп тоже анимированный, из тех же
-            # кадров и с тем же fps (VMT анимирует $bumpmap через $bumpframe).
+            # Нормаль включена + анимация -> бамп тоже анимированный, из тех же
+            # кадров и с тем же fps (VMT анимирует $bumpmap через $bumpframe)
             if is_normal_map:
                 normal_vtf_path = vtf_output_path / f"{normal_base}_normal.vtf"
                 from src.services import normal_map
@@ -394,19 +394,37 @@ class TextureService:
                 logger.info(f"Создана анимированная normal VTF: {normal_vtf_path.name}")
             return animated_fps, is_normal_map
 
+        args = (image_path, vtf_output_path, temp_png_path, normal_base, size,
+                format_type, vtf_flags, merged, is_normal_map, stock_normal)
+        if jobs is not None:
+            jobs.submit(TextureService.image_to_vtf, *args, key=str(temp_png_path))
+        else:
+            TextureService.image_to_vtf(*args)
+        return animated_fps, is_normal_map
+
+    @staticmethod
+    def image_to_vtf(image_path, vtf_output_path, temp_png_path, normal_base: str,
+                     size, format_type: str, vtf_flags: List[str], merged: dict,
+                     is_normal_map: bool = False, stock_normal=None) -> None:
+        """Картинка -> временный PNG -> VTF (и {normal_base}_normal.vtf)"""
         TextureService.process_image(image_path, temp_png_path, size)
         if is_normal_map:
             normal_options = merged.copy()
             normal_options.pop("normal", None)
-            TextureService.create_vtf(str(temp_png_path), str(vtf_output_path), format_type, vtf_flags, normal_options)
-            TextureService.write_normal_vtf(temp_png_path, vtf_output_path, normal_base,
-                                            format_type, merged, stock_normal)
+            # Нормаль - свой процесс VTFCmd, жмётся одновременно с базой
+            from concurrent.futures import ThreadPoolExecutor
+            with ThreadPoolExecutor(max_workers=1) as ex:
+                normal = ex.submit(TextureService.write_normal_vtf, temp_png_path,
+                                   vtf_output_path, normal_base, format_type,
+                                   merged, stock_normal)
+                TextureService.create_vtf(str(temp_png_path), str(vtf_output_path),
+                                          format_type, vtf_flags, normal_options)
+                normal.result()
         else:
             TextureService.create_vtf(str(temp_png_path), str(vtf_output_path), format_type, vtf_flags, merged)
 
         if Path(temp_png_path).exists():
             Path(temp_png_path).unlink()
-        return animated_fps, is_normal_map
 
     @staticmethod
     def create_vtf(png_path: str, output_path: str, format_type: str, flags: List[str], options: dict = None) -> None:
@@ -461,7 +479,7 @@ class TextureService:
         logger.info(f"VTFCmd команда: {' '.join(vtf_args)}")
         logger.debug(f"Формат: {vtf_format} (исходный: {format_type}), опции: {options}, флаги: {flags}")
         # Без check=True: при ненулевом коде формируем информативное исключение
-        # с выводом VTFCmd, а не сырой CalledProcessError.
+        # с выводом VTFCmd, а не сырой CalledProcessError
         try:
             result = subprocess.run(vtf_args, capture_output=True, text=True,
                                     creationflags=subprocess.CREATE_NO_WINDOW,

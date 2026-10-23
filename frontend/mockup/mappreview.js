@@ -1,5 +1,5 @@
 /*
- * Превью карточек «Phong-карта», «Rim light», «Отражение» и «Detail».
+ * Превью карточек «Phong-карта», «Rim light», «Отражение» и «Detail»
  *
  * Картинки собирает Python (Session.map_preview) так же, как сборка, а здесь
  * они смешиваются по формулам шейдера модели (source-sdk-2013, skin_ps20b.fxc,
@@ -13,7 +13,7 @@
  *             · lerp(1, ranges(френель), $envmapfresnel)
  *   detail  = TextureCombine: 0 - база · lerp(1, 2·деталь, f) (деталь без
  *             гаммы), 1 - база + f · деталь, 2 - lerp(база, деталь, f · альфа
- *             детали), 5 - освещённое + f · деталь; координаты × $detailscale.
+ *             детали), 5 - освещённое + f · деталь, координаты × $detailscale
  *
  * Геометрия своя: шар или текстура, согнутая как ствол (нормаль меняется
  * поперёк). Свет один, окружение ровное - так видно, что меняет поле.
@@ -34,7 +34,7 @@ function el(tag, className, text) {
   return node;
 }
 
-/** Картинка → ImageData (null, если не загрузилась). */
+/** Картинка -> ImageData (null, если не загрузилась) */
 export function load(url) {
   return new Promise((resolve) => {
     if (!url) { resolve(null); return; }
@@ -52,7 +52,7 @@ export function load(url) {
   });
 }
 
-/** Источник карты из состояния карточки - то, что пойдёт в сборку. */
+/** Источник карты из состояния карточки - то, что пойдёт в сборку */
 export function sourceSpec(st) {
   if (st.source === 'auto') return { derive: true, threshold: String(st.threshold || '') };
   if (st.source === 'mod') return { mod: true };
@@ -67,7 +67,7 @@ const channel = (img, c = 0) => {
   return out;
 };
 
-/** Картинки превью по `spec`; перезапрашивает, когда spec меняется. */
+/** Картинки превью по `spec`; перезапрашивает, когда spec меняется */
 function loader(material, mapId) {
   let data = null;
   let key = null;
@@ -79,7 +79,7 @@ function loader(material, mapId) {
       load(res.texture ? api.fileUrl(res.texture) : ''), load(res.map ? api.fileUrl(res.map) : ''),
       load(res.mask ? api.fileUrl(res.mask) : ''), load(res.env ? api.fileUrl(res.env) : ''),
       load(res.map_alpha ? api.fileUrl(res.map_alpha) : '')]);
-    // Без текстуры материала (не загружена) - только шары.
+    // Без текстуры материала (не загружена) - только шары
     const n = tex ? tex.width * tex.height : 0;
     const albedo = tex ? new Float32Array(n * 3) : null;
     for (let i = 0; i < n; i++) {
@@ -114,7 +114,7 @@ function loader(material, mapId) {
 }
 
 /** Кубмапа в направлении (x, y, z) мира Source (Z вверх), линейный цвет.
- * Грани как в VTF: +X −X +Y −Y +Z −Z, раскладка D3D (проверено по швам). */
+ * Грани как в VTF: +X −X +Y −Y +Z −Z, раскладка D3D (проверено по швам) */
 function cubeAt(cube, x, y, z) {
   const ax = Math.abs(x); const ay = Math.abs(y); const az = Math.abs(z);
   let f; let sc; let tc; let ma;
@@ -128,8 +128,8 @@ function cubeAt(cube, x, y, z) {
   return [cube.lin[at], cube.lin[at + 1], cube.lin[at + 2]];
 }
 
-/** Отражённый взгляд (вид: x вправо, y вверх, z к зрителю) → мир Source,
- * окружение повёрнуто вокруг вертикали на `turn`. Зритель смотрит вдоль +X. */
+/** Отражённый взгляд (вид: x вправо, y вверх, z к зрителю) -> мир Source,
+ * окружение повёрнуто вокруг вертикали на `turn`. Зритель смотрит вдоль +X */
 function reflectWorld(n, turn) {
   const d = 2 * n[2];
   const r = [d * n[0], d * n[1], d * n[2] - 1];
@@ -146,7 +146,7 @@ const num = (value, fallback) => {
   return Number.isFinite(v) ? v : fallback;
 };
 
-/** Шар: `shade(n, i)` → линейный RGB точки с нормалью n. */
+/** Шар: `shade(n, i)` -> линейный RGB точки с нормалью n */
 function drawSphere(canvas, shade) {
   const size = canvas.width;
   const ctx = canvas.getContext('2d');
@@ -167,8 +167,8 @@ function drawSphere(canvas, shade) {
   ctx.putImageData(img, 0, 0);
 }
 
-/** Текстура, согнутая как ствол: `shade(n, i)` → линейный RGB текселя i.
- * `tilt` - изгиб ещё и вдоль (рад): отражение берёт не только горизонт. */
+/** Текстура, согнутая как ствол: `shade(n, i)` -> линейный RGB текселя i.
+ * `tilt` - изгиб ещё и вдоль (рад): отражение берёт не только горизонт */
 function drawBent(canvas, w, h, shade, tilt = 0) {
   canvas.width = w;
   canvas.height = h;
@@ -192,7 +192,7 @@ function drawBent(canvas, w, h, shade, tilt = 0) {
   ctx.putImageData(img, 0, 0);
 }
 
-/** Блик (L·R)^k при взгляде (0, 0, 1). */
+/** Блик (L·R)^k при взгляде (0, 0, 1) */
 const phong = (n, light, k) => Math.max(0, 2 * dot(n, light) * n[2] - light[2]) ** k;
 
 function figure(caption, tip, className = 'glow__img') {
@@ -203,7 +203,7 @@ function figure(caption, tip, className = 'glow__img') {
   return [fig, canvas];
 }
 
-/** Обёртка превью: узел, кадр по таймеру, кадр сразу при показе. */
+/** Обёртка превью: узел, кадр по таймеру, кадр сразу при показе */
 function animated(node, frame, everyMs = 50) {
   let running = false;
   let last = 0;
@@ -221,7 +221,7 @@ function animated(node, frame, everyMs = 50) {
   };
 }
 
-/** Phong-карта: размер блика (R) на согнутой текстуре, свет ходит. */
+/** Phong-карта: размер блика (R) на согнутой текстуре, свет ходит */
 function glossPreview(st, ui, material) {
   const node = el('div', 'glow');
   const row = el('div', 'glow__row');
@@ -257,7 +257,7 @@ function glossPreview(st, ui, material) {
   }, 66);
 }
 
-/** Rim light: шар, свет обходит его кругом - обводка видна, когда он сзади. */
+/** Rim light: шар, свет обходит его кругом - обводка видна, когда он сзади */
 function rimPreview(st, ui, material) {
   const node = el('div', 'glow');
   const row = el('div', 'glow__row');
@@ -299,7 +299,7 @@ function rimPreview(st, ui, material) {
   }, 40);
 }
 
-/** Отражение: окружение на шаре и где оно легло на текстуру по маске. */
+/** Отражение: окружение на шаре и где оно легло на текстуру по маске */
 function envPreview(st, ui, material) {
   const node = el('div', 'glow');
   const row = el('div', 'glow__row');
@@ -342,7 +342,7 @@ function envPreview(st, ui, material) {
   }, 66);
 }
 
-/** Detail: деталь поверх текстуры по режиму и плотности, на ровном свету. */
+/** Detail: деталь поверх текстуры по режиму и плотности, на ровном свету */
 function detailPreview(st, ui, material) {
   const node = el('div', 'glow');
   const [fig, canvas] = figure(ui.view_detail, ui.view_detail_tip);
@@ -362,7 +362,7 @@ function detailPreview(st, ui, material) {
     const mode = String(st.numbers.$detailblendmode ?? '0');
     const f = num(st.numbers.$detailblendfactor, 1);
     const key = JSON.stringify([spec, scale, mode, f, d.w]);
-    // Данные тоже: пока шёл запрос, могли нарисоваться прошлые.
+    // Данные тоже: пока шёл запрос, могли нарисоваться прошлые
     if (key === drawn && d === drawnData) return;
     drawn = key;
     drawnData = d;
@@ -374,7 +374,7 @@ function detailPreview(st, ui, material) {
     for (let y = 0; y < d.h; y++) {
       for (let x = 0; x < d.w; x++) {
         const i = y * d.w + x;
-        // Координаты детали = координаты базы × $detailscale, с повтором.
+        // Координаты детали = координаты базы × $detailscale, с повтором
         const u = (((x + 0.5) / d.w) * scale) % 1;
         const v = (((y + 0.5) / d.h) * scale) % 1;
         const at = (Math.floor(v * det.height) * det.width + Math.floor(u * det.width)) * 4;
@@ -397,7 +397,7 @@ function detailPreview(st, ui, material) {
 
 const VIEWS = { gloss: glossPreview, rim: rimPreview, env: envPreview, detail: detailPreview };
 
-/** Превью карточки по её `preview` или null. */
+/** Превью карточки по её `preview` или null */
 export function mapPreview(st, schema, material) {
   const make = VIEWS[st.spec.preview];
   return make ? make(st, schema.ui, material) : null;

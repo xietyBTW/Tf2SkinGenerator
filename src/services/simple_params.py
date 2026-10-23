@@ -1,46 +1,46 @@
 """
-Декларативная схема «простого режима» редактора частиц.
+Декларативная схема «простого режима» редактора частиц
 
-Каждый SimpleParam — одна крутилка: что она показывает и в какие атрибуты
+Каждый SimpleParam - одна крутилка: что она показывает и в какие атрибуты
 каких модулей пишет. Добавление новой крутилки = одна запись в SIMPLE_PARAMS
 плюс переводы particles_sp_<key>; UI строится по схеме автоматически,
-синхронизация с деревом экспертного режима бесплатна — оба пути пишут через
-ParticleEditorService.set_attr/ensure_attr и читают один systems_json.
+синхронизация с деревом экспертного режима бесплатна - оба пути пишут через
+ParticleEditorService.set_attr/ensure_attr и читают один systems_json
 
 Три вещи, которые схема описывает явно, потому что данные игры этого требуют:
 
 * ВАРИАНТЫ адресов (`variants`). Один и тот же смысл в разных эффектах
-  живёт в разных модулях: скорость разлёта — либо в Position Within Sphere
+  живёт в разных модулях: скорость разлёта - либо в Position Within Sphere
   Random, либо в Velocity Random. Крутилка берёт первый вариант, все модули
   которого есть в системе.
-* МЯГКИЕ и ЖЁСТКИЕ границы. minimum/maximum — диапазон ползунка (столько,
-  сколько нужно в 99% эффектов), hard_min/hard_max — предел ручного ввода.
+* МЯГКИЕ и ЖЁСТКИЕ границы. minimum/maximum - диапазон ползунка (столько,
+  сколько нужно в 99% эффектов), hard_min/hard_max - предел ручного ввода.
   Стоковые PCF содержат emission_rate до 999999 и lifetime до 1e10 («вечная»
   частица): если ограничить ввод мягкой границей, редактор молча испортит
   чужой эффект.
 * КРИВАЯ ползунка. Половина стоковых значений гравитации лежит в ±50 при
-  размахе ±800 — на линейном ползунке это 6% хода. Кривая «sqrt» отдаёт
-  малым значениям половину дорожки.
+  размахе ±800 - на линейном ползунке это 6% хода. Кривая «sqrt» отдаёт
+  малым значениям половину дорожки
 
-Модуль без Qt: логика чтения/записи тестируется напрямую.
+Логика чтения/записи тестируется напрямую
 """
 
 from dataclasses import dataclass
 from typing import List, Optional, Tuple
 
-#: Кривые ползунка: доля хода [0..1] ⇄ доля диапазона [0..1].
+#: Кривые ползунка: доля хода [0..1] ⇄ доля диапазона [0..1]
 CURVE_LINEAR = "linear"
 #: Квадратичная: мелкие значения занимают половину дорожки. Для диапазонов
-#: «от нуля вверх» с длинным хвостом (скорость, область спавна, размер).
+#: «от нуля вверх» с длинным хвостом (скорость, область спавна, размер)
 CURVE_SQRT = "sqrt"
-#: То же, но симметрично относительно нуля — для знаковых (гравитация, спин).
+#: То же, но симметрично относительно нуля - для знаковых (гравитация, спин)
 CURVE_SIGNED_SQRT = "signed_sqrt"
 
 
 @dataclass(frozen=True)
 class AttrRef:
-    """Адрес атрибута: (группа, functionName модуля) либо group=None —
-    атрибут самой системы."""
+    """Адрес атрибута: (группа, functionName модуля) либо group=None -
+    атрибут самой системы"""
     group: Optional[str]
     function_name: str
     attr: str
@@ -53,9 +53,9 @@ class SimpleParam:
     key: str            # ключ перевода particles_sp_<key>
     kind: str           # "value" | "range" | "color_pair"
     #: Адреса по приоритету: первый вариант, чьи модули есть в системе.
-    #: Кнопка «Включить» создаёт модули ПЕРВОГО варианта.
+    #: Кнопка «Включить» создаёт модули ПЕРВОГО варианта
     variants: Tuple[Tuple[AttrRef, ...], ...]
-    minimum: float = 0.0     # мягкая граница — диапазон ползунка
+    minimum: float = 0.0     # мягкая граница - диапазон ползунка
     maximum: float = 1.0
     hard_min: Optional[float] = None   # предел ручного ввода; None = minimum
     hard_max: Optional[float] = None
@@ -66,15 +66,15 @@ class SimpleParam:
 
     @property
     def refs(self) -> Tuple[AttrRef, ...]:
-        """Основной вариант адресов (тот, что создаёт кнопка «Включить»)."""
+        """Основной вариант адресов (тот, что создаёт кнопка «Включить»)"""
         return self.variants[0]
 
     @property
     def placeholder_value(self):
-        """Что показывать в строке, под которой модуля ещё нет.
+        """Что показывать в строке, под которой модуля ещё нет
 
-        Умолчание Source: строка-заготовка обязана врать как можно меньше —
-        именно это значение эффект и получит, если правку не трогать.
+        Умолчание Source: строка-заготовка обязана врать как можно меньше -
+        именно это значение эффект и получит, если правку не трогать
         """
         if self.kind == "value":
             return self.default
@@ -92,7 +92,7 @@ class SimpleParam:
 
 
 def curve_fraction(param: SimpleParam, value: float) -> float:
-    """Значение → доля хода ползунка [0..1] (обратное к curve_value)."""
+    """Значение -> доля хода ползунка [0..1] (обратное к curve_value)"""
     lo, hi = param.minimum, param.maximum
     span = hi - lo
     if span <= 0:
@@ -107,7 +107,7 @@ def curve_fraction(param: SimpleParam, value: float) -> float:
 
 
 def curve_value(param: SimpleParam, fraction: float) -> float:
-    """Доля хода ползунка [0..1] → значение параметра."""
+    """Доля хода ползунка [0..1] -> значение параметра"""
     f = min(1.0, max(0.0, fraction))
     if param.curve == CURVE_SQRT:
         t = f * f
@@ -121,10 +121,10 @@ def curve_value(param: SimpleParam, fraction: float) -> float:
 
 def module_index(sys_json: dict, group: str,
                  function_name: str) -> Optional[int]:
-    """Индекс первого модуля группы с таким functionName; None — нет такого.
+    """Индекс первого модуля группы с таким functionName; None - нет такого
 
     Регистр written-имени в PCF гуляет от файла к файлу (в стоке есть и
-    «Radius Random», и «radius_random»), поэтому сравнение регистронезависимое.
+    «Radius Random», и «radius_random»), поэтому сравнение регистронезависимое
     """
     for i, mod in enumerate(sys_json.get(group) or []):
         if mod.get("functionName", "").strip().lower() == function_name.lower():
@@ -133,17 +133,17 @@ def module_index(sys_json: dict, group: str,
 
 
 def _refs_present(sys_json: dict, refs: Tuple[AttrRef, ...]) -> bool:
-    """Все ли модули варианта есть в системе (системные атрибуты — всегда)."""
+    """Все ли модули варианта есть в системе (системные атрибуты - всегда)"""
     return all(ref.group is None
                or module_index(sys_json, ref.group, ref.function_name) is not None
                for ref in refs)
 
 
 def active_refs(sys_json: dict, param: SimpleParam) -> Tuple[AttrRef, ...]:
-    """Вариант адресов, которым крутилка работает с ЭТОЙ системой.
+    """Вариант адресов, которым крутилка работает с ЭТОЙ системой
 
-    Первый вариант, все модули которого на месте; если ни один не подходит —
-    основной (его и будет создавать кнопка «Включить»).
+    Первый вариант, все модули которого на месте, если ни один не подходит -
+    основной (его и будет создавать кнопка «Включить»)
     """
     for refs in param.variants:
         if _refs_present(sys_json, refs):
@@ -152,7 +152,7 @@ def active_refs(sys_json: dict, param: SimpleParam) -> Tuple[AttrRef, ...]:
 
 
 def _read_ref(sys_json: dict, ref: AttrRef):
-    """Значение атрибута по адресу; None — модуля/атрибута нет."""
+    """Значение атрибута по адресу; None - модуля/атрибута нет"""
     if ref.group is None:
         tv = sys_json["attrs"].get(ref.attr)
     else:
@@ -173,13 +173,13 @@ def _read_ref(sys_json: dict, ref: AttrRef):
 
 def read_param(sys_json: dict, param: SimpleParam):
     """
-    Текущее значение крутилки из systems_json.
+    Текущее значение крутилки из systems_json
 
     Returns:
-        "value" → скаляр; "range"/"color_pair" → кортеж по refs.
-        None — нужного модуля в системе нет (крутилка выключена, показывается
-        кнопка «Включить»). Отсутствующий АТРИБУТ существующего модуля — не
-        причина выключать: игра держит его в дефолте, и правка его создаст.
+        "value" -> скаляр; "range"/"color_pair" -> кортеж по refs.
+        None - нужного модуля в системе нет (крутилка выключена, показывается
+        кнопка «Включить»). Отсутствующий АТРИБУТ существующего модуля - не
+        причина выключать: игра держит его в дефолте, и правка его создаст
     """
     refs = active_refs(sys_json, param)
     if not _refs_present(sys_json, refs):
@@ -190,7 +190,7 @@ def read_param(sys_json: dict, param: SimpleParam):
 
 
 def missing_modules(sys_json: dict, param: SimpleParam) -> List[tuple]:
-    """[(группа, functionName)] модулей, которых не хватает крутилке."""
+    """[(группа, functionName)] модулей, которых не хватает крутилке"""
     out = []
     for ref in active_refs(sys_json, param):
         if ref.group is None:
@@ -203,8 +203,8 @@ def missing_modules(sys_json: dict, param: SimpleParam) -> List[tuple]:
 
 def write_calls(sys_json: dict, param: SimpleParam, value) -> List[tuple]:
     """
-    Значение крутилки → [(group|None, mod_idx, attr, attr_type, new_value)]
-    для ParticleEditorService.ensure_attr. Пусто — нужного модуля нет.
+    Значение крутилки -> [(group|None, mod_idx, attr, attr_type, new_value)]
+    для ParticleEditorService.ensure_attr. Пусто - нужного модуля нет
     """
     refs = active_refs(sys_json, param)
     vals = [value] if param.kind == "value" else list(value)
@@ -230,18 +230,18 @@ def _r(group, fn, attr, attr_type="float", component=None) -> AttrRef:
 
 
 def _v(*refs: AttrRef) -> Tuple[AttrRef, ...]:
-    """Один вариант адресов."""
+    """Один вариант адресов"""
     return refs
 
 
 #: Схема простого режима. Новая крутилка = одна запись здесь
-#: + ключ перевода particles_sp_<key> в translations.py (ru и en).
+#: + ключ перевода particles_sp_<key> в translations.py (ru и en)
 #:
 #: Мягкие границы и дефолты выставлены по срезу стоковых PCF игры
-#: (134 файла, 10426 систем): мягкая граница ≈ 99-й процентиль, жёсткая —
-#: с запасом над максимумом, дефолт — как в Source.
+#: (134 файла, 10426 систем): мягкая граница ≈ 99-й процентиль, жёсткая -
+#: с запасом над максимумом, дефолт - как в Source
 SIMPLE_PARAMS: Tuple[SimpleParam, ...] = (
-    # ── Эмиссия ───────────────────────────────────────────────────────────
+    # Эмиссия
     # Параметры эмиттеров показываются только при их наличии: автосоздание
     # эмиттера может задвоить залп, поэтому creatable=False
     SimpleParam("spawn_rate", "value",
@@ -253,7 +253,7 @@ SIMPLE_PARAMS: Tuple[SimpleParam, ...] = (
                        "integer")),),
                 minimum=0, maximum=1000, hard_max=1e6, curve=CURVE_SQRT,
                 decimals=0, default=100, creatable=False),
-    # Задержка старта эмиссии — есть у обоих эмиттеров, имя атрибута одно
+    # Задержка старта эмиссии - есть у обоих эмиттеров, имя атрибута одно
     SimpleParam("emit_delay", "value",
                 (_v(_r("emitters", "emit_continuously", "emission_start_time")),
                  _v(_r("emitters", "emit_instantaneously",
@@ -269,9 +269,9 @@ SIMPLE_PARAMS: Tuple[SimpleParam, ...] = (
                 (_v(_r(None, "", "max_particles", "integer")),),
                 minimum=1, maximum=5000, hard_max=1e6, curve=CURVE_SQRT,
                 decimals=0, default=1000),
-    # ── Область спавна и разлёт ───────────────────────────────────────────
-    # Сферическая область — самая ходовая (7032 модуля в стоке), бокс —
-    # запасной вариант (273); у обоих гизмо в 3D-превью
+    # Область спавна и разлёт
+    # Сферическая область - самая ходовая (7032 модуля в стоке), бокс -
+    # запасной вариант (273), у обоих гизмо в 3D-превью
     SimpleParam("spawn_area", "range",
                 (_v(_r("initializers", "Position Within Sphere Random",
                        "distance_min"),
@@ -294,11 +294,11 @@ SIMPLE_PARAMS: Tuple[SimpleParam, ...] = (
                        component=2)),),
                 minimum=-800, maximum=800, hard_min=-1e6, hard_max=1e6,
                 curve=CURVE_SIGNED_SQRT),
-    # Сопротивление среды: 0 — движение по инерции, 1 — мгновенная остановка
+    # Сопротивление среды: 0 - движение по инерции, 1 - мгновенная остановка
     SimpleParam("drag", "value",
                 (_v(_r("operators", "Movement Basic", "drag")),),
                 minimum=0, maximum=1, hard_min=-10, hard_max=10, decimals=3),
-    # ── Размер ────────────────────────────────────────────────────────────
+    # Размер
     SimpleParam("size", "value",
                 (_v(_r(None, "", "radius")),),
                 minimum=0.1, maximum=200, hard_min=0, hard_max=1e5,
@@ -314,7 +314,7 @@ SIMPLE_PARAMS: Tuple[SimpleParam, ...] = (
                     _r("operators", "Radius Scale", "radius_end_scale")),),
                 minimum=0, maximum=10, hard_max=1e4, curve=CURVE_SQRT,
                 default=1.0),
-    # ── Жизнь, прозрачность, затухание ────────────────────────────────────
+    # Жизнь, прозрачность, затухание
     SimpleParam("lifetime", "range",
                 (_v(_r("initializers", "Lifetime Random", "lifetime_min"),
                     _r("initializers", "Lifetime Random", "lifetime_max")),),
@@ -334,7 +334,7 @@ SIMPLE_PARAMS: Tuple[SimpleParam, ...] = (
                     _r("operators", "Alpha Fade Out Random",
                        "fade out time max")),),
                 minimum=0, maximum=10, hard_max=1e4, default=0.25),
-    # ── Цвет и вращение ───────────────────────────────────────────────────
+    # Цвет и вращение
     SimpleParam("colors", "color_pair",
                 (_v(_r("initializers", "Color Random", "color1", "color"),
                     _r("initializers", "Color Random", "color2", "color")),)),

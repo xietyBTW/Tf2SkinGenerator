@@ -1,12 +1,12 @@
 """
-Точки крепления (attachment) моделей Source — источник трансформа для
-контрол-пойнта в редакторе частиц.
+Точки крепления (attachment) моделей Source - источник трансформа для
+контрол-пойнта в редакторе частиц
 
 В игре анюжуал висит не «в воздухе», а на attachment модели (`unusual_0`…
 `unusual_5` у оружия, `head`/свой у шапок): клиент каждый кадр кладёт в CP0
-позицию И ОРИЕНТАЦИЮ этой точки. Ориентация — не украшение: по базису CP
+позицию И ОРИЕНТАЦИЮ этой точки. Ориентация - не украшение: по базису CP
 раскладываются локальные системы координат инициализаторов скорости и
-плоскость спрайтов при orientation_type 2/3.
+плоскость спрайтов при orientation_type 2/3
 
 Данные берутся из уже декомпилированных Crowbar моделей (кэш
 ~/.tf2skingen_cache/decompiled), никакой распаковки VPK здесь не происходит:
@@ -14,9 +14,9 @@
     SMD: секции nodes (дерево костей) и skeleton/time 0 (бинд-поза)
 
 Мировой трансформ точки = цепочка костей до корня × локальная матрица
-attachment. Все матрицы — matrix3x4 в конвенции Source (столбцы = forward,
-left, up; четвёртый столбец — позиция), углы — QAngle (pitch, yaw, roll) в
-градусах, ровно в том виде, который принимает setControlPointOrientation.
+attachment. Все матрицы - matrix3x4 в конвенции Source (столбцы = forward,
+left, up; четвёртый столбец - позиция), углы - QAngle (pitch, yaw, roll) в
+градусах, ровно в том виде, который принимает setControlPointOrientation
 """
 
 import json
@@ -49,17 +49,17 @@ _ATTACHMENT_RE = re.compile(
 
 @dataclass(frozen=True)
 class Attachment:
-    """Точка крепления в мировых координатах бинд-позы."""
+    """Точка крепления в мировых координатах бинд-позы"""
     name: str
     bone: str
     pos: Tuple[float, float, float]
-    angles: Tuple[float, float, float]   # pitch, yaw, roll — как в QAngle
+    angles: Tuple[float, float, float]   # pitch, yaw, roll - как в QAngle
 
 
-# ── Математика Source ────────────────────────────────────────────────────── #
+# Математика Source
 
 def angle_matrix(pitch: float, yaw: float, roll: float) -> Matrix3x4:
-    """Порт AngleMatrix(QAngle): матрица = (YAW * PITCH) * ROLL, градусы."""
+    """Порт AngleMatrix(QAngle): матрица = (YAW * PITCH) * ROLL, градусы"""
     sy, cy = math.sin(math.radians(yaw)), math.cos(math.radians(yaw))
     sp, cp = math.sin(math.radians(pitch)), math.cos(math.radians(pitch))
     sr, cr = math.sin(math.radians(roll)), math.cos(math.radians(roll))
@@ -73,7 +73,7 @@ def angle_matrix(pitch: float, yaw: float, roll: float) -> Matrix3x4:
 
 
 def matrix_angles(m: Matrix3x4) -> Tuple[float, float, float]:
-    """Порт MatrixAngles: матрица → QAngle (pitch, yaw, roll) в градусах."""
+    """Порт MatrixAngles: матрица -> QAngle (pitch, yaw, roll) в градусах"""
     fwd = (m[0][0], m[1][0], m[2][0])
     left = (m[0][1], m[1][1], m[2][1])
     up_z = m[2][2]
@@ -91,10 +91,10 @@ def matrix_angles(m: Matrix3x4) -> Tuple[float, float, float]:
 
 def radian_euler_matrix(rx: float, ry: float, rz: float,
                         pos: Tuple[float, float, float]) -> Matrix3x4:
-    """Порт AngleMatrix(RadianEuler) — то, как SMD хранит поворот кости.
+    """Порт AngleMatrix(RadianEuler) - то, как SMD хранит поворот кости
 
     В mathlib RadianEuler(x, y, z) превращается в QAngle(y, z, x) в градусах,
-    поэтому порядок осей здесь именно такой, а не «как записано в файле».
+    поэтому порядок осей здесь именно такой, а не «как записано в файле»
     """
     m = angle_matrix(math.degrees(ry), math.degrees(rz), math.degrees(rx))
     for i in range(3):
@@ -103,7 +103,7 @@ def radian_euler_matrix(rx: float, ry: float, rz: float,
 
 
 def concat_transforms(a: Matrix3x4, b: Matrix3x4) -> Matrix3x4:
-    """Порт ConcatTransforms: out = a * b (b применяется первым)."""
+    """Порт ConcatTransforms: out = a * b (b применяется первым)"""
     out: Matrix3x4 = [[0.0] * 4 for _ in range(3)]
     for i in range(3):
         for j in range(3):
@@ -113,10 +113,10 @@ def concat_transforms(a: Matrix3x4, b: Matrix3x4) -> Matrix3x4:
     return out
 
 
-# ── Разбор файлов ────────────────────────────────────────────────────────── #
+# Разбор файлов
 
 def parse_qc_attachments(qc_text: str) -> List[dict]:
-    """Строки $attachment из QC → [{name, bone, offset, angles}]."""
+    """Строки $attachment из QC -> [{name, bone, offset, angles}]"""
     out: List[dict] = []
     for line in qc_text.splitlines():
         m = _ATTACHMENT_RE.match(line)
@@ -132,7 +132,7 @@ def parse_qc_attachments(qc_text: str) -> List[dict]:
 
 
 def parse_smd_bind_pose(smd_text: str) -> Dict[str, Matrix3x4]:
-    """Секции nodes + skeleton/time 0 → мировые матрицы костей бинд-позы."""
+    """Секции nodes + skeleton/time 0 -> мировые матрицы костей бинд-позы"""
     lines = smd_text.splitlines()
     parents: Dict[int, int] = {}
     names: Dict[int, str] = {}
@@ -159,7 +159,7 @@ def parse_smd_bind_pose(smd_text: str) -> Dict[str, Matrix3x4]:
                 parents[idx] = int(m.group(3))
         elif section == "skeleton":
             if low.startswith("time"):
-                # Нужен только первый кадр — это и есть бинд-поза
+                # Нужен только первый кадр - это и есть бинд-поза
                 if frame_seen:
                     break
                 frame_seen = True
@@ -184,7 +184,7 @@ def parse_smd_bind_pose(smd_text: str) -> Dict[str, Matrix3x4]:
         if mat is None:
             return [row[:] for row in _IDENTITY]
         parent = parents.get(idx, -1)
-        # guard — защита от битого дерева с циклом
+        # guard - защита от битого дерева с циклом
         if parent >= 0 and parent != idx and guard < 128:
             mat = concat_transforms(resolve(parent, guard + 1), mat)
         world[idx] = mat
@@ -194,17 +194,17 @@ def parse_smd_bind_pose(smd_text: str) -> Dict[str, Matrix3x4]:
 
 
 def reference_smd_for_qc(qc_path: str) -> Optional[str]:
-    """Путь к reference-SMD модели — из него же строится меш для превью."""
+    """Путь к reference-SMD модели - из него же строится меш для превью"""
     smd = _reference_smd(Path(qc_path))
     return None if smd is None else str(smd)
 
 
 def _reference_smd(qc_path: Path) -> Optional[Path]:
-    """Reference-SMD рядом с QC: не физика, не анимация, не поза."""
-    # Сперва — то, что QC зовёт телом (`$body`/`$model`): у игроков рядом
+    """Reference-SMD рядом с QC: не физика, не анимация, не поза"""
+    # Сперва - то, что QC зовёт телом (`$body`/`$model`): у игроков рядом
     # лежат бодигруппы (dogtags, hat, shoes), и перебор по алфавиту отдавал
     # жетоны разведчика вместо самого разведчика. Правило то же, что у 3D
-    # (smd_locator.character_body_smd), включая пустой LOD0 пиромана.
+    # (smd_locator.character_body_smd), включая пустой LOD0 пиромана
     body = body_smd_from_qc(qc_path)
     if body is not None:
         return body
@@ -219,8 +219,8 @@ def _reference_smd(qc_path: Path) -> Optional[Path]:
 
 
 def body_smd_from_qc(qc_path: Path) -> Optional[Path]:
-    """Меш, который QC объявляет первым `$body`/`$model`, — самый подробный из
-    его семьи «файл плюс _lodN» (у пиромана нулевой уровень пуст)."""
+    """Меш, который QC объявляет первым `$body`/`$model`, - самый подробный из
+    его семьи «файл плюс _lodN» (у пиромана нулевой уровень пуст)"""
     from src.services.smd_service import triangle_count
 
     try:
@@ -238,11 +238,11 @@ def body_smd_from_qc(qc_path: Path) -> Optional[Path]:
 
 
 def attachments_from_qc(qc_path: str) -> List[Attachment]:
-    """Мировые трансформы всех attachment модели по её QC + reference SMD.
+    """Мировые трансформы всех attachment модели по её QC + reference SMD
 
-    Кости, которых нет в SMD, дают точку в начале координат — это лучше, чем
+    Кости, которых нет в SMD, дают точку в начале координат - это лучше, чем
     молча выкинуть attachment: пользователь увидит её в списке и поймёт, что
-    модель декомпилирована не полностью.
+    модель декомпилирована не полностью
     """
     qc = Path(qc_path)
     try:
@@ -280,12 +280,12 @@ def attachments_from_qc(qc_path: str) -> List[Attachment]:
     return out
 
 
-# ── Модели из кэша декомпиляции ──────────────────────────────────────────── #
+# Модели из кэша декомпиляции
 
 def root_bone_from_qc(qc_path: str) -> Optional[Attachment]:
-    """Корневая кость модели в мировых координатах bind-позы — то, к чему
+    """Корневая кость модели в мировых координатах bind-позы - то, к чему
     игра цепляет анюжуал косметики (`attach_to_rootbone 1` в items_game:
-    у шапок это bip_head). None — SMD или скелета нет."""
+    у шапок это bip_head). None - SMD или скелета нет"""
     qc = Path(qc_path)
     smd = _reference_smd(qc)
     if smd is None:
@@ -297,9 +297,9 @@ def root_bone_from_qc(qc_path: str) -> Optional[Attachment]:
     bones = parse_smd_bind_pose(text)
     if not bones:
         return None
-    # Корень для игры — не первая кость модели, а первая из тех, что есть и у
-    # игрока (bone_merge_cache.cpp: m_MergedBones[0]); у косметики это bip_*.
-    # parse_smd_bind_pose хранит порядок файла, Crowbar пишет его как в MDL.
+    # Корень для игры - не первая кость модели, а первая из тех, что есть и у
+    # игрока (bone_merge_cache.cpp: m_MergedBones[0]), у косметики это bip_*.
+    # parse_smd_bind_pose хранит порядок файла, Crowbar пишет его как в MDL
     name, world = next(((n, m) for n, m in bones.items()
                         if n.lower().startswith("bip_")),
                        next(iter(bones.items())))
@@ -309,19 +309,19 @@ def root_bone_from_qc(qc_path: str) -> Optional[Attachment]:
 
 
 def list_decompiled_models() -> List[Tuple[str, str]]:
-    """Модели, уже разобранные Crowbar: [(подпись, путь к QC)], по алфавиту."""
+    """Модели, уже разобранные Crowbar: [(подпись, путь к QC)], по алфавиту"""
     out = [(m["label"], m["qc"]) for m in list_decompiled_models_meta()]
     out.sort(key=lambda pair: pair[0].lower())
     return out
 
 
 def list_decompiled_models_meta() -> List[Dict[str, str]]:
-    """Все записи кэша декомпиляции: {label, qc, mdl (путь модели в игре)}.
+    """Все записи кэша декомпиляции: {label, qc, mdl (путь модели в игре)}
 
     Своей распаковки VPK здесь нет намеренно: Crowbar долгий, а модели
     попадают в кэш при обычной работе на вкладках оружия и шапок. Одна и та
     же модель может лежать в кэше дважды (разведчик как `__player_scout` и
-    как `models/player/scout.mdl`) — различать их наверху по `mdl`.
+    как `models/player/scout.mdl`) - различать их наверху по `mdl`
     """
     cache = Path(os.path.expanduser("~")) / ".tf2skingen_cache" / "decompiled"
     out: List[Dict[str, str]] = []
@@ -346,14 +346,14 @@ def list_decompiled_models_meta() -> List[Dict[str, str]]:
         if qc is None or not Path(qc).is_file():
             continue
         if not mdl:
-            # Старые записи кэша без меты: путь модели знает сам QC.
+            # Старые записи кэша без меты: путь модели знает сам QC
             mdl = _modelname_from_qc(Path(qc))
         out.append({"label": label, "qc": str(qc), "mdl": mdl.replace("\\", "/")})
     return out
 
 
 def _modelname_from_qc(qc_path: Path) -> str:
-    """`$modelname "player/scout.mdl"` → `models/player/scout.mdl`; пусто, если нет."""
+    """`$modelname "player/scout.mdl"` -> `models/player/scout.mdl`; пусто, если нет"""
     try:
         text = qc_path.read_text(encoding="utf-8", errors="replace")
     except OSError:

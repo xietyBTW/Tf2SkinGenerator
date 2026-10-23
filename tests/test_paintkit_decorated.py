@@ -1,10 +1,10 @@
 """
-Украшенное оружие коллекций (Current Event, Night Owl…) на любой модели.
+Украшенное оружие коллекций (Current Event, Night Owl…) на любой модели
 
 В игре такой скин есть только у своих пушек: шаблона у него нет, рецепт каждого
 износа нарисован под маски пушки (``p_<пушка>_groups`` и др.) и номера её групп.
 Приложение раскладывает «виды» рецепта по деталям модели в долях оригинала и
-подменяет маски оригинала масками модели.
+подменяет маски оригинала масками модели
 """
 
 import os
@@ -29,7 +29,7 @@ def _select(*values):
             'select': [str(v) for v in values]}
 
 
-#: Как у Current Event: молнии на группах 3/11/15, лаванда на 2/4/8/9, чёрный — остальное.
+#: Как у Current Event: молнии на группах 3/11/15, лаванда на 2/4/8/9, чёрный - остальное
 CURRENT_EVENT = {'type': 'combine_lerp', 'fields': {}, 'nodes': [
     {'type': 'combine_lerp', 'fields': {}, 'nodes': [
         _lookup('patterns/solid_black_02'), _lookup('patterns/powerhouse/electric_purple'),
@@ -39,10 +39,10 @@ CURRENT_EVENT = {'type': 'combine_lerp', 'fields': {}, 'nodes': [
 
 
 def _mask(counts):
-    """Маска групп: {номер группы: сколько пикселей}."""
+    """Маска групп: {номер группы: сколько пикселей}"""
     ids = [g for g, n in counts.items() for _ in range(n)]
     mask = np.zeros((1, len(ids), 4), np.uint8)
-    mask[0, :, 0] = [min(g * 16, 255) for g in ids]     # группа 16 в маске — 255
+    mask[0, :, 0] = [min(g * 16, 255) for g in ids]     # группа 16 в маске - 255
     return mask
 
 
@@ -55,7 +55,7 @@ class LooksTests(unittest.TestCase):
         self.assertEqual([round(s, 2) for s in looks.shares], [0.2, 0.2, 0.6])
 
     def test_group_sixteen_is_a_look_too(self):
-        """255 и 248 — группа 16: у Stabbed to Hell на ней трещины, у ножа это пятая часть."""
+        """255 и 248 - группа 16: у Stabbed to Hell на ней трещины, у ножа это пятая часть"""
         recipe = {'type': 'combine_lerp', 'fields': {}, 'nodes': [
             _lookup('patterns/solid_black_02'), _lookup('patterns/mtp/pyr_crackles'),
             _select(255)]}
@@ -68,7 +68,7 @@ class LooksTests(unittest.TestCase):
             _select(48), _select(48), _select(64)]}
         looks = pg.recipe_looks(recipe, lambda path, raw=False: None)
         self.assertEqual(looks.values, [0, 48, 64])
-        self.assertEqual(looks.shares, [1 / 3] * 3)        # маски нет — поровну
+        self.assertEqual(looks.shares, [1 / 3] * 3)        # маски нет - поровну
 
     def test_parts_follow_original_shares(self):
         got = pg.assign_shares([0.5, 0.3, 0.1, 0.1], [0.2, 0.5, 0.3])
@@ -96,14 +96,14 @@ class SwapTests(unittest.TestCase):
         self.assertEqual(recipe['nodes'][0]['fields']['texture'][:6], 'models')  # копия
 
     def test_picture_drawn_for_the_original_is_dropped(self):
-        """У Killer Bee поверх узора — рисунок под развёртку обреза (умножением)."""
+        """У Killer Bee поверх узора - рисунок под развёртку обреза (умножением)"""
         recipe = {'type': 'combine_multiply', 'fields': {}, 'nodes': [
             _select(48), _lookup('patterns/combat/c_scattergun_killerbee_multiply')]}
         self.assertEqual(pg.swap_weapon_textures(recipe)['nodes'][1]['fields']['texture'],
                          'patterns/blank_white')
 
     def test_skin_drawn_whole_stays_with_its_weapon(self):
-        """Warhawk — одна картинка под развёртку ракетомёта, групп нет."""
+        """Warhawk - одна картинка под развёртку ракетомёта, групп нет"""
         from src.data.paintkit_defs import _drawn_whole
         warhawk = {'type': 'combine_lerp', 'fields': {}, 'nodes': [
             _lookup('models/weapons/c_models/c_rocketlauncher/p_rocketlauncher_albedo'),
@@ -164,7 +164,7 @@ class LayoutTests(unittest.TestCase):
             self.assertEqual([l['n'] for l in res['layers']], [0, 1, 2])
             self.assertTrue(all(os.path.isfile(l['swatch']) for l in res['layers']))
             self.assertEqual(len({l['color'] for l in res['layers']}), 3)
-        # Крупная деталь — самому частому виду оригинала (молнии, 60 %).
+        # Крупная деталь - самому частому виду оригинала (молнии, 60 %)
         self.assertEqual([u['layer'] for u in res['units']], [2, 1, 0])
 
 

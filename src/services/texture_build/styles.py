@@ -1,5 +1,5 @@
 """
-Стадия «варианты стилей» (skinfamilies) своей модели.
+Стадия «варианты стилей» (skinfamilies) своей модели
 """
 
 from src.shared.logging_config import get_logger
@@ -9,12 +9,12 @@ logger = get_logger(__name__)
 
 def remap_skin_data_to_smd(skin_build_data: dict, smd_mats: list) -> dict:
     """
-    Переименовывает материалы стилей под ФАКТИЧЕСКИЕ имена материалов SMD.
+    Переименовывает материалы стилей под ФАКТИЧЕСКИЕ имена материалов SMD
 
-    UI собирает имена из превью-загрузки; к моменту сборки имена меша в SMD
+    UI собирает имена из превью-загрузки, к моменту сборки имена меша в SMD
     могут отличаться (другой экспорт/регистр). Сопоставляем UI↔SMD ПО ИНДЕКСУ
     (порядок появления материалов) и переписываем mesh_materials / tg_overrides /
-    variant_files на SMD-имена. Картинки вариантов сохраняются.
+    variant_files на SMD-имена. Картинки вариантов сохраняются
     """
     ui_mats = skin_build_data.get('mesh_materials', [])
     if not ui_mats or not smd_mats:

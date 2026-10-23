@@ -1,11 +1,11 @@
 """
-War Paint и гирлянды на моде из VPK («Кастомный мод») и своей модели.
+War Paint и гирлянды на моде из VPK («Кастомный мод») и своей модели
 
 - War Paint ищутся по оружию, которое мод заменяет, а не по прошлому
   предмету каталога;
 - на своей геометрии War Paint игры не предлагаются: рецепт Valve кладёт
-  узор по развёртке стоковой модели — работает универсальный режим;
-- правленые гирлянды доходят до сборки кастомного мода.
+  узор по развёртке стоковой модели - работает универсальный режим;
+- правленые гирлянды доходят до сборки кастомного мода
 """
 
 from __future__ import annotations
@@ -15,6 +15,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from src.app.paintkit_editor import PaintkitEditor
+from src.app.build_editor import BuildEditor
 from src.app.session import AppSession
 from src.domain.preview.session import PreviewSession
 from src.services.custom_vpk_service import CustomVPKService
@@ -48,7 +49,7 @@ class WarpaintOnModTests(unittest.TestCase):
             self.assertEqual(s.paintkits.paintkits(), {'items': [{'id': 2}], 'generic': True})
 
     def test_texture_only_mod_keeps_game_kits(self):
-        """Мод без MDL лежит на стоковой модели — её War Paint ложатся верно."""
+        """Мод без MDL лежит на стоковой модели - её War Paint ложатся верно"""
         s = _session(custom_vpk_mode=True, custom_vpk_weapon='c_scattergun',
                      custom_vpk_own_model=False)
         with patch('src.data.paintkit_defs.for_model', return_value=[{'id': 1}]):
@@ -66,7 +67,7 @@ class WarpaintOnModTests(unittest.TestCase):
 
 
 class BypassSettingTests(unittest.TestCase):
-    """Способ обхода sv_pure из настроек доходит до сборки."""
+    """Способ обхода sv_pure из настроек доходит до сборки"""
 
     def _method(self, value):
         with patch('src.config.app_config.AppConfig.load_config',
@@ -83,7 +84,7 @@ class BypassSettingTests(unittest.TestCase):
             png = f.name
         s = _session()
         s._mode = 'normal'
-        s._build = None
+        s.building = BuildEditor(s)
         s.preview.textures.material_names = ['c_pistol']
         s.preview.textures.set_texture('c_pistol', png)
         s.parts = MagicMock(bake_plan=lambda paths: None, baked_path=lambda p: p)
@@ -99,7 +100,7 @@ class BypassSettingTests(unittest.TestCase):
         with patch('src.config.app_config.AppConfig.load_config',
                    return_value={'sv_pure_bypass': 'vgui'}), \
              patch('src.services.build_worker.BuildWorker', Worker):
-            res = s.build({'filename': 'x.vpk'})
+            res = s.building.build({'filename': 'x.vpk'})
         self.assertTrue(res.get('started'), res)
         self.assertEqual(captured['request'].bypass_method, 'vgui')
 
@@ -109,7 +110,7 @@ class BypassSettingTests(unittest.TestCase):
 
 
 class SceneNamesTests(unittest.TestCase):
-    """Куда в показанной сцене ложится карточка (предпросмотр War Paint)."""
+    """Куда в показанной сцене ложится карточка (предпросмотр War Paint)"""
 
     def test_single_material_in_hands_is_the_weapon_mesh(self):
         from src.domain.preview.texture_state import SINGLE_TEX_KEY
@@ -126,7 +127,7 @@ class SceneNamesTests(unittest.TestCase):
 
 
 class WeaponMdlTests(unittest.TestCase):
-    """Гирлянда в той же папке, что пушка, не должна стать «оружием» мода."""
+    """Гирлянда в той же папке, что пушка, не должна стать «оружием» мода"""
 
     def test_weapon_wins_over_its_garland(self):
         from src.services.preview_vpk_mod_worker import _weapon_mdl
@@ -140,7 +141,7 @@ class WeaponMdlTests(unittest.TestCase):
 
 
 class ModMainCardTests(unittest.TestCase):
-    """Главная карточка мода — материал модели, а не первый VTF архива."""
+    """Главная карточка мода - материал модели, а не первый VTF архива"""
 
     def test_model_material_becomes_main(self):
         from src.app.preview_controller import VpkModController

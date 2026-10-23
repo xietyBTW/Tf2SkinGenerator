@@ -1,12 +1,12 @@
 """
 Инструменты: извлечь модель и текстуры из игры, экспорт файлов модели,
-объединение модов.
+объединение модов
 
 Инструмент один на сеанс: две декомпиляции разом дерутся за один
 временный каталог. Результат пишется в папку экспорта из настроек
-(`_export_settings` сеанса); прогресс и итог уходят событиями страницы.
+(`_export_settings` сеанса), прогресс и итог уходят событиями страницы
 
-Доступ — `session().tools`; `api.py` зовёт его методы напрямую.
+Доступ - `session().tools`; `api.py` зовёт его методы напрямую
 """
 
 from __future__ import annotations
@@ -22,23 +22,23 @@ logger = get_logger(__name__)
 
 
 class ToolsEditor:
-    """Извлечение из игры, экспорт и объединение модов."""
+    """Извлечение из игры, экспорт и объединение модов"""
 
     def __init__(self, host: "AppSession") -> None:
         self._host = host
-        #: Текущий воркер-инструмент (извлечение, экспорт, объединение).
+        #: Текущий воркер-инструмент (извлечение, экспорт, объединение)
         self._tool = None
         #: Подготовленная декомпиляция модели: ждёт выбора файлов на странице.
-        #: Пока она жива, за ней числится временный каталог.
+        #: Пока она жива, за ней числится временный каталог
         self._prepared: Optional[Dict[str, Any]] = None
 
     def _run_tool(self, worker, done: str = 'tool_done') -> Dict[str, Any]:
         """
-        Запускает воркер-инструмент и переводит его сигналы в события.
+        Запускает воркер-инструмент и переводит его сигналы в события
 
         Инструмент один на сеанс: две декомпиляции разом дерутся за один
-        временный каталог — в приложении это ровно та же проверка
-        (``_worker_busy``).
+        временный каталог - в приложении это ровно та же проверка
+        (``_worker_busy``)
         """
         worker.progress.connect(lambda pct, text: self._host._put('progress', text=text))
         worker.finished.connect(
@@ -54,17 +54,17 @@ class ToolsEditor:
 
     def extract_model(self, lang: str = 'ru') -> Dict[str, Any]:
         """
-        Декомпилирует модель предмета и отдаёт список готовых файлов.
+        Декомпилирует модель предмета и отдаёт список готовых файлов
 
         Операция двухшаговая, как и в приложении: сначала файлы готовятся во
         временном каталоге, потом человек выбирает, что из них сохранить
-        (``export_model_files``). Список приезжает событием ``extract_files``.
+        (``export_model_files``). Список приезжает событием ``extract_files``
         """
         from src.domain.preview.model_key import model_key_for
 
         mode = getattr(self._host, '_mode', '')
         # Ключ предмета берём тот же, по которому грузилось превью: у шапок он
-        # свой на каждую вещь и из режима не выводится.
+        # свой на каждую вещь и из режима не выводится
         key = self._host.preview.weapon_key or model_key_for(mode)
         if not key:
             return {'error': f'Для режима «{mode}» модели нет'}
@@ -87,7 +87,7 @@ class ToolsEditor:
         return {'started': True}
 
     def _model_prepared(self, worker, ok: bool, message: str) -> None:
-        """Файлы готовы во временном каталоге — ждём выбора страницы."""
+        """Файлы готовы во временном каталоге - ждём выбора страницы"""
         from src.services.extract_model_service import ExtractModelService
 
         files = list(getattr(worker, 'prepared_files', None) or [])
@@ -109,10 +109,10 @@ class ToolsEditor:
     def export_model_files(self, files: Optional[List[str]] = None,
                            lang: str = 'ru') -> Dict[str, Any]:
         """
-        Сохраняет выбранные файлы модели в папку экспорта.
+        Сохраняет выбранные файлы модели в папку экспорта
 
-        Пустой список — отказ: временный каталог тогда убирается сразу, иначе
-        декомпиляция висела бы в temp до перезапуска.
+        Пустой список - отказ: временный каталог тогда убирается сразу, иначе
+        декомпиляция висела бы в temp до перезапуска
         """
         from src.services.extract_model_service import ExtractModelService
 
@@ -143,10 +143,10 @@ class ToolsEditor:
 
     def character_textures(self) -> List[str]:
         """
-        Текстуры персонажа в игровом VPK — из них выбирают, что извлекать.
+        Текстуры персонажа в игровом VPK - из них выбирают, что извлекать
 
         У тела персонажа их бывает под два десятка (лицо, части формы,
-        экипировка), поэтому приложение спрашивает, а не тащит всё подряд.
+        экипировка), поэтому приложение спрашивает, а не тащит всё подряд
         """
         from src.data.player_characters import PLAYER_CHARACTERS
 
@@ -176,10 +176,10 @@ class ToolsEditor:
     def extract_texture(self, textures: Optional[List[str]] = None,
                         lang: str = 'ru') -> Dict[str, Any]:
         """
-        Извлекает оригинальные текстуры предмета в папку экспорта.
+        Извлекает оригинальные текстуры предмета в папку экспорта
 
         У тела персонажа выбор обязателен: без списка возвращается
-        ``need_textures`` — страница спрашивает, что брать, и зовёт снова.
+        ``need_textures`` - страница спрашивает, что брать, и зовёт снова
         """
         from src.data.player_characters import (
             PLAYER_BODY_MODE_KEYS, PLAYER_CHARACTERS,
@@ -202,7 +202,7 @@ class ToolsEditor:
 
         export_folder, export_format = self._host._export_settings()
 
-        # Шапка: своя цепочка QC → VMT → $baseTexture, у каждой вещи своя модель.
+        # Шапка: своя цепочка QC -> VMT -> $baseTexture, у каждой вещи своя модель
         if mode == 'hat':
             key = self._host.preview.weapon_key
             if not key:
@@ -225,12 +225,12 @@ class ToolsEditor:
         else:
             explicit = None
 
-        # У рук ключ — модель предплечья: под ним лежит QC в кэше декомпиляции,
-        # и служба берёт из него ПОЛНЫЙ $texturegroup — те же текстуры, что
-        # положит сборка (список в player_hands бывает неполным).
+        # У рук ключ - модель предплечья: под ним лежит QC в кэше декомпиляции,
+        # и служба берёт из него ПОЛНЫЙ $texturegroup - те же текстуры, что
+        # положит сборка (список в player_hands бывает неполным)
         #
         # У тела персонажа ключ не передаём НАМЕРЕННО: там список выбрал
-        # человек, и подмена его группой из QC вернула бы всё подряд.
+        # человек, и подмена его группой из QC вернула бы всё подряд
         key = '' if is_body else model_key_for(mode)
         if not key and not is_body:
             return {'error': f'Для режима «{mode}» текстуры не найти'}
@@ -247,7 +247,7 @@ class ToolsEditor:
         ))
 
     def export_vpks(self) -> List[str]:
-        """Имена собранных модов в папке экспорта — из них выбирают, что слить."""
+        """Имена собранных модов в папке экспорта - из них выбирают, что слить"""
         from pathlib import Path
         export_folder, _ = self._host._export_settings()
         folder = Path(export_folder)
@@ -258,11 +258,11 @@ class ToolsEditor:
     def merge_vpk(self, files: Optional[List[str]] = None, name: str = '',
                   confirmed: bool = False, lang: str = 'ru') -> Dict[str, Any]:
         """
-        Сливает несколько модов из папки экспорта в один VPK.
+        Сливает несколько модов из папки экспорта в один VPK
 
-        Моды, трогающие одно оружие, друг друга затирают — о таких сначала
+        Моды, трогающие одно оружие, друг друга затирают - о таких сначала
         предупреждаем (``duplicates``) и ждём подтверждения, как это делает
-        окно приложения.
+        окно приложения
         """
         from pathlib import Path
         from src.services.merge_vpk_service import MergeVPKService
@@ -277,7 +277,7 @@ class ToolsEditor:
 
         export_folder, _ = self._host._export_settings()
         # От страницы берём только имена: путь собираем сами, иначе она могла бы
-        # указать файл за пределами папки экспорта.
+        # указать файл за пределами папки экспорта
         paths = [Path(export_folder) / Path(f).name for f in chosen]
         missing = [p.name for p in paths if not p.is_file()]
         if missing:

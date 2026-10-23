@@ -1,13 +1,13 @@
 /*
- * Рамка картинки на превью конструктора блеска: как в редакторах картинок.
+ * Рамка картинки на превью конструктора блеска: как в редакторах картинок
  *
  * Тянуть за середину - двигать, за угол - менять размер, за кружок над
  * рамкой - поворачивать (с Shift - шагом 15°), колесо - размер. Пока тянут,
  * меняется только рамка: кадры маски считает Python (около секунды), и они
- * пересчитываются после отпускания мыши.
+ * пересчитываются после отпускания мыши
  *
  * Геометрия та же, что у sheen_builder._picture: «целиком» - вписать
- * картинку в бок оружия с её пропорцией, «растянуть» - на весь бок; потом
+ * картинку в бок оружия с её пропорцией, «растянуть» - на весь бок, потом
  * размер, поворот по часовой и центр в долях длины и высоты.
  */
 
@@ -15,7 +15,7 @@ import * as api from './api.js';
 import { t } from './i18n.js';
 
 const SVG = 'http://www.w3.org/2000/svg';
-//: Пределы - как у полей слоя (sheen_builder.LAYER_TYPES["image"]).
+//: Пределы - как у полей слоя (sheen_builder.LAYER_TYPES["image"])
 const SCALE = [0.1, 2];
 const HANDLE = 5;
 const ARM = 18;
@@ -44,7 +44,7 @@ export function createTransform(stage, canvas, pattern, { onCommit }) {
   svg.append(box, arm, spin, ...corners);
   stage.append(svg);
 
-  //: Пропорции картинок: путь -> {w, h}; грузятся один раз.
+  //: Пропорции картинок: путь -> {w, h}; грузятся один раз
   const sizes = new Map();
   function natural(path) {
     if (!sizes.has(path)) {
@@ -61,7 +61,7 @@ export function createTransform(stage, canvas, pattern, { onCommit }) {
     return l && l.type === 'image' && l.image && l.on ? l : null;
   };
 
-  /** Центр, полуоси и угол рамки в пикселях плитки. */
+  /** Центр, полуоси и угол рамки в пикселях плитки */
   function geometry(l) {
     const W = canvas.clientWidth;
     const H = canvas.clientHeight;
@@ -82,7 +82,7 @@ export function createTransform(stage, canvas, pattern, { onCommit }) {
   const turn = (g, x, y) => [g.cx + x * Math.cos(g.a) - y * Math.sin(g.a),
                              g.cy + x * Math.sin(g.a) + y * Math.cos(g.a)];
 
-  /** Рамка по слою; зовётся каждый кадр проигрывателя - дёшево. */
+  /** Рамка по слою, зовётся каждый кадр проигрывателя - дёшево */
   function sync() {
     const l = drag ? drag.layer : layer();
     const g = l && geometry(l);
@@ -104,7 +104,7 @@ export function createTransform(stage, canvas, pattern, { onCommit }) {
     spin.setAttribute('cx', sx); spin.setAttribute('cy', sy);
   }
 
-  // ── Мышь ────────────────────────────────────────────────────────────
+  // Мышь
   let drag = null;
   const local = (e) => {
     const r = svg.getBoundingClientRect();
@@ -153,7 +153,7 @@ export function createTransform(stage, canvas, pattern, { onCommit }) {
   svg.addEventListener('pointerup', finish);
   svg.addEventListener('pointercancel', finish);
 
-  // Колесо над рамкой - размер; одна правка после паузы, а не на каждый щелчок.
+  // Колесо над рамкой - размер, одна правка после паузы, а не на каждый щелчок
   let wheelTimer = null;
   box.addEventListener('wheel', (e) => {
     const l = layer();

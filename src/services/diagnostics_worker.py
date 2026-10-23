@@ -1,4 +1,4 @@
-"""Фоновый прогон диагностики VPK — чтобы UI не подвисал на распаковке/осмотре."""
+"""Фоновый прогон диагностики VPK - чтобы UI не подвисал на распаковке/осмотре"""
 
 from __future__ import annotations
 
@@ -11,7 +11,7 @@ logger = get_logger(__name__)
 
 class DiagnosticsWorker(BaseWorker):
     """Гоняет inspect_vpk в отдельном потоке. Сигнал finished несёт
-    DiagnosticReport (или None при неожиданной ошибке — тогда шлём error)."""
+    DiagnosticReport (или None при неожиданной ошибке - тогда шлём error)"""
 
     finished = Signal(object)   # DiagnosticReport
     error = Signal(str)
