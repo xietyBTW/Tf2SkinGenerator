@@ -83,7 +83,7 @@ def build_spy_masks_vpk(
             elif mask_img and os.path.isfile(mask_img):
                 # Конвертируем изображение пользователя.
                 # ВАЖНО: имя PNG должно совпадать с именем VTF (без _tmp),
-                # иначе VTFCmd создаст файл с неправильным именем
+                # иначе create_vtf создаст файл с неправильным именем
                 tmp_png = masks_dir / f"{vtf_name}.png"
                 TextureService.process_image(mask_img, tmp_png, size)
                 vtf_flags, merged = TextureService.resolve_vtf_flags_and_options(flags, vtf_options, drop_normal=True)

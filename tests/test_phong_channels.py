@@ -2,7 +2,7 @@
 от текстуры ($phongalbedotint), A - маска обводки ($rimmask), и конструктор
 градиента блика (phongwarp)
 
-VTFCmd не зовём: create_vtf кладёт PNG под именем .vtf, rgba_from_vtf его читает
+Настоящее сжатие VTF не зовём: create_vtf кладёт PNG под именем .vtf, rgba_from_vtf его читает
 """
 import io
 import tempfile

@@ -285,7 +285,7 @@ class BuildContext:
         """
         # Папка сборки - прямо в системном %TEMP% и с коротким именем: внутри
         # неё лежат пути вида vpkroot\materials\vgui\replay\thumbnails\models\
-        # workshop\…, а vpk.exe, VTFCmd и studiomdl не умеют путей длиннее 260
+        # workshop\…, а vpk.exe и studiomdl не умеют путей длиннее 260
         # символов, а у шапок длинные пути и так на грани. Префикс
         # `tf2sg_` - уборка %TEMP% при старте снимает брошенные папки сама
         # (file_utils.cleanup_stale_temp_artifacts), каждую по своему возрасту

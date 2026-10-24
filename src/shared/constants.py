@@ -65,13 +65,7 @@ def bypass_prefix(method: Optional[str]) -> str:
 class ToolPaths:
     """Пути к внешним инструментам"""
     #: Бандл - только чтение, живёт рядом с .exe (см. src/shared/paths.py)
-    VTF_TOOL = install_dir() / "tools/VTF/VTFCmd.exe"
     VPK_TOOL = install_dir() / "tools/VPK/vpk.exe"
-
-    @classmethod
-    def get_vtf_tool(cls) -> Path:
-        """Возвращает абсолютный путь к VTF инструменту"""
-        return cls.VTF_TOOL.resolve() if cls.VTF_TOOL.exists() else cls.VTF_TOOL
 
     @classmethod
     def get_vpk_tool(cls) -> Path:
@@ -112,7 +106,7 @@ class ToolPaths:
 
 class ToolTimeouts:
     """
-    Лимиты времени для внешних инструментов (Crowbar, studiomdl, VTFCmd, vpk.exe)
+    Лимиты времени для внешних инструментов (Crowbar, studiomdl, vpk.exe)
 
     Без таймаута зависший процесс (битая модель, баг Crowbar) заблокировал бы
     воркер навсегда: прогресс-бар висит, отмена не убивает заблокированный
@@ -120,7 +114,6 @@ class ToolTimeouts:
     """
     DECOMPILE = 300   # Crowbar: декомпиляция MDL -> QC/SMD
     COMPILE = 300     # studiomdl: компиляция QC -> MDL
-    VTF = 120         # VTFCmd: конвертация изображения в VTF
     VPK = 180         # vpk.exe: упаковка папки в VPK
 
 

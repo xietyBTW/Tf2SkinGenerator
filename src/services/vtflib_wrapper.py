@@ -1,5 +1,5 @@
 import os
-from ctypes import POINTER, c_char_p, c_float, c_int, c_uint, c_ubyte, pointer, windll
+from ctypes import POINTER, c_char_p, c_float, c_int, c_uint, c_ubyte, c_void_p, pointer, windll
 from pathlib import Path
 from threading import RLock
 
@@ -122,8 +122,11 @@ class VTFLib:
         cls._dll.vlImageSetFlags.restype = None
         cls._dll.vlImageSetFlags.argtypes = [vlUInt]
 
-        cls._dll.vlImageSave.restype = vlBool
-        cls._dll.vlImageSave.argtypes = [c_char_p]
+        cls._dll.vlImageSaveLump.restype = vlBool
+        cls._dll.vlImageSaveLump.argtypes = [c_void_p, vlUInt, POINTER(vlUInt)]
+
+        cls._dll.vlImageGetSize.restype = vlUInt
+        cls._dll.vlImageGetSize.argtypes = []
 
         cls._dll.vlImageComputeMipmapSize.restype = vlUInt
         cls._dll.vlImageComputeMipmapSize.argtypes = [vlUInt, vlUInt, vlUInt, vlUInt, c_int]
@@ -138,8 +141,8 @@ class VTFLib:
         cls._dll.vlSetFloat.argtypes = [c_int, c_float]
 
         # Функции для чтения VTF
-        cls._dll.vlImageLoad.restype = vlBool
-        cls._dll.vlImageLoad.argtypes = [c_char_p, vlBool]
+        cls._dll.vlImageLoadLump.restype = vlBool
+        cls._dll.vlImageLoadLump.argtypes = [c_void_p, vlUInt, vlBool]
 
         cls._dll.vlImageGetWidth.restype = vlUInt
         cls._dll.vlImageGetWidth.argtypes = []
@@ -175,6 +178,28 @@ class VTFLib:
                 err = dll.vlGetLastError()
                 raise RuntimeError(err.decode("utf-8", errors="replace") if err else "VTFLib init failed")
             cls._initialized = True
+
+    # Файлы читает и пишет Python, VTFLib работает с памятью: путь он берёт
+    # в кодировке ANSI, и кириллица в пути (папка пользователя) ломает открытие
+
+    @classmethod
+    def _load_bound(cls, dll, vtf_path) -> None:
+        """Загрузить файл в привязанный образ. VTFLib копирует данные к себе"""
+        with open(vtf_path, "rb") as f:
+            size = os.fstat(f.fileno()).st_size
+            buf = (c_ubyte * size)()
+            f.readinto(buf)
+        if not dll.vlImageLoadLump(buf, c_uint(size), c_int(0)):
+            raise RuntimeError(cls._last_error())
+
+    @classmethod
+    def _save_bound(cls, dll, output_file) -> None:
+        size = int(dll.vlImageGetSize())
+        buf = (c_ubyte * size)()
+        written = c_uint(0)
+        if not dll.vlImageSaveLump(buf, c_uint(size), pointer(written)):
+            raise RuntimeError(cls._last_error())
+        Path(output_file).write_bytes(memoryview(buf)[:written.value])
 
     @classmethod
     def _last_error(cls) -> str:
@@ -259,9 +284,7 @@ class VTFLib:
                     except Exception:
                         pass
 
-                out_bytes = str(Path(output_file)).encode("utf-8")
-                if not dll.vlImageSave(out_bytes):
-                    raise RuntimeError(cls._last_error())
+                cls._save_bound(dll, output_file)
             finally:
                 try:
                     dll.vlImageDestroy()
@@ -303,8 +326,7 @@ class VTFLib:
                         raise ValueError("Face size mismatch")
                     buf = (c_ubyte * len(data)).from_buffer_copy(data)
                     dll.vlImageSetData(c_uint(0), c_uint(face), c_uint(0), c_uint(0), buf)
-                if not dll.vlImageSave(str(Path(output_file)).encode("utf-8")):
-                    raise RuntimeError(cls._last_error())
+                cls._save_bound(dll, output_file)
             finally:
                 try:
                     dll.vlImageDestroy()
@@ -342,9 +364,7 @@ class VTFLib:
                 if not dll.vlBindImage(img_id.value):
                     raise RuntimeError(cls._last_error())
 
-                path_bytes = str(vtf_path).encode("utf-8")
-                if not dll.vlImageLoad(path_bytes, vlBool(0)):
-                    raise RuntimeError(cls._last_error())
+                cls._load_bound(dll, vtf_path)
 
                 width       = int(dll.vlImageGetWidth())
                 height      = int(dll.vlImageGetHeight())
@@ -424,9 +444,7 @@ class VTFLib:
                 if not dll.vlBindImage(img_id.value):
                     raise RuntimeError(cls._last_error())
 
-                path_bytes = str(vtf_path).encode("utf-8")
-                if not dll.vlImageLoad(path_bytes, vlBool(0)):
-                    raise RuntimeError(cls._last_error())
+                cls._load_bound(dll, vtf_path)
 
                 width  = int(dll.vlImageGetWidth())
                 height = int(dll.vlImageGetHeight())

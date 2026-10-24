@@ -154,9 +154,9 @@ class ControlsTests(unittest.TestCase):
     def test_flag_checks_carry_names_not_captions(self):
         """Галки флагов приезжают с ИМЕНЕМ флага, а не с подписью
 
-        В сборку уходит имя (`-flag clamps`): на подпись («Clamp S») VTFCmd
-        падает, то есть отмеченный флаг ломал сборку целиком. Плюс каждое имя
-        обязано быть тем, которое сборка умеет применить
+        В сборку уходит имя (`CLAMPS`): подпись («Clamp S») сборка не знает, и
+        отмеченный флаг молча терялся. Плюс каждое имя обязано быть тем,
+        которое сборка умеет применить
         """
         from src.services.texture_service import TextureService
 
@@ -166,8 +166,8 @@ class ControlsTests(unittest.TestCase):
             self.assertIn(row['key'], TextureService._VTFLIB_FLAG_BITS, row)
             self.assertTrue(row['label'], row)
             self.assertTrue(row['on'], row)          # режим ничего не запрещает
-        # NOMIP гасится опцией `nomipmaps`, а не флагом: в VTFCmd-пути имя
-        # пропускается нарочно, и галка была бы пустышкой
+        # NOMIP гасится опцией `nomipmaps`, а не флагом, и галка была бы
+        # пустышкой
         self.assertNotIn('NOMIP', [row['key'] for row in flags])
 
     def test_settings_says_whether_the_game_path_works(self):

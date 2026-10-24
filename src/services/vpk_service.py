@@ -885,7 +885,7 @@ class VPKService:
             main_from_game=r.main_from_game,
             settings_for=_eff,
             # Главная, доп. материалы и синие жмутся одновременно, до finish().
-            # ponytail: при ошибке посреди стадии фоновые VTFCmd дорабатывают
+            # ponytail: при ошибке посреди стадии фоновые сжатия дорабатывают
             # без ожидания, как и компиляция модели
             jobs=VtfJobs(),
         )

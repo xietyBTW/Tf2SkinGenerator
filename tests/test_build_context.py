@@ -86,7 +86,7 @@ class BuildContextTests(unittest.TestCase):
 
     def test_default_folder_is_short_and_swept_at_start(self):
         # Короткая папка прямо в %TEMP%: в прежней <данные>\tools\temp\build_…
-        # пути материалов шапок упирались в 260 символов (vpk.exe, VTFCmd).
+        # пути материалов шапок упирались в 260 символов (vpk.exe, studiomdl).
         # Префикс tf2sg_ - брошенную папку снимет уборка %TEMP% при старте
         ctx = BuildContext.create("hat", "some_hat", debug_mode=False)
         try:

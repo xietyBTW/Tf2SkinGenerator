@@ -102,6 +102,6 @@ Python 3.12 or newer is required. The development setup, project layout, tests a
 
 ## License
 
-The source code is released under the [MIT license](LICENSE). Crowbar, the VTFLib tools (VTFCmd, VTFLib, HLLib, DevIL), meshoptimizer and three.js come bundled under their own licenses, listed in [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md).
+The source code is released under the [MIT license](LICENSE). Crowbar, VTFLib, meshoptimizer and three.js come bundled under their own licenses, listed in [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md).
 
 TF2 Skin Generator is a fan-made tool. It isn't affiliated with or endorsed by Valve. Team Fortress 2 and its assets belong to Valve Corporation, and no game files are distributed with the app.

@@ -352,7 +352,7 @@ def controls_for(mode: str, key: str = '') -> Dict[str, object]:
         # Галки флагов: ИМЯ (его ждёт сборка), подпись и разрешён ли флаг в
         # этом режиме. Список конкретный по той же причине, что и форматы:
         # копия в разметке разъезжается с доменной, и страница присылала в
-        # сборку подписи вместо имён - VTFCmd на них падал
+        # сборку подписи вместо имён - флаги на них терялись
         'flags': [{'key': key, 'label': label, 'adv': adv,
                    'on': allowed_flags is None or key in allowed_flags}
                   for key, label, adv in VTF_FLAGS],

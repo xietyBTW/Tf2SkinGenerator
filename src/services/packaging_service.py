@@ -12,7 +12,7 @@ logger = get_logger(__name__)
 
 class PackagingService:
 
-    #: Предел длины пути у vpk.exe и VTFCmd (Win32 MAX_PATH, с нулём в конце)
+    #: Предел длины пути у vpk.exe (Win32 MAX_PATH, с нулём в конце)
     MAX_PATH = 260
 
     @staticmethod

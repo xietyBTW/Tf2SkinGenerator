@@ -218,34 +218,30 @@ class VPKServiceTests(unittest.TestCase):
         with self.assertRaises(builtins.FileNotFoundError):
             TextureService.process_image("missing.png", "out.png", (4, 4))
 
-    def test_create_vtf_builds_command(self):
+    def test_create_vtf_writes_options(self):
+        from srctools.vtf import VTF, VTFFlags
         with tempfile.TemporaryDirectory() as tmp:
             base = Path(tmp)
             png_path = base / "img.png"
             Image.new("RGBA", (8, 8), color=(255, 0, 0, 128)).save(png_path)
-            with patch("src.services.texture_service.TextureService.get_vtf_tool", return_value=Path("vtf.exe")):
-                with patch("src.services.texture_service.subprocess.run") as run:
-                    run.return_value = type("R", (), {"returncode": 0, "stdout": "", "stderr": ""})()
-                    TextureService.create_vtf(str(png_path), str(base), "DXT1", ["CLAMPS"], {"nomipmaps": True})
-                    args = run.call_args[0][0]
-                    self.assertIn("-alphaformat", args)
-                    self.assertIn("-nomipmaps", args)
-    
+            TextureService.create_vtf(str(png_path), str(base), "DXT1", ["CLAMPS"], {"nomipmaps": True})
+            with open(base / "img.vtf", "rb") as f:
+                vtf = VTF.read(f, header_only=True)
+            self.assertEqual(vtf.mipmap_count, 1)
+            self.assertIn(VTFFlags.CLAMP_S, vtf.flags)
+            self.assertIn(VTFFlags.NO_MIP, vtf.flags)
+
     def test_create_vtf_error(self):
         from src.shared.exceptions import VTFCreationError
         with tempfile.TemporaryDirectory() as tmp:
             base = Path(tmp)
             png_path = base / "img.png"
-            Image.new("RGB", (8, 8), color="red").save(png_path)
-            with patch("src.services.texture_service.TextureService.get_vtf_tool", return_value=Path("vtf.exe")):
-                def fake_run(*args, **kwargs):
-                    return type("R", (), {"returncode": 1, "stdout": "bad", "stderr": "err"})()
-                with patch("src.services.texture_service.subprocess.run", side_effect=fake_run):
-                    with self.assertRaises(VTFCreationError) as cm:
-                        TextureService.create_vtf(str(png_path), str(base), "DXT1", [], {})
-                    # Сообщение должно содержать вывод VTFCmd
-                    self.assertIn("bad", str(cm.exception))
-                    self.assertIn("err", str(cm.exception))
+            Image.new("RGB", (12, 8), color="red").save(png_path)
+            with self.assertRaises(VTFCreationError) as cm:
+                TextureService.create_vtf(str(png_path), str(base), "DXT1", [], {})
+            # Причина (размер не степень двойки) доходит до сообщения
+            self.assertIn("power of 2", str(cm.exception))
+            self.assertFalse((base / "img.vtf").exists())
 
     def test_create_vpk_file_success_and_failure(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -387,7 +383,7 @@ class VPKServiceTests(unittest.TestCase):
             TS = "src.services.texture_service.TextureService."
 
             def fake_create_vtf(png_path, output_path, fmt, flags, options=None):
-                # Эмулируем VTFCmd: кладём .vtf рядом по имени PNG
+                # Как create_vtf: кладём .vtf рядом по имени PNG
                 out = Path(output_path)
                 out.mkdir(parents=True, exist_ok=True)
                 (out / f"{Path(png_path).stem}.vtf").write_bytes(b"vtf")
@@ -1154,7 +1150,7 @@ class VPKServiceTests(unittest.TestCase):
             self.assertEqual(list(out.glob("*.vtf")), [])
 
     def test_render_extra_texture_vtf_input_copies_and_writes_vmt(self):
-        # На вход .vtf -> копируется как есть + создаётся VMT (без vtfcmd)
+        # На вход .vtf -> копируется как есть + создаётся VMT (без сжатия)
         with tempfile.TemporaryDirectory() as tmp:
             out = Path(tmp)
             src_vtf = out / "src.vtf"
@@ -1210,7 +1206,7 @@ class BuildVpkCharacterizationTests(unittest.TestCase):
     """
     Характеризационный тест build_vpk: фиксирует, КАКИЕ VTF-файлы (и с какими
     именами) производит пайплайн для обычного оружия с панельной доп.текстурой.
-    Внешние инструменты (crowbar/studiomdl/VTFCmd/упаковка) замоканы; create_vtf
+    Внешние инструменты (crowbar/studiomdl/сжатие VTF/упаковка) замоканы; create_vtf
     пишет маркер-файл, чтобы наблюдать именование материалов через весь конвейер
 
     Назначение - сетка безопасности под рефакторинг build_vpk: рефактор не должен
@@ -1538,12 +1534,12 @@ class BuildVpkCharacterizationTests(unittest.TestCase):
 
     def test_background_compression_error_fails_build(self):
         def broken_vtf(*a, **k):
-            raise RuntimeError("VTFCmd упал")
+            raise RuntimeError("сжатие упало")
         with tempfile.TemporaryDirectory() as tmp:
             ok, msg, _ = self._run_build(Path(tmp), extra_patches={
                 "src.services.texture_service.TextureService.create_vtf": {"side_effect": broken_vtf}})
         self.assertFalse(ok)
-        self.assertIn("VTFCmd упал", msg)
+        self.assertIn("сжатие упало", msg)
 
     def test_snapshot_material_only_mirror_no_blu(self):
         # Часы шпиона: без BLU (одна текстура), зеркальный VMT по игровому

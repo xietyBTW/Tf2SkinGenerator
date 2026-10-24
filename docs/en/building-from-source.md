@@ -38,7 +38,7 @@ These live in `tools/` and are committed to the repository, so there's nothing t
 | Folder | What's there |
 |---|---|
 | `tools/crowbar/` | Crowbar's command-line decompiler |
-| `tools/VTF/` | VTFCmd with VTFLib, HLLib and DevIL |
+| `tools/VTF/` | VTFLib (animated textures and reading VTF) |
 | `tools/meshoptimizer/` | `meshoptimizer.dll` for simplifying imported models, built by `scripts/build_meshoptimizer.ps1` |
 
 `vpk.exe` and `studiomdl.exe` are Valve's own programs and aren't in the repository. The app takes them from `<TF2>\bin`. If you'd rather not depend on the game for packing, a copy of `vpk.exe` in `tools/VPK/` takes priority.
@@ -105,7 +105,7 @@ build-release.ps1         release script
 
 **Two roots on disk.** `src/shared/paths.py` separates `install_dir()`, the program files, which are read-only because an update replaces them, from `data_dir()`, where everything the app writes goes. In the built app the data folder is `%LOCALAPPDATA%\Tf2SkinGenerator`; from source both are the current folder. New code that writes files must go through `data_dir()`.
 
-**The build pipeline.** A skin build decompiles the item with Crowbar (the result is cached in `%USERPROFILE%\.tf2skingen_cache`), patches the QC so its materials point into the sv_pure bypass folder, converts images to VTF with VTFCmd, writes the VMTs, compiles the model with `studiomdl` and packs the folder with `vpk.exe`. `BuildRequest` describes a build, `BuildWorker` runs it in a thread, `VPKService` does the work.
+**The build pipeline.** A skin build decompiles the item with Crowbar (the result is cached in `%USERPROFILE%\.tf2skingen_cache`), patches the QC so its materials point into the sv_pure bypass folder, converts images to VTF with srctools, writes the VMTs, compiles the model with `studiomdl` and packs the folder with `vpk.exe`. `BuildRequest` describes a build, `BuildWorker` runs it in a thread, `VPKService` does the work.
 
 **Translations.** The interface is written in Russian, and Russian strings are the keys. The English dictionary is `frontend/mockup/strings.js`. A string with a value inside is one template with `{}` (`Built: {}`), never glued from pieces, otherwise the dictionary can't find it. Item names come from Python already in the right language. Messages from Python live in `src/data/translations.py`, and `src/shared/error_classifier.py` turns raw errors into explanations in the interface language. Debug and info log entries stay in Russian on purpose: they're read by the developer.
 
@@ -169,4 +169,4 @@ When the app runs from source, the update check only offers a link to the releas
 
 ## Licenses
 
-The project's own code is under the MIT license. The bundled tools keep their licenses: Crowbar (CC BY-SA 3.0), VTFLib, HLLib and DevIL (LGPL), VTFCmd (GPL, used as a separate program), meshoptimizer (MIT), three.js (MIT). The particle engine follows the logic of noclip.website (MIT). Details are in [THIRD_PARTY_LICENSES.md](../../THIRD_PARTY_LICENSES.md).
+The project's own code is under the MIT license. The bundled tools keep their licenses: Crowbar (CC BY-SA 3.0), VTFLib (LGPL), meshoptimizer (MIT), three.js (MIT). The particle engine follows the logic of noclip.website (MIT). Details are in [THIRD_PARTY_LICENSES.md](../../THIRD_PARTY_LICENSES.md).

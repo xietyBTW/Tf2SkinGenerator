@@ -1,11 +1,10 @@
 import os
-import subprocess
 from pathlib import Path
 from typing import List, Tuple, Optional
 from PIL import Image, ImageOps
-from src.shared.constants import ToolPaths, ToolTimeouts
 from src.shared.exceptions import VTFCreationError
 from src.shared.logging_config import get_logger
+from src.services import vtf_writer
 from src.services.vtflib_wrapper import VTFLib, VTFImageFormat, VTFImageFlags
 
 logger = get_logger(__name__)
@@ -19,7 +18,7 @@ def _normal_settings(options):
 
 class TextureService:
     # Маппинг читаемых имён форматов -> внутренние идентификаторы.
-    # Используется и VTFLib-путём (_map_format_to_vtflib) и VTFCmd-путём (create_vtf)
+    # Используется и анимацией (_map_format_to_vtflib), и create_vtf
     _FORMAT_ALIASES: dict = {
         "RGB888 Bluescreen":    "RGB888_BLUESCREEN",
         "BGR888 Bluescreen":    "BGR888_BLUESCREEN",
@@ -49,16 +48,6 @@ class TextureService:
         "SSBUMP": VTFImageFlags.SSBUMP,
         "BORDER": VTFImageFlags.BORDER,
     }
-
-    # UI-имя флага -> аргумент VTFCmd -flag. Всё, чего нет в таблице,
-    # передаётся как flag.lower() (совпадает для остальных флагов)
-    _VTFCMD_FLAG_ALIASES: dict = {
-        "NOMINMIP": "minmip",
-    }
-
-    @staticmethod
-    def get_vtf_tool() -> Path:
-        return ToolPaths.get_vtf_tool()
 
     @staticmethod
     def derive_effect_map(
@@ -270,7 +259,7 @@ class TextureService:
             options = {}
 
         # options["normal"] -> на выходе многокадровая КАРТА НОРМАЛЕЙ той же
-        # анимации (VTFCmd -normal тут неприменим: он умеет только один кадр)
+        # анимации
         as_normal = bool(options.get("normal", False))
 
         count, has_alpha = TextureService._animation_info(input_path)
@@ -364,7 +353,7 @@ class TextureService:
             out_vtf_path:   полный путь к итоговому .vtf (для анимированного).
             temp_png_path:  временный PNG для конвертации обычной текстуры.
             normal_base:    стем для файлов normal-map ('{normal_base}_normal.vtf').
-            vtf_output_path: директория, куда VTFCmd кладёт .vtf.
+            vtf_output_path: директория, куда ложится .vtf.
             jobs:           VtfJobs - сжать в фоне (кроме анимации)
 
         Returns:
@@ -411,7 +400,7 @@ class TextureService:
         if is_normal_map:
             normal_options = merged.copy()
             normal_options.pop("normal", None)
-            # Нормаль - свой процесс VTFCmd, жмётся одновременно с базой
+            # Нормаль жмётся одновременно с базой
             from concurrent.futures import ThreadPoolExecutor
             with ThreadPoolExecutor(max_workers=1) as ex:
                 normal = ex.submit(TextureService.write_normal_vtf, temp_png_path,
@@ -427,67 +416,35 @@ class TextureService:
             Path(temp_png_path).unlink()
 
     @staticmethod
+    def _gamma_value(options: dict) -> float:
+        """Гамма из текстового поля: «2,2» с русской раскладки тоже число,
+        пустое или неверное - 2.0, как по умолчанию"""
+        raw = str(options.get("gcorrection", "")).strip().replace(",", ".")
+        try:
+            value = float(raw)
+        except ValueError:
+            return 2.0
+        return value if value > 0 else 2.0
+
+    @staticmethod
     def create_vtf(png_path: str, output_path: str, format_type: str, flags: List[str], options: dict = None) -> None:
+        """PNG -> {output_path}/{имя PNG}.vtf. Опция normal здесь не действует:
+        карту нормалей строит normal_map, все вызовы её отбрасывают"""
         if options is None:
             options = {}
-        vtf_format = TextureService._FORMAT_ALIASES.get(format_type, format_type)
-        has_alpha = False
+        vtf_format = TextureService._FORMAT_ALIASES.get(format_type, format_type).upper()
+        out_file = Path(output_path) / f"{Path(png_path).stem}.vtf"
+        gamma = TextureService._gamma_value(options) if options.get("gamma") else None
+        logger.info(f"Создание VTF {out_file.name}: {vtf_format}, флаги {flags}, опции {options}")
         try:
             with Image.open(png_path) as img:
-                has_alpha = img.mode in ('RGBA', 'LA') or 'transparency' in img.info
+                vtf_writer.write_vtf(
+                    img, out_file, vtf_format,
+                    TextureService._map_flags_to_vtflib(flags, options),
+                    mipmaps=not options.get("nomipmaps", False),
+                    thumbnail=not options.get("nothumbnail", False),
+                    with_reflectivity=not options.get("noreflectivity", False),
+                    gamma=gamma,
+                    bump_scale=float(options.get("bumpscale", 1.0)))
         except Exception as e:
-            logger.warning(f"Не удалось проверить альфа-канал: {e}")
-        logger.info(f"Создание VTF с форматом: {format_type} -> {vtf_format}, альфа-канал: {has_alpha}")
-        vtf_args = [
-            str(TextureService.get_vtf_tool()),
-            "-file", png_path,
-            "-output", output_path,
-            "-format", vtf_format
-        ]
-        if has_alpha:
-            vtf_args.extend(["-alphaformat", vtf_format])
-        if options.get("nomipmaps", False):
-            vtf_args.append("-nomipmaps")
-        if options.get("nothumbnail", False):
-            vtf_args.append("-nothumbnail")
-        if options.get("noreflectivity", False):
-            vtf_args.append("-noreflectivity")
-        if options.get("gamma", False):
-            vtf_args.append("-gamma")
-            if "gcorrection" in options:
-                vtf_args.extend(["-gcorrection", str(options["gcorrection"])])
-        if options.get("normal", False):
-            vtf_args.append("-normal")
-            if "nkernel" in options:
-                vtf_args.extend(["-nkernel", str(options["nkernel"])])
-            if "nheight" in options:
-                vtf_args.extend(["-nheight", str(options["nheight"])])
-            if "nalpha" in options:
-                vtf_args.extend(["-nalpha", str(options["nalpha"])])
-            if "nscale" in options:
-                vtf_args.extend(["-nscale", str(options["nscale"])])
-            if options.get("nwrap", False):
-                vtf_args.append("-nwrap")
-        if "bumpscale" in options:
-            vtf_args.extend(["-bumpscale", str(options["bumpscale"])])
-        for flag in flags:
-            name = flag.upper()
-            if name == "NOMIP":
-                continue
-            cmd_flag = TextureService._VTFCMD_FLAG_ALIASES.get(name, flag.lower())
-            vtf_args.extend(["-flag", cmd_flag])
-        logger.info(f"VTFCmd команда: {' '.join(vtf_args)}")
-        logger.debug(f"Формат: {vtf_format} (исходный: {format_type}), опции: {options}, флаги: {flags}")
-        # Без check=True: при ненулевом коде формируем информативное исключение
-        # с выводом VTFCmd, а не сырой CalledProcessError
-        try:
-            result = subprocess.run(vtf_args, capture_output=True, text=True,
-                                    creationflags=subprocess.CREATE_NO_WINDOW,
-                                    timeout=ToolTimeouts.VTF)
-        except subprocess.TimeoutExpired:
-            raise VTFCreationError(
-                ' '.join(vtf_args), "",
-                f"VTFCmd timed out after {ToolTimeouts.VTF}s"
-            )
-        if result.returncode != 0:
-            raise VTFCreationError(' '.join(vtf_args), result.stdout, result.stderr)
+            raise VTFCreationError(f"{png_path} -> {out_file.name} ({vtf_format})", stderr=str(e)) from e

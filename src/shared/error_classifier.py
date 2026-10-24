@@ -200,29 +200,25 @@ _RULES: List[Tuple[Callable, str, str, str, str]] = [
         ),
     ),
 
-    # Ошибка конвертации текстуры (VTFCmd)
+    # Ошибка конвертации текстуры
     (
         lambda m: any(x in m for x in [
             "vtf creation failed", "vtf создание не удалось",
-            "vtfcmd", "error_vtf_creation",
+            "ошибка создания vtf", "error_vtf_creation",
         ]),
         "Ошибка создания текстуры",
         (
-            "VTFCmd.exe не смог конвертировать изображение в формат VTF.\n\n"
+            "Не удалось перевести изображение в формат VTF.\n\n"
             "Проверьте:\n"
-            "• Присутствует ли VTFCmd.exe в папке tools программы\n"
             "• Поддерживается ли формат вашего изображения (PNG, JPEG, TGA, BMP)\n"
-            "• Совместим ли выбранный формат сжатия (DXT1/DXT5) с размером изображения - "
-            "размер должен быть кратен 4"
+            "• Размер текстуры - степень двойки (256, 512, 1024, 2048)"
         ),
         "Texture creation failed",
         (
-            "VTFCmd.exe failed to convert the image to VTF format.\n\n"
+            "Could not convert the image to VTF.\n\n"
             "Check:\n"
-            "• Is VTFCmd.exe present in the program's tools folder\n"
             "• Is your image format supported (PNG, JPEG, TGA, BMP)\n"
-            "• Is the selected compression (DXT1/DXT5) compatible with your image size - "
-            "dimensions must be multiples of 4"
+            "• Is the texture size a power of two (256, 512, 1024, 2048)"
         ),
     ),
 

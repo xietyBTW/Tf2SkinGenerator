@@ -115,8 +115,8 @@ def _part_textures(part_variants, part_specs, part_maps, fixed_handled,
     render_panel_extras(
         {row: image for row, (image, _) in renders.items()}, fixed_handled,
         ctx, slots, lambda name: _eff(owner.get(name, name)))
-    # VMT уже смотрит на эту VTF: не вышла (длинный путь у VTFCmd,
-    # битая картинка) - в игре материал фиолетовый, молчать нельзя
+    # VMT уже смотрит на эту VTF: не вышла (длинный путь, битая картинка) -
+    # в игре материал фиолетовый, молчать нельзя
     for row in renders:
         if not slots.vtf(row).exists():
             ctx.warn(f"Текстура материала части «{row}» не создана: в игре он будет без неё")
@@ -191,8 +191,8 @@ def run_extra_render_jobs(
 
     jobs: список ``(name, img, size, format_type, flags, vtf_options)``. Каждая
     задача пишет свои ``{name}.vtf/.vmt`` - без shared-файлов, без чтения игрового
-    VPK и без UI-callback, поэтому безопасна в пуле потоков. VTFCmd - внешний
-    CPU-bound процесс, так что параллелизм реально ускоряет многоматериальные и
+    VPK и без UI-callback, поэтому безопасна в пуле потоков. Сжатие VTF
+    отпускает GIL, так что параллелизм реально ускоряет многоматериальные и
     многостилевые сборки. Результаты логируются, функция ничего не возвращает
     """
     if not jobs:

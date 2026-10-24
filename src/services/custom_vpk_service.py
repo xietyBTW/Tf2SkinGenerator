@@ -377,7 +377,7 @@ class CustomVPKService:
                     todo.append((user_img, tex, _stock(tex)))
                 # Если пользователь не выбрал - оригинальный VTF остаётся без изменений
 
-            # Текстуры независимы, а VTFCmd - отдельный процесс: жмём одновременно
+            # Текстуры независимы, а сжатие отпускает GIL: жмём одновременно
             if todo:
                 names = ", ".join(tex['name'] for _, tex, _ in todo)
                 emit(-1, f"Converting {names}..." if language == "en"

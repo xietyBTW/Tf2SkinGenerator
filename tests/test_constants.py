@@ -11,8 +11,8 @@ class ConstantsTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             tool_file = Path(tmp) / "tool.exe"
             tool_file.write_text("x", encoding="utf-8")
-            with patch.object(ToolPaths, "VTF_TOOL", tool_file):
-                result = ToolPaths.get_vtf_tool()
+            with patch.object(ToolPaths, "VPK_TOOL", tool_file):
+                result = ToolPaths.get_vpk_tool()
             self.assertEqual(result, tool_file.resolve())
 
     def test_tool_paths_missing_no_tf2(self):

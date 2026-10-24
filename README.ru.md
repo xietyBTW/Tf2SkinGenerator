@@ -102,6 +102,6 @@ python -m venv .venv
 
 ## Лицензия
 
-Исходный код распространяется по [лицензии MIT](LICENSE). Crowbar, инструменты VTFLib (VTFCmd, VTFLib, HLLib, DevIL), meshoptimizer и three.js идут в комплекте под своими лицензиями, их список в [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md).
+Исходный код распространяется по [лицензии MIT](LICENSE). Crowbar, VTFLib, meshoptimizer и three.js идут в комплекте под своими лицензиями, их список в [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md).
 
 TF2 Skin Generator сделан фанатом игры. Он не связан с Valve и не одобрен ею. Team Fortress 2 и её ресурсы принадлежат Valve Corporation, файлы игры вместе с приложением не распространяются.
