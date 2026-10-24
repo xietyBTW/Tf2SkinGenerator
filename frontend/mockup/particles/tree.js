@@ -15,7 +15,7 @@ import { plural } from '../util.js';
 import { ask } from '../ask.js';
 import { contextMenu } from '../menu.js';
 import { flipList, staggerIn } from '../motion.js';
-import { pcfNodes, pcfTree, pcfCollapsed, pSystem, setTree, pcfDiff, setDiff } from './state.js';
+import { pcfNodes, pcfTree, pcfCollapsed, pSystem, setSystem, setTree, pcfDiff, setDiff } from './state.js';
 import { systemMenu, applyStructure } from './actions.js';
 import { showParams } from './params.js';
 import { syncHistory, editorKey } from './playback.js';
@@ -345,6 +345,14 @@ export function showParticleFrame(on) {
   }
   stage.pframe.hidden = !on;
   stage.frame.hidden = on;
+  if (!stage.pframe.src) return;
+  // Уход из раздела - уход от эффекта, как у оружия: страница его забыла, и
+  // движок не должен ни показывать его на возврате, ни крутить в спрятанном окне
+  if (!on) setSystem('');
+  withParticles((w) => {
+    if (!on) w.resetViewer();
+    w.setActive(on);
+  });
 }
 
 //: Номер последнего открытия файла и выбора системы: ответы на прежние
@@ -394,7 +402,13 @@ export async function loadPcf(source, label = '', system = '', { keepList = fals
     w.onEditorKey = editorKey;
     // Отпустили ручку гизмо: правка уже видна в кадре, в документ - здесь
     w.onGizmoEdit = async (system, edits) =>
-      applyStructure(await api.applyParticleGizmo(system, edits));
+      applyStructure(await api.applyParticleGizmo(system, edits), { soft: true });
+    // Первый сдвиг всего эффекта: документ ставит точку «начало эффекта».
+    // Эффекту, который считает свои точки, её не ставят - едут места рождения
+    w.onGizmoPrepare = async (system) => {
+      const res = await api.applyParticleGizmo(system, [], true);
+      return res?.noOrigin ? 'fallback' : applyStructure(res);
+    };
     w.loadParticleData(data);
   });
   loadedShort = short;

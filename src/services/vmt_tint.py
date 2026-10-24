@@ -69,29 +69,6 @@ def parse_tint(vmt_text: str) -> Optional[TintSpec]:
     return TintSpec(color, max(0.0, min(1.0, over_base)))
 
 
-def same_look(red: Optional[TintSpec], blu: Optional[TintSpec]) -> bool:
-    """Дают ли две краски одинаковый результат на одной и той же текстуре"""
-    if red is None or blu is None:
-        return red is blu or (red is None and blu is None)
-    if red.is_neutral and blu.is_neutral:
-        return True
-    return red.color == blu.color and abs(red.over_base - blu.over_base) < 1e-6
-
-
-def same_material_look(red: Optional[tuple], blu: Optional[tuple]) -> bool:
-    """
-    Дают ли два материала одну и ту же картинку
-
-    Аргументы - пары (basetexture, TintSpec): именно из них складывается вид
-    материала. У 46 стоковых шапок BLU-скин - точная копия RED, и
-    переключатель команд там ничего не меняет, у 329 других текстура та же,
-    но краска разная - это уже настоящая разница
-    """
-    if not red or not blu:
-        return False
-    return red[0] == blu[0] and same_look(red[1], blu[1])
-
-
 def apply_to_png(png_path: str, spec: Optional[TintSpec]) -> bool:
     """
     Впечатывает краску в PNG на месте: то, что игрок увидит в игре

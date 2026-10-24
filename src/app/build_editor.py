@@ -536,8 +536,11 @@ class BuildEditor:
             return
         from src.shared.constants import EXTRA_TEX_USE_GAME_ORIGINAL
         # Мод из VPK: текстура материала уже лежит в моде и видна на
-        # карточке - своей нет, значит остаётся его. Спрашивать не о чем
-        if self._host.preview.custom_vpk_mode:
+        # карточке - своей нет, значит остаётся его. Спрашивать не о чем.
+        # Синий двойник красного без правки - тоже: карточки у него нет, а
+        # игровой выглядит как красный
+        if (self._host.preview.custom_vpk_mode
+                or material.lower() in self._host.preview.textures.blu_twins):
             self._answer_texture_request(EXTRA_TEX_USE_GAME_ORIGINAL)
             return
         # Сборку отменяют: воркер дойдёт до проверки отмены только после

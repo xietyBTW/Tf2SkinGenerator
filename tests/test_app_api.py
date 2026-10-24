@@ -117,6 +117,27 @@ class ControlsTests(unittest.TestCase):
             self.assertFalse(api.controls_for(mode)['first_person'], mode)
         self.assertTrue(api.controls_for('taunt_conga')['taunt'])
 
+    def test_banner_backpack_is_worn_and_its_bugle_is_held(self):
+        """Рюкзак знамени и горн - разные записи каталога: у рюкзака вид от
+        первого лица показывал бы горн, а самого рюкзака там не видно"""
+        from unittest.mock import patch
+        from src.data import viewmodel_anims
+        from src.data.viewmodel_anims import WeaponAnimInfo
+
+        infos = {
+            'c_shogun_warpack': WeaponAnimInfo(item_class='tf_weapon_buff_item',
+                                               held='c_shogun_warhorn'),
+            'c_shogun_warhorn': WeaponAnimInfo(item_class='tf_weapon_buff_item'),
+        }
+        with patch('src.config.app_config.AppConfig.load_config',
+                   return_value={'tf2_game_folder': 'root'}), \
+                patch.object(viewmodel_anims, 'anim_info',
+                             lambda key, _root: infos.get(key)):
+            pack = api.controls_for('soldier_c_shogun_warpack')
+            horn = api.controls_for('soldier_c_shogun_warhorn')
+        self.assertEqual((pack['wear'], pack['first_person']), (True, False))
+        self.assertEqual((horn['wear'], horn['first_person']), (False, True))
+
     def test_spray_pins_resolution_and_locks_format(self):
         c = api.controls_for('spray')
         self.assertEqual(c['resolutions'], ['256'])

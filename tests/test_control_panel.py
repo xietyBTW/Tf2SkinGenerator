@@ -106,3 +106,64 @@ class ScreenSmdTests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class WatchScreensTests(unittest.TestCase):
+    """Экраны Quäckenbirdt и Enthusiast's Timepiece - как у Звона смерти"""
+
+    def test_known_by_model_name(self):
+        for qc_name, bg in (('weapons/v_models/v_ttg_watch_spy.mdl', 'ttg_watch_bg'),
+                            ('workshop_partner/weapons/v_models/v_hm_watch/v_hm_watch.mdl',
+                             'hm_watch_bg')):
+            with tempfile.TemporaryDirectory() as tmp:
+                qc = os.path.join(tmp, 'm.qc')
+                with open(qc, 'w', encoding='utf-8') as f:
+                    f.write(f'$modelname "{qc_name}"\n')
+                self.assertEqual(control_panel.screen_spec(qc)['bg'], bg)
+
+
+class WatchScreenResTests(unittest.TestCase):
+    """.res экрана часов в моде: заменённое - из мода, остальное - игры"""
+
+    def setUp(self):
+        from src.services.texture_build.fixed_extras import watch_screen_res
+        self.res = watch_screen_res
+
+    def test_untouched_face_needs_no_res(self):
+        self.assertIsNone(self.res('v_hm_watch', set()))
+        self.assertIsNone(self.res('c_spy_watch', {'x'}))
+
+    def test_replaced_image_comes_from_the_mod_the_other_from_the_game(self):
+        text = self.res('v_hm_watch', {'hm_watch_fg'})
+        self.assertIn('"fg_image"\t"replay/thumbnails/hmwatch/hm_watch_fg"', text)
+        self.assertIn('"bg_image"\t"workshop_partner/hm_watch/hm_watch_bg"', text)
+
+    def test_dead_ringer_keeps_its_paths(self):
+        text = self.res('c_pocket_watch', {'pocket_watch_fg', 'pocket_watch_bg'})
+        self.assertIn('"fg_image"\t"replay/thumbnails/deadringer/pocket_watch_fg"', text)
+        self.assertIn('"bg_image"\t"replay/thumbnails/deadringer/pocket_watch_bg"', text)
+
+
+class FlippedPanelTests(unittest.TestCase):
+    """Угол ur в минус X и минус Y кости: игра рисует панель развёрнутой"""
+
+    def test_panel_is_built_in_the_negative_quadrant(self):
+        ref_text = REFERENCE_SMD.replace('2 2 1 0 0 0 0', '2 -2 -1 0 0 0 0')
+        with tempfile.TemporaryDirectory() as tmp:
+            ref = os.path.join(tmp, 'v_watch_pocket_spy.smd')
+            with open(ref, 'w', encoding='utf-8') as f:
+                f.write(ref_text)
+            with open(os.path.join(tmp, 'v_watch_pocket_spy.qc'), 'w', encoding='utf-8') as f:
+                f.write(QC)
+            paths = control_panel.screen_smds(tmp, ref)
+            self.assertEqual(len(paths), 1)
+            xs, ys = [], []
+            with open(paths[0], encoding='utf-8') as f:
+                for ln in f.read().split('triangles', 1)[1].splitlines():
+                    parts = ln.split()
+                    if len(parts) > 8:
+                        xs.append(float(parts[1]))
+                        ys.append(float(parts[2]))
+            self.assertLessEqual(max(xs), 0.0)
+            self.assertLessEqual(max(ys), 0.0)
+            self.assertLess(min(xs), -1.5)

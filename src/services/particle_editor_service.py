@@ -25,8 +25,8 @@ from typing import Dict, List, Optional
 
 from src.services.crit_pcf_service import CritPcfService
 from src.services.particle_editor import (
-    attr_edit, catalog, export, materials, paste, structure, texture_colors,
-    texture_replace)
+    attr_edit, catalog, export, materials, origin, paste, structure,
+    texture_colors, texture_replace)
 from src.services.particle_editor import param_reference as reference
 from src.services.particle_editor import stock as stock_mod
 # Реэкспорт: эти имена импортируют из сервиса приложение, скрипты и тесты
@@ -263,6 +263,7 @@ class ParticleEditorService:
     # Правка структуры: модули, системы, слои (structure.py)
     add_module = structure.add_module
     apply_gizmo_edits = structure.apply_gizmo_edits
+    ensure_effect_origin = origin.ensure_effect_origin
     _seed_spawn_area = staticmethod(structure.seed_spawn_area)
     remove_module = structure.remove_module
     duplicate_system = structure.duplicate_system

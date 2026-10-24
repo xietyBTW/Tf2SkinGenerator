@@ -11,6 +11,16 @@ ITEMS_GAME = """"items_game"
 			"item_slot"	"head"
 			"equip_region"	"hat"
 		}
+		"hides_hat"
+		{
+			"visuals"
+			{
+				"player_bodygroups"
+				{
+					"hat"		"1"
+				}
+			}
+		}
 	}
 	"items"
 	{
@@ -29,6 +39,23 @@ ITEMS_GAME = """"items_game"
 			"used_by_classes"
 			{
 				"soldier"		"1"
+			}
+		}
+		"31106"
+		{
+			"name"		"Sophisticated Smoker"
+			"prefab"		"hides_hat"
+			"model_player"		"models/workshop/player/items/all_class/sum20_sophisticated_smoker/sum20_sophisticated_smoker_soldier.mdl"
+			"used_by_classes"
+			{
+				"soldier"		"1"
+			}
+			"visuals"
+			{
+				"player_bodygroups"
+				{
+					"headphones"		"1"
+				}
 			}
 		}
 		"30339"
@@ -74,6 +101,13 @@ def test_item_hides_player_bodygroup(tmp_path):
     hats = _parse(tmp_path)
     assert hats["Ground Control"].hidden_bodygroups == {"hat": 1}
     assert hats["Styled Cap"].hidden_bodygroups == {}
+
+
+def test_own_bodygroups_merge_with_prefab(tmp_path):
+    """Свой блок предмета не заменяет блок префаба, а сливается с ним, как в
+    игре: иначе Sophisticated Smoker надевалась поверх каски солдата"""
+    hats = _parse(tmp_path)
+    assert hats["Sophisticated Smoker"].hidden_bodygroups == {"hat": 1, "headphones": 1}
 
 
 def test_style_hides_its_own_bodygroups(tmp_path):

@@ -32,18 +32,20 @@
 
   #status-spinner {
     width: 26px; height: 26px;
-    border: 2px solid #2c2c2c;
-    border-top-color: #5a5a5a;
+    border: 2px solid #3a3a3a;
+    border-top-color: #8a867f;
     border-radius: 50%;
     animation: spin 0.75s linear infinite;
     display: none;
     flex-shrink: 0;
   }
 
-  #status-icon { font-size: 32px; opacity: 0.18; line-height: 1; }
+  #status-icon { font-size: 32px; color: #8a867f; opacity: 0.5; line-height: 1; }
 
+  /* Фон тёмный в обеих темах: огонь и свечение на светлом теряются. Зато
+     подписи не тонут в нём, как прежние #454545 */
   #status-text {
-    color: #454545;
+    color: #8a867f;
     font-size: 12px;
     letter-spacing: 0.045em;
     text-align: center;
@@ -53,7 +55,7 @@
 
   #status.loading #status-spinner { display: block; }
   #status.loading #status-icon    { display: none; }
-  #status.loading #status-text    { color: #505050; }
+  #status.loading #status-text    { color: #8a867f; }
   #status.error   #status-icon    { opacity: 0.3; }
   #status.error   #status-text    { color: #a05050; }
   #status.hidden  { display: none; }
@@ -62,7 +64,7 @@
   #stats {
     position: absolute;
     left: 10px; bottom: 8px;
-    color: #4a4a4a;
+    color: #7a766f;
     font-size: 11px;
     letter-spacing: 0.04em;
     user-select: none;
@@ -93,6 +95,8 @@ import * as THREE        from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { OBJLoader }     from 'three/addons/loaders/OBJLoader.js';
 import { ParticleSystemInstance, implementedModules } from './js/particles/engine.js';
+import { modAttr, moduleFn, findModule, findOrigin, ORIGIN_OFFSET, toWorld, toLocal, effectScope,
+         originScope, effectNames, shiftLive } from './js/particles/gizmo_scope.js';
 
 // i18n
 
@@ -876,14 +880,10 @@ function addBoxGizmo(min, max, color, opacity) {
   gizmoGroup.add(line);
 }
 
-/** Атрибут модуля из systems_json ({"t","v"}), с дефолтом */
-function modAttr(mod, name, fallback) {
-  const tv = mod.attrs && mod.attrs[name];
-  return (tv === undefined || tv === null) ? fallback : tv.v;
-}
-
-function moduleFn(mod) {
-  return (mod.functionName || '').trim().toLowerCase();
+/** Точка, как её видит живой эффект: часть точек ставят его операторы */
+function cpAt(n) {
+  return rootInstance ? rootInstance.getControlPoint(n)
+                      : controller.controlPoints[n] || [0, 0, 0];
 }
 
 /** Суммарное среднее смещение от Position Modify Offset Random */
@@ -891,8 +891,12 @@ function offsetOf(def) {
   const out = [0, 0, 0];
   for (const mod of def.initializers || []) {
     if (moduleFn(mod) !== 'position modify offset random') continue;
-    const min = modAttr(mod, 'offset min', [0, 0, 0]);
-    const max = modAttr(mod, 'offset max', [0, 0, 0]);
+    let min = modAttr(mod, 'offset min', [0, 0, 0]);
+    let max = modAttr(mod, 'offset max', [0, 0, 0]);
+    if (modAttr(mod, 'offset in local space 0/1', false)) {
+      const basis = rootInstance?.getControlPointBasis(modAttr(mod, 'control_point_number', 0));
+      min = toWorld(basis, min); max = toWorld(basis, max);
+    }
     for (let i = 0; i < 3; i++) out[i] += (min[i] + max[i]) / 2;
   }
   return out;
@@ -910,21 +914,21 @@ function rebuildGizmo(def) {
   (def.initializers || []).forEach((mod, modIndex) => {
     const fn = moduleFn(mod);
     if (fn === 'position within sphere random') {
-      const cp = controller.controlPoints[
-        modAttr(mod, 'control_point_number', 0)] || [0, 0, 0];
+      const cp = cpAt(modAttr(mod, 'control_point_number', 0));
       const center = [cp[0] + shift[0], cp[1] + shift[1], cp[2] + shift[2]];
       const rMax = modAttr(mod, 'distance_max', 0);
       addSphereGizmo(center, rMax, GIZMO_OUTER, 0.5);
       addSphereGizmo(center, modAttr(mod, 'distance_min', 0), GIZMO_OUTER, 0.22);
       const hs = Math.min(8, Math.max(2.5, rMax * 0.06));
+      // На -X: на +X лежит стрелка перемещения, и при радиусе в её длину
+      // щелчок по стрелке хватал радиус
       addHandle('sphere_radius', { modIndex, center },
-                [center[0] + rMax, center[1], center[2]], hs, GIZMO_HANDLE);
+                [center[0] - rMax, center[1], center[2]], hs, GIZMO_HANDLE);
       if (moveCenter === null) {
         moveCenter = center; moveScale = hs; moveSpan = rMax;
       }
     } else if (fn === 'position within box random') {
-      const cp = controller.controlPoints[
-        modAttr(mod, 'control point number', 0)] || [0, 0, 0];
+      const cp = cpAt(modAttr(mod, 'control point number', 0));
       const min = modAttr(mod, 'min', [0, 0, 0]);
       const max = modAttr(mod, 'max', [0, 0, 0]);
       const base = [cp[0] + shift[0], cp[1] + shift[1], cp[2] + shift[2]];
@@ -1027,19 +1031,16 @@ function setModAttr(mod, name, type, value) {
   else mod.attrs[key] = { t: type, v: value };
 }
 
-function findModule(def, fnLower) {
-  const list = def.initializers || [];
-  for (let i = 0; i < list.length; i++)
-    if (moduleFn(list[i]) === fnLower) return i;
-  return -1;
-}
-
 // Правки во время протяжки живут только здесь, в документ уходит итог,
 // одним шагом истории (window.onGizmoEdit ставит страница)
 function sendGizmoEdits(edits, final) {
   if (final && typeof window.onGizmoEdit === 'function')
     window.onGizmoEdit(currentRootName, edits);
 }
+
+//: Что двигает гизмо: 'effect' - корень вместе с дочерними, 'system' - только корень
+let gizmoScope = 'effect';
+window.setGizmoScope = (s) => { gizmoScope = s === 'system' ? 'system' : 'effect'; };
 
 function applyDrag(e, final) {
   const def = systemsJson[currentRootName];
@@ -1120,37 +1121,108 @@ function applyDrag(e, final) {
     const snapping = !!(e && e.shiftKey);
     const step = (v, i) => (snapping && delta[i] !== 0) ? snap(v) : r2(v);
 
-    if (dragState.boxIndex >= 0) {
-      // Бокс двигаем ИМ САМИМ (min/max): не нужен вспомогательный модуль,
-      // а симуляция подхватывает сразу - атрибуты читаются по ссылке
-      const mod = def.initializers[dragState.boxIndex];
-      const nmin = dragState.baseMin.map((v, i) => step(v + delta[i], i));
-      const nmax = dragState.baseMax.map((v, i) => step(v + delta[i], i));
-      setModAttr(mod, 'min', 'vec3', nmin);
-      setModAttr(mod, 'max', 'vec3', nmax);
-      edits.push({ group: 'initializers', index: def.initializers.indexOf(mod), fn: mod.functionName,
-                   attr: 'min', type: 'vec3', value: nmin });
-      edits.push({ group: 'initializers', index: def.initializers.indexOf(mod), fn: mod.functionName,
-                   attr: 'max', type: 'vec3', value: nmax });
-    } else {
-      // Сфера: своего смещения у неё нет - правим Position Modify Offset
-      // Random (модуль создан ещё в pointerdown, инстанс его уже знает)
-      const idx = findModule(def, 'position modify offset random');
-      if (idx < 0) return;
-      const mod = def.initializers[idx];
-      const nmin = dragState.baseMin.map((v, i) => step(v + delta[i], i));
-      const nmax = dragState.baseMax.map((v, i) => step(v + delta[i], i));
-      setModAttr(mod, 'offset min', 'vec3', nmin);
-      setModAttr(mod, 'offset max', 'vec3', nmax);
-      edits.push({ group: 'initializers', index: def.initializers.indexOf(mod), fn: mod.functionName,
-                   attr: 'offset min', type: 'vec3', value: nmin });
-      edits.push({ group: 'initializers', index: def.initializers.indexOf(mod), fn: mod.functionName,
-                   attr: 'offset max', type: 'vec3', value: nmax });
+    // Бокс двигаем ИМ САМИМ (min/max), место рождения - через Position
+    // Modify Offset Random, весь эффект - смещением точки «начало эффекта»
+    // (в осях точки 0). Симуляция подхватывает сразу: атрибуты читаются по ссылке
+    const basis = rootInstance?.getControlPointBasis(0);
+    let moved = null;
+    for (const m of dragState.movers) {
+      const mod = systemsJson[m.name]?.[m.group]?.[m.idx];
+      if (!mod) continue;
+      for (const [attr, base] of m.pairs) {
+        const from = m.local ? toWorld(basis, base) : base;
+        const to = from.map((v, i) => step(v + delta[i], i));
+        const value = m.local ? toLocal(basis, to).map(r2) : to;
+        setModAttr(mod, attr, 'vec3', value);
+        edits.push({ system: m.name, group: m.group, index: m.idx,
+                     fn: mod.functionName, attr, type: 'vec3', value });
+        if (!moved) moved = to.map((v, i) => v - from[i]);
+      }
+    }
+    // На столько же, уже со снапом, едут живые частицы
+    if (moved) {
+      shiftLive(rootInstance, dragState.moving,
+                moved.map((v, i) => v - dragState.applied[i]));
+      dragState.applied = moved;
     }
   }
 
   rebuildGizmo(def);
   if (edits.length) sendGizmoEdits(edits, final);
+}
+
+//: Номер нажатия, для которого документ ставит точку «начало эффекта»; 0 -
+//: не ставит или кнопку уже отпустили. По номеру, а не флагом: отпустили и
+//: нажали снова, пока документ отвечал на первое - первый ответ не должен
+//: начать протяжку второго нажатия
+let preparing = 0;
+let prepareTurn = 0;
+//: Эффекты, которым точку ставить нельзя (считают свои точки): их весь
+//: эффект двигают места рождения, и документ второй раз не спрашиваем
+const noOrigin = new Set();
+
+/**
+ * Начало протяжки ручки перемещения: что двигаем и откуда считаем сдвиг.
+ * null - начать нельзя (курсор не попал в плоскость ручки)
+ */
+function beginMove(state, whole) {
+  const root = currentRootName;
+  let scope;
+  if (whole && findOrigin(systemsJson[root]) >= 0) {
+    scope = originScope(systemsJson, root);
+  } else {
+    const sc = effectScope(systemsJson, root, whole);
+    scope = { movers: [], moving: sc.moving };
+    let restart = false;
+    for (const name of sc.movers) {
+      const d = systemsJson[name];
+      if (!d) continue;
+      d.initializers = d.initializers || [];
+      let idx = findModule(d, 'position within box random');
+      let names = ['min', 'max'];
+      // Своё смещение места рождения, не «Effect origin offset»: то в осях
+      // точки и едет вместе с началом эффекта
+      const ownOffset = () => d.initializers.findIndex((m) =>
+        moduleFn(m) === 'position modify offset random' && m.name !== ORIGIN_OFFSET);
+      if (idx < 0) {
+        if (ownOffset() < 0) {
+          // Модуль обязан существовать ДО начала драга: живой инстанс
+          // фиксирует список инициализаторов при создании, и дописанный
+          // на лету модуль он бы не увидел (каркас ехал бы без частиц)
+          d.initializers.push({
+            functionName: 'Position Modify Offset Random',
+            name: 'Position Modify Offset Random', attrs: {},
+          });
+          restart = true;
+        }
+        idx = ownOffset();
+        names = ['offset min', 'offset max'];
+      }
+      const mod = d.initializers[idx];
+      scope.movers.push({ name, group: 'initializers', idx, local: false,
+                          pairs: names.map((a) => [a, [...modAttr(mod, a, [0, 0, 0])]]) });
+    }
+    if (restart) window.setRootSystem(root);   // единственный перезапуск
+  }
+  state.movers = scope.movers;
+  state.moving = scope.moving;
+  state.applied = [0, 0, 0];
+  // Центр манипулятора = центр области (ручка оси смещена от него)
+  state.center = moveGizmoCenter ? moveGizmoCenter.clone() : state.p0?.clone();
+  if (!state.center) return null;
+  const h = state.handle;
+  let start = null;
+  if (h.kind === 'move_axis') {
+    const dir = new THREE.Vector3(); dir.setComponent(h.axis, 1);
+    start = axisPoint(state.center, dir);
+  } else if (h.kind === 'move_plane') {
+    start = planePoint(state.center, h.axis);
+  } else {
+    start = viewPlanePoint(state.center);
+  }
+  if (!start) return null;
+  state.startHit = start;
+  return state;
 }
 
 renderer.domElement.addEventListener('pointerdown', (e) => {
@@ -1164,42 +1236,34 @@ renderer.domElement.addEventListener('pointerdown', (e) => {
   const state = { handle: h, p0: hit.object.position.clone() };
   if (h.kind === 'move' || h.kind === 'move_axis' || h.kind === 'move_plane') {
     if (!def) return;
-    state.boxIndex = findModule(def, 'position within box random');
-    if (state.boxIndex >= 0) {
-      const mod = def.initializers[state.boxIndex];
-      state.baseMin = [...modAttr(mod, 'min', [0, 0, 0])];
-      state.baseMax = [...modAttr(mod, 'max', [0, 0, 0])];
-    } else {
-      let idx = findModule(def, 'position modify offset random');
-      if (idx < 0) {
-        // Модуль обязан существовать ДО начала драга: живой инстанс
-        // фиксирует список инициализаторов при создании, и дописанный
-        // на лету модуль он бы не увидел (каркас ехал бы без частиц)
-        def.initializers.push({
-          functionName: 'Position Modify Offset Random',
-          name: 'Position Modify Offset Random', attrs: {},
-        });
-        window.setRootSystem(currentRootName);   // единственный перезапуск
-        idx = findModule(def, 'position modify offset random');
-      }
-      const mod = idx >= 0 ? def.initializers[idx] : null;
-      state.baseMin = mod ? [...modAttr(mod, 'offset min', [0, 0, 0])] : [0, 0, 0];
-      state.baseMax = mod ? [...modAttr(mod, 'offset max', [0, 0, 0])] : [0, 0, 0];
+    // Alt на время меняет режим: «весь эффект» <-> «эта система»
+    const whole = (gizmoScope === 'effect') !== !!e.altKey;
+    // Весь эффект едет точкой «начало эффекта». Её ставит документ, один раз:
+    // эффект пересоберётся, и протяжка начнётся с ручки на новом месте
+    if (preparing) return;
+    if (whole && findOrigin(def) < 0 && !noOrigin.has(currentRootName)
+        && typeof window.onGizmoPrepare === 'function') {
+      const turn = ++prepareTurn;
+      preparing = turn;
+      controls.enabled = false;
+      try { renderer.domElement.setPointerCapture(e.pointerId); } catch (_) {}
+      e.preventDefault();
+      const root = currentRootName;
+      window.onGizmoPrepare(root).then((ok) => {
+        const held = preparing === turn;
+        if (held) preparing = 0;
+        if (ok === 'fallback') noOrigin.add(root);
+        // Отпустили раньше ответа: точка уже в документе, и её надо записать
+        // шагом истории, иначе она уйдёт в чужую правку
+        if (ok === true && !held) window.onGizmoEdit?.(root, []);
+        if (!held) return;
+        const st = ok ? beginMove({ handle: h }, true) : null;
+        if (st) dragState = st;
+        else controls.enabled = true;
+      });
+      return;
     }
-    // Центр манипулятора = центр области (ручка оси смещена от него)
-    state.center = moveGizmoCenter
-      ? moveGizmoCenter.clone() : hit.object.position.clone();
-    let start = null;
-    if (h.kind === 'move_axis') {
-      const dir = new THREE.Vector3(); dir.setComponent(h.axis, 1);
-      start = axisPoint(state.center, dir);
-    } else if (h.kind === 'move_plane') {
-      start = planePoint(state.center, h.axis);
-    } else {
-      start = viewPlanePoint(state.center);
-    }
-    if (!start) return;
-    state.startHit = start;
+    if (!beginMove(state, whole)) return;
   } else if (h.kind === 'box_face') {
     // Центр области по этой оси - опора для симметричного изменения (Shift)
     const mod = def ? def.initializers[h.modIndex] : null;
@@ -1238,6 +1302,8 @@ renderer.domElement.addEventListener('pointermove', (e) => {
 });
 
 function endDrag(e) {
+  // Отпустили, пока документ ставил точку: протяжки не было
+  if (preparing) { preparing = 0; controls.enabled = true; }
   if (!dragState) return;
   ndcFromEvent(e);
   applyDrag(e, true);
@@ -1365,10 +1431,16 @@ window.missingMaterials = function(root) {
 
 /** Обновление только определений систем (правка атрибутов): материалы и
     GPU-текстуры переиспользуются - без ремаршалинга PNG и роста VRAM */
-window.updateSystems = function(systemsOnly, rootName) {
+window.updateSystems = function(systemsOnly, rootName, { soft = false } = {}) {
   try {
-    systemsJson = (typeof systemsOnly === 'string')
+    const next = (typeof systemsOnly === 'string')
       ? JSON.parse(systemsOnly) : (systemsOnly || {});
+    // Итог перетаскивания гизмо: значения в кадре уже те же, что в документе,
+    // и пересборка только перезапустила бы эффект. Нужна она, лишь когда
+    // документ поменял состав (своя копия общей системы)
+    if (soft && rootName === currentRootName
+        && effectNames(next, rootName) === effectNames(systemsJson, rootName)) return;
+    systemsJson = next;
     if (rootName) window.setRootSystem(rootName);
   } catch (e) {
     console.log('updateSystems error:', e);
@@ -1600,10 +1672,24 @@ const ropePool = [];
 let timeScale = 1;
 window.setTimeScale = function(k) { timeScale = Math.max(0.05, Number(k) || 1); };
 
+let frameId = 0;
 function animate() {
-  requestAnimationFrame(animate);
+  frameId = requestAnimationFrame(animate);
   drawFrame(Math.min(clock.getDelta(), 0.3) * timeScale);
 }
+
+// Спрятанный iframe браузер не глушит: ушли со страницы частиц, а эффект
+// крутился на полной частоте экрана, впустую грузя поток страницы и
+// видеокарту. Страница выключает цикл, уходя из раздела
+window.setActive = function(on) {
+  if (on && !frameId) {
+    clock.getDelta();          // простой не должен прийти одним шагом
+    animate();
+  } else if (!on && frameId) {
+    cancelAnimationFrame(frameId);
+    frameId = 0;
+  }
+};
 
 /** Кадр: шаг симуляции на dt и отрисовка. Отдельно от animate - пока
     вкладка скрыта, requestAnimationFrame не идёт, а автопроверке кадр нужен

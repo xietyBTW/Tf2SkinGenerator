@@ -227,6 +227,22 @@ class ItemsGame:
         """
         return self._inherited_block(block, key, 0)
 
+    def merged_block(self, block: str, key: str) -> str:
+        """Вложенный блок "key" так, как его видит игра: слитый с префабами
+
+        Движок не выбирает между блоком предмета и блоком префаба, а сливает
+        их по ключам (MergeDefinitionPrefab в econ_item_schema.cpp): префабы
+        с последнего в списке к первому, предмет поверх. У Sophisticated
+        Smoker свой `player_bodygroups` прячет наушники, а каску солдата
+        прячет префаб `hat` - по одному блоку шапка надевалась поверх каски
+
+        Тексты блоков идут подряд в том же порядке, поэтому при разборе в
+        словарь более поздний ключ побеждает, как в игре
+        """
+        parts: List[str] = []
+        self._merge_blocks(block, key, parts, 0)
+        return "".join(parts)
+
     def inherited_match(self, block: str, pattern: re.Pattern) -> Optional[str]:
         """Первая группа регулярки с учётом цепочки prefab
 
@@ -266,6 +282,17 @@ class ItemsGame:
             if found:
                 return found
         return None
+
+    def _merge_blocks(self, block: str, key: str, parts: List[str], depth: int) -> None:
+        if depth < MAX_PREFAB_DEPTH:
+            for name in reversed((flat_value(block, "prefab") or "").split()):
+                parent = self.prefabs.get(name)
+                if parent is not None:
+                    self._merge_blocks(parent, key, parts, depth + 1)
+        start = block.find(f'"{key}"')
+        brace = block.find('{', start) if start != -1 else -1
+        if brace != -1:
+            parts.append(block[brace:skip_to_close_brace(block, brace)])
 
     def _inherited_match(self, block: str, pattern: re.Pattern,
                          depth: int) -> Optional[str]:

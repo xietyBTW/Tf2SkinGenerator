@@ -28,7 +28,7 @@ class _FakeWorker(BaseWorker):
     multi_material = Signal(object)
     blu_ready = Signal(object, float)
     blu_multi_material = Signal(object)
-    blu_same_as_red = Signal()
+    blu_same_as_red = Signal(object)
     australium_ready = Signal(str, str)
     render_hints = Signal(object)
     scene_extra = Signal(object)
@@ -147,10 +147,10 @@ class BluTests(unittest.TestCase):
         c._on_blu_ready(["b.png"], 30.0)
         self.assertEqual(c._session.team_framerate, 30.0)
 
-    def test_same_as_red_is_remembered(self):
+    def test_twins_are_remembered(self):
         c = _controller()
-        c._on_blu_same_as_red()
-        self.assertTrue(c._session.blu_matches_red)
+        c._on_blu_same_as_red({"Hat_Blue": "hat"})
+        self.assertEqual(c._session.textures.blu_twins, {"hat_blue": "hat"})
 
     def test_name_map_recorded_without_textures(self):
         """Подписи карточек нужны даже когда синих VTF в VPK не нашлось"""

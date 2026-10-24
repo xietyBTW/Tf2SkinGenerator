@@ -350,15 +350,6 @@ export function applyView(st) {
     if (key === 'RED' || key === 'BLU') {
       b.hidden = !st.has_teams;
       b.classList.toggle('is-active', st.team.toUpperCase() === key);
-      // Командный вариант есть, но в стоке он не отличается от RED: без
-      // подсказки кажется, что переключатель сломан
-      if (key === 'BLU') {
-        // Кнопка уже в документе: атрибут переводим сами (наблюдатель
-        // видит только добавленные узлы)
-        b.title = st.blu_matches_red
-          ? t('В игре синий вариант этой модели не отличается от красного')
-          : '';
-      }
     } else {
       b.hidden = !(modeControls.teams && st.has_australium);
       b.classList.toggle('is-active', st.australium_active);

@@ -55,7 +55,7 @@
 .ptools__btn .ptools__pip { fill: currentColor; stroke: none; }
 .ptools__btn:hover { color: var(--ink); background: var(--bg); }
 /* Выбранный инструмент - инверсия, как всё выбранное в этом интерфейсе */
-.ptools__btn.is-active { background: var(--ink); color: var(--surface); }
+.ptools__btn.is-active { background: var(--chosen); color: var(--chosen-ink); }
 
 /* Свёрнутая палитра: остаётся одна кнопка разворота, стрелка смотрит в другую
    сторону. Кадр при этом чист - модель разглядывают и издали тоже */

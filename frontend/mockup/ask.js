@@ -16,7 +16,7 @@ const askEl = document.getElementById('ask');
 const SEARCH_FROM = 8;
 
 export function ask({ title, text = '', value = null, list = null, multi = false,
-               chosen = [], ok = 'Готово', check = '' }) {
+               chosen = [], ok = 'Готово', check = '', cancel = true }) {
   const titleEl = askEl.querySelector('.ask__title');
   const textEl = askEl.querySelector('.ask__text');
   const input = askEl.querySelector('.ask__input');
@@ -38,6 +38,8 @@ export function ask({ title, text = '', value = null, list = null, multi = false
   search.hidden = !(list && list.length > SEARCH_FROM);
   search.value = '';
   askEl.querySelector('.ask__ok').textContent = ok;
+  // Сообщение, а не вопрос: отказываться не от чего, кнопка одна
+  cancelBtn.hidden = !cancel;
   // Галка-приписка к ответу: с ней окно отдаёт {value, checked}, без неё -
   // просто значение
   checkBox.hidden = !check;

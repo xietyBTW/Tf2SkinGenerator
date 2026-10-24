@@ -77,6 +77,17 @@ Packages that pywebview pulls in on Windows and that end up in the built app:
 | bottle | MIT |
 | typing_extensions | PSF-2.0 |
 
+Also shipped inside the built app:
+
+| Component | License |
+|-----------|---------|
+| Python runtime | PSF-2.0 |
+| Microsoft WebView2 SDK (`Microsoft.Web.WebView2.Core.dll`, `Microsoft.Web.WebView2.WinForms.dll`, `WebView2Loader.dll`), bundled by pywebview | BSD-3-Clause, Copyright (c) Microsoft Corporation |
+| PyInstaller bootloader | GPL-2.0 with the PyInstaller bootloader exception (does not affect the app's license) |
+| Native libraries inside the Pillow and NumPy wheels (libjpeg-turbo, libpng, zlib, FreeType, OpenBLAS and others) | Listed in each package's own license file |
+
+The WebView2 runtime itself is not shipped; Windows provides it.
+
 Optional: `vtf2img` (MIT) converts extracted textures to PNG, TGA or JPG when it is
 installed.
 
@@ -88,6 +99,9 @@ The interface no longer uses Qt; PySide6 is not a dependency of the project.
 |---------|-------|--------|---------|
 | three.js r160 (`three.module.js`, `OrbitControls`, `TransformControls`, `OBJLoader`) | `src/static/js/` | three.js authors | MIT |
 | Particle simulation logic ported from noclip.website (`ParticleSystem.ts`) | `src/static/js/particles/engine.js` | Copyright (c) 2018 Jasper St. Pierre | MIT |
+
+The noise permutation tables in `engine.js` repeat `noisedata.h` from Valve's
+Source SDK so the preview matches the game's particle noise.
 
 The MIT license texts are available at https://github.com/mrdoob/three.js/blob/dev/LICENSE
 and https://github.com/magcius/noclip.website/blob/main/LICENSE.

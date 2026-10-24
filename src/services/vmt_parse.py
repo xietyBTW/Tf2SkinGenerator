@@ -237,6 +237,23 @@ def _fill(node: VmtNode, tokens: List[Tuple[str, str]], i: int) -> int:
     return i
 
 
+def fingerprint(doc: VmtDoc, skip: Tuple[str, ...] = ()) -> str:
+    """Шейдер и все параметры одной строкой: равные строки - равные материалы
+
+    Регистр и пробелы внутри значений не в счёт, порядок ключей тоже: так
+    сравнивает движок, а не текстовый редактор
+    """
+    drop = {_key(k) for k in skip}
+
+    def node(n: VmtNode) -> list:
+        params = sorted((k, " ".join(v.lower().split()))
+                        for k, v in n.params.items() if k not in drop)
+        blocks = sorted((k, [node(c) for c in kids]) for k, kids in n.blocks.items())
+        return [params, blocks]
+
+    return repr([doc.shader, node(doc.root)])
+
+
 # Частые запросы одной строкой
 
 def basetexture(text: str) -> Optional[str]:

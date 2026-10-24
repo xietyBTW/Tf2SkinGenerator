@@ -584,9 +584,14 @@ def texturegroup_misc(layout, mat_names: list) -> list:
     return misc
 
 
-def style_pairs(layout) -> tuple:
+def style_pairs(layout, item_rows=()) -> tuple:
     """
     Пары «базовый материал -> материал стиля» по строкам-стилям QC
+
+    item_rows - строки, которые в игре отдельный предмет (Критокола - строка 2
+    модели Бонка, см. item_skin_styles). В QC они безымянные «Skin N», и
+    стилем их делает только items_game. Строка-копия более ранней не стиль,
+    как в SkinDetectWorker._with_item_styles
 
     Returns:
         ({индекс скина: {базовый: материал стиля}}, [материалы стилей по порядку]).
@@ -600,7 +605,10 @@ def style_pairs(layout) -> tuple:
     base_row = rows[0]
     wanted: dict = {}
     names: list = []
-    for _label, idx in qc_skin_parser.selector_spec(layout).styles:
+    styles = [idx for _label, idx in qc_skin_parser.selector_spec(layout).styles]
+    styles += [idx for idx in item_rows
+               if 0 < idx < len(rows) and idx not in styles and rows[idx] not in rows[:idx]]
+    for idx in styles:
         if not 0 <= idx < len(rows):
             continue
         pairs: dict = {}

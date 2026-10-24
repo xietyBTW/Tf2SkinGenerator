@@ -22,11 +22,19 @@
   --overlay:   #ffffff;
   --ink:       #14120f;
   --ink-soft:  #57534d;
-  --ink-mute:  #97918a;
+  --ink-mute:  #746e66;
   --hairline:  #d9d5cf;
   --hairline-strong: #b8b2aa;
   --accent:    #cc5522;
   --viewport:  #e6e3de;
+  /* Выбранный вариант в ряду (метки, сегменты). На светлом чёрная заливка
+     спорила с главной кнопкой, и ряд из трёх меток выглядел тяжелее модели */
+  --chosen:     #dedad3;
+  --chosen-ink: #14120f;
+  /* Шахматка под прозрачной текстурой. На светлом клетки темнее страницы:
+     белый спрайт эффекта на прежних белых клетках пропадал */
+  --checker:    #c2bcb3;
+  --checker-bg: #d9d5ce;
 
   --gap:    20px;
   --rhythm: 26px;
@@ -70,6 +78,10 @@
   --hairline-strong: #3d3b38;
   --accent:    #e2662c;
   --viewport:  #1c1b1a;
+  --chosen:     #ecebe8;
+  --chosen-ink: #161615;
+  --checker:    #2a2927;
+  --checker-bg: #161615;
 }
 
 * { box-sizing: border-box; }
@@ -232,6 +244,14 @@ button, input, select, textarea { color: inherit; }
   transition: background var(--dur), color var(--dur), border-color var(--dur);
 }
 .btn--primary:hover { background: var(--accent); border-color: var(--accent); }
+/* Недоступная - контуром: полупрозрачный чёрный блок читался как серая плашка */
+.btn--primary:disabled,
+.btn--primary:disabled:hover {
+  background: none;
+  border-color: var(--hairline-strong);
+  color: var(--ink-mute);
+  cursor: default;
+}
 
 .textbtn {
   padding: 0 0 2px;
@@ -293,7 +313,7 @@ button, input, select, textarea { color: inherit; }
   cursor: pointer;
   /* Заливка выбранной метки разъезжается слева направо (размер фона), а не
      появляется рывком: стиль шапки, версия гирлянды, анимация - один жест */
-  background: linear-gradient(var(--ink), var(--ink)) no-repeat 0 0 / 0% 100%;
+  background: linear-gradient(var(--chosen), var(--chosen)) no-repeat 0 0 / 0% 100%;
   transition: color var(--dur), border-color var(--dur),
               background-size 300ms cubic-bezier(.65, 0, .25, 1);
 }
@@ -301,7 +321,7 @@ button, input, select, textarea { color: inherit; }
 .tag.is-active {
   background-size: 100% 100%;
   border-color: var(--ink);
-  color: var(--surface);
+  color: var(--chosen-ink);
 }
 [data-motion="off"] .tag { transition: none; }
 

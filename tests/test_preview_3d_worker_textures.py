@@ -141,13 +141,113 @@ def test_identical_blu_reports_no_difference():
         )
         w, decomp = _worker(files, QC_SIMPLE_TEAM, tmp)
         fired = []
-        w.blu_same_as_red.connect(lambda: fired.append(1))
+        w.blu_same_as_red.connect(fired.append)
 
         w._extract_hat_textures_via_qc_vmt(decomp, ["hat"])
         raw = w._extract_hat_blu_textures(decomp, ["hat"])
 
         assert raw == {}, "различий нет - карту не отдаём"
-        assert fired, "но сообщаем, что команды выглядят одинаково"
+        assert fired == [{"hat_blue": "hat"}], "сборке - чью правку отдать синему"
+
+
+def test_identical_blu_hides_the_team_switch():
+    """Ничего на модели не меняется - ни карты, ни кадра BLU"""
+    with TemporaryDirectory() as tmp:
+        files = _files(
+            hat=("models/hat/color", (30, 30, 30, 255)),
+            hat_blue=("models/hat/color", (30, 30, 30, 255)),
+        )
+        w, decomp = _worker(files, QC_SIMPLE_TEAM, tmp)
+        w._hat_decomp_dir = decomp
+        sent = []
+        w.blu_ready.connect(lambda *a: sent.append(a))
+        w.blu_multi_material.connect(sent.append)
+        w.ready.connect(lambda *_: None)
+
+        w._emit_hat_textures("model.obj", ["hat"])
+
+        assert not sent
+
+
+#: Шарф с общим атласом: модель берёт только левую часть текстуры
+QC_ATLAS = QC_SIMPLE_TEAM.replace('$texturegroup', '$model "Body" "hat.smd"\n\n$texturegroup')
+SMD_LEFT_STRIP = """version 1
+nodes
+0 "root" -1
+end
+skeleton
+time 0
+0 0 0 0 0 0 0
+end
+triangles
+hat
+0 0 0 0 0 0 1 0.0 0.0 1 0 1
+0 1 0 0 0 0 1 0.4 0.0 1 0 1
+0 0 1 0 0 0 1 0.0 1.0 1 0 1
+hat
+0 1 0 0 0 0 1 0.4 0.0 1 0 1
+0 1 1 0 0 0 1 0.4 1.0 1 0 1
+0 0 1 0 0 0 1 0.0 1.0 1 0 1
+end
+"""
+
+
+def _atlas_png(right) -> bytes:
+    """64x64: левая половина общая, правая - своя у каждой команды"""
+    from io import BytesIO
+
+    from PIL import Image
+
+    img = Image.new("RGBA", (64, 64), (200, 200, 190, 255))
+    img.paste(Image.new("RGBA", (32, 64), right), (32, 0))
+    buf = BytesIO()
+    img.save(buf, format="PNG")
+    return buf.getvalue()
+
+
+def test_shared_atlas_counts_only_what_the_mesh_samples():
+    """Файлы разные, но синее только там, куда модель не смотрит"""
+    with TemporaryDirectory() as tmp:
+        files = {
+            f"materials/{CD}/hat.vmt": vmt(basetexture="models/hat/red"),
+            f"materials/{CD}/hat_blue.vmt": vmt(basetexture="models/hat/blue"),
+            "materials/models/hat/red.vtf": _atlas_png((120, 0, 0, 255)),
+            "materials/models/hat/blue.vtf": _atlas_png((0, 0, 120, 255)),
+        }
+        w, decomp = _worker(files, QC_ATLAS, tmp)
+        (Path(decomp) / "hat.smd").write_text(SMD_LEFT_STRIP, encoding="utf-8")
+        fired = []
+        w.blu_same_as_red.connect(fired.append)
+
+        w._extract_hat_textures_via_qc_vmt(decomp, ["hat"])
+        raw = w._extract_hat_blu_textures(decomp, ["hat"])
+
+        assert raw == {}
+        assert fired == [{"hat_blue": "hat"}]
+
+
+def test_shared_atlas_with_team_detail_on_the_mesh_is_a_difference():
+    """Тот же атлас, но синий цвет и под треугольниками модели"""
+    with TemporaryDirectory() as tmp:
+        from io import BytesIO
+
+        from PIL import Image
+
+        buf = BytesIO()
+        Image.new("RGBA", (64, 64), (0, 0, 120, 255)).save(buf, format="PNG")
+        files = {
+            f"materials/{CD}/hat.vmt": vmt(basetexture="models/hat/red"),
+            f"materials/{CD}/hat_blue.vmt": vmt(basetexture="models/hat/blue"),
+            "materials/models/hat/red.vtf": _atlas_png((120, 0, 0, 255)),
+            "materials/models/hat/blue.vtf": buf.getvalue(),
+        }
+        w, decomp = _worker(files, QC_ATLAS, tmp)
+        (Path(decomp) / "hat.smd").write_text(SMD_LEFT_STRIP, encoding="utf-8")
+
+        w._extract_hat_textures_via_qc_vmt(decomp, ["hat"])
+        raw = w._extract_hat_blu_textures(decomp, ["hat"])
+
+        assert raw["hat"][0], "своя BLU-текстура"
 
 
 def test_different_blu_texture_is_a_real_difference():
@@ -158,7 +258,7 @@ def test_different_blu_texture_is_a_real_difference():
         )
         w, decomp = _worker(files, QC_SIMPLE_TEAM, tmp)
         fired = []
-        w.blu_same_as_red.connect(lambda: fired.append(1))
+        w.blu_same_as_red.connect(fired.append)
 
         w._extract_hat_textures_via_qc_vmt(decomp, ["hat"])
         raw = w._extract_hat_blu_textures(decomp, ["hat"])
@@ -201,7 +301,7 @@ def test_team_tint_from_vmt_makes_blu_different():
         }
         w, decomp = _worker(files, QC_SIMPLE_TEAM, tmp)
         fired = []
-        w.blu_same_as_red.connect(lambda: fired.append(1))
+        w.blu_same_as_red.connect(fired.append)
 
         red = w._extract_hat_textures_via_qc_vmt(decomp, ["hat"])
         raw = w._extract_hat_blu_textures(decomp, ["hat"])

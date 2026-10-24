@@ -43,6 +43,23 @@ SCREENS: Dict[str, dict] = {
         'fg': 'pocket_watch_fg',
         'progress': 0.5,
     },
+    # Экраны _ttg и _hm у Valve - та же шкала, что у Звона смерти (.res
+    # совпадают до картинок). У Quäckenbirdt игра читает картинки из
+    # vgui/workshop_partner/hm_watch, в vgui лежат те же байты под тем же именем
+    'v_ttg_watch_spy': {
+        'pixels': (280, 100),
+        'rect': (10, 10, 260, 80),
+        'bg': 'ttg_watch_bg',
+        'fg': 'ttg_watch_fg',
+        'progress': 0.5,
+    },
+    'v_hm_watch': {
+        'pixels': (280, 100),
+        'rect': (10, 10, 260, 80),
+        'bg': 'hm_watch_bg',
+        'fg': 'hm_watch_fg',
+        'progress': 0.5,
+    },
 }
 
 _RE_MODELNAME = re.compile(r'^\s*\$modelname\s+"([^"]+)"', re.IGNORECASE | re.MULTILINE)
@@ -120,7 +137,10 @@ def _quad(reference_smd: str, qc_path: str, index: int = 0):
     delta = tuple(corner[i] - origin[i] for i in range(3))
     width = sum(delta[i] * x_axis[i] for i in range(3))
     height = sum(delta[i] * y_axis[i] for i in range(3))
-    if width <= 1e-4 or height <= 1e-4:
+    # Знак не проверяем, как и игра (CBaseViewModel::SpawnControlPanels):
+    # у Quäckenbirdt и Enthusiast's Timepiece правый верхний угол лежит в
+    # минус X и минус Y кости, и панель просто развёрнута на 180°
+    if abs(width) <= 1e-4 or abs(height) <= 1e-4:
         logger.debug(f"[screen] вырожденный экран: {width:.3f}×{height:.3f}")
         return None
     return (origin, tuple(a * width for a in x_axis), tuple(a * height for a in y_axis),

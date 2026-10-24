@@ -598,6 +598,17 @@ const INIT_SETS = {
     'trail length random': ['trail'],
 };
 
+/**
+ * Модификаторы позиции Valve применяет ПОСЛЕ всех, кто её задаёт, в своём
+ * порядке между собой: смещение, записанное перед сферой, всё равно сдвигает
+ * частицу (оракул: offset, sphere -> z 50). Так записан
+ * unusual_invasion_boogaloop
+ */
+const POS_MODIFIERS = new Set([
+    'position modify offset random',
+    'position modify warp random',
+]);
+
 function _placeOnPath(mod, sys, p, t) {
     const a = sys.getControlPointAt(attr(mod, 'start control point number', 0), p.spawnTime);
     const b = sys.getControlPointAt(attr(mod, 'end control point number', 1), p.spawnTime);
@@ -2045,10 +2056,12 @@ export class ParticleSystemInstance {
         this.constSeq = attr(def, 'sequence_number', 0);
         this.constSeq2 = attr(def, 'sequence_number 1', 0);
 
-        this.initializers = def.initializers
+        const inits = def.initializers
             .map(m => ({ mod: m, fn: INITIALIZERS[resolveFnName(m.functionName)],
-                         sets: INIT_SETS[resolveFnName(m.functionName)] || null }))
+                         sets: INIT_SETS[resolveFnName(m.functionName)] || null,
+                         late: POS_MODIFIERS.has(resolveFnName(m.functionName)) }))
             .filter(x => x.fn || (console.log('Unknown Initializer:', x.mod.functionName), false));
+        this.initializers = [...inits.filter(x => !x.late), ...inits.filter(x => x.late)];
         this.operators = def.operators
             .map(m => ({ mod: m, fn: OPERATORS[resolveFnName(m.functionName)],
                          env: opEnvelope(m) }))
@@ -2168,7 +2181,14 @@ export class ParticleSystemInstance {
      */
     getControlPointAt(i, time) {
         const now = this.getControlPoint(i);
-        const root = this.parent !== null ? this.parent : this;
+        // Снимок прошлого кадра держит корень, и это точки СНАРУЖИ эффекта.
+        // Точку, выставленную внутри (Set child control points), с ним не
+        // смешиваем: метеоры Darkblaze рождались между головой и колесом
+        let root = this;
+        for (; root.parent !== null; root = root.parent) {
+            if (root.cpOverrides[i] !== undefined) return now;
+        }
+        if (root.cpOverrides[i] !== undefined) return now;
         const prev = root._cpPrev && root._cpPrev[i];
         const t0 = root._cpPrevTime;
         if (!prev || t0 === undefined || root.curTime <= t0 || time >= root.curTime) return now;

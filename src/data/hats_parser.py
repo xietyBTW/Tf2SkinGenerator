@@ -35,7 +35,7 @@ logger = logging.getLogger(__name__)
 # v12: collection - коллекция игры (фильтр каталога).
 # v13: убран event (сезон): фильтр прячет только хэллоуинские по ограничению.
 # Смена версии форсирует одноразовый перепарс старого кэша.
-_CACHE_VERSION = "v14"  # v14: что шапка прячет у персонажа (hidden_bodygroups)
+_CACHE_VERSION = "v15"  # v15: hidden_bodygroups слит с префабами, как в игре
 _CACHE_DIR = data_dir() / "cache"
 
 #: Как называется файл локализации у языка приложения. Один словарь на модуль:
@@ -609,7 +609,7 @@ def _parse_items_game(filepath: str,
             icon=icon,
             regions=_extract_regions(block, game),
             hidden_bodygroups=_bodygroup_pairs(
-                game.inherited_block(block, "player_bodygroups")),
+                game.merged_block(block, "player_bodygroups")),
         ))
 
         if progress_cb and items_parsed % 500 == 0:

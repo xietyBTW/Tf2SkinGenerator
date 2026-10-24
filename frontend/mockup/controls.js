@@ -14,6 +14,7 @@
 import * as api from './api.js';
 import { ask } from './ask.js';
 import { say, sayError } from './stage.js';
+import { notifyApp } from './app-note.js';
 import { SINGLE_TEX, frameOf } from './album.js';
 import { sel, applyToolsMenu } from './catalog.js';
 import { buildParams, checkName } from './build.js';
@@ -338,8 +339,8 @@ document.getElementById('editreset').addEventListener('click', async () => {
  */
 async function keepWork() {
   const res = await api.keepWork();
-  if (res.error) { sayError(res.error); return; }
-  say('Работа сохранена - она в разделе «Кастомный мод»');
+  if (res.error) { notifyApp(res.error, 'error'); return; }
+  notifyApp('Работа сохранена - она в разделе «Кастомный мод»');
   showWork(res);
 }
 

@@ -87,7 +87,7 @@
   height: 56px;
   padding: 0 var(--rhythm);
   border-top: 1px solid var(--hairline);
-  background: var(--surface);
+  background: var(--bg);
 }
 
 .dock__summary {
@@ -136,6 +136,8 @@
 /* Сжатие делится пропорционально, огромные множители дают почти очередь:
    путь к игре (до начала строки), за ним сводка, сообщение последним */
 #docksum { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex-shrink: 100; }
+/* Файл эффектов не влезет в казуал (build.js, сводка частиц) */
+#docksum.is-over { color: var(--bfx-error); }
 .dock__more { flex: none; }
 .dock__tf2 { min-width: 96px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex-shrink: 10000; }
 .dock > .btn--primary { flex: none; white-space: nowrap; }
@@ -376,3 +378,58 @@
 .logline[hidden] { display: none; }
 
 
+
+/* Уведомление про приложение (app-note.js): на время встаёт на место сводки
+   и пути к игре. Сводка уходит вверх, сообщение въезжает снизу, потом
+   наоборот. Квадратик того же размера, что у «Готово», цвет - род */
+.dock__note {
+  --kind: var(--accent);
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: var(--rhythm);
+  /* до главной кнопки: её ширина в обоих языках меньше 170px */
+  right: calc(var(--rhythm) + 170px + var(--gap));
+  display: flex;
+  align-items: center;
+  font-size: 10px;
+  letter-spacing: .14em;
+  text-transform: uppercase;
+  color: var(--ink);
+  white-space: nowrap;
+  pointer-events: none;
+  opacity: 0;
+  visibility: hidden;
+  /* Заметка выезжает снизу, но сдвигается только содержимое внутри неё:
+     сдвинутая сама, она и скрытой выходила за низ окна, и у страницы
+     появлялась прокрутка */
+  overflow: hidden;
+  transition: opacity var(--dur-panel), visibility 0s var(--dur-panel);
+}
+.dock__note::before,
+.dock__note > span {
+  transform: translateY(8px);
+  transition: transform var(--dur-panel) ease-out;
+}
+.dock.has-note > .dock__note::before,
+.dock.has-note > .dock__note > span { transform: none; }
+.dock__note::before {
+  content: "";
+  flex: none;
+  width: 5px;
+  height: 5px;
+  margin-right: 8px;
+  background: var(--kind);
+}
+.dock__note > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.dock__note[data-kind="info"] { --kind: var(--ink-mute); }
+.dock__note[data-kind="error"] { --kind: var(--bfx-error); color: var(--bfx-error); }
+.dock > .dock__summary,
+.dock > .dock__tf2 { transition: opacity var(--dur-panel), transform var(--dur-panel) ease-out; }
+.dock.has-note > .dock__summary,
+.dock.has-note > .dock__tf2 { opacity: 0; transform: translateY(-8px); pointer-events: none; }
+.dock.has-note > .dock__note {
+  opacity: 1;
+  visibility: visible;
+  transition: opacity var(--dur-panel);
+}

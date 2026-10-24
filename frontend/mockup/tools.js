@@ -8,7 +8,8 @@
 import * as api from './api.js';
 import { ask } from './ask.js';
 import { chooseFile } from './util.js';
-import { say, sayInfo, sayError } from './stage.js';
+import { say, sayError } from './stage.js';
+import { notifyApp } from './app-note.js';
 import { loadPcf, pSystem } from './particles/index.js';
 import { floating, panel, closeCat } from './layout.js';
 
@@ -20,7 +21,7 @@ document.getElementById('tools').addEventListener('click', async (e) => {
 
   if (item.dataset.tool === 'folder') {
     const res = await api.exportFolder();
-    if (res.error) sayError(res.error);
+    if (res.error) notifyApp(res.error, 'error');
     return;
   }
   if (item.dataset.tool === 'open') {
@@ -42,21 +43,23 @@ document.getElementById('tools').addEventListener('click', async (e) => {
                              value: (pSystem || 'effect') + '.pcf' });
     if (!path) return;
     const res = await api.saveParticles(path);
-    say(res.error || `Сохранено: ${res.path} (${res.size} Б)`);
+    if (res.error) notifyApp(res.error, 'error');
+    else notifyApp(`Сохранено: ${res.path} (${res.size} Б)`);
     return;
   }
   if (item.dataset.tool === 'ref' || item.dataset.tool === 'ref-ai') {
     const forAi = item.dataset.tool === 'ref-ai';
     say('Сбор справочника…');
     const res = await api.particleReference('', forAi);
-    say(res.error || `Справочник сохранён: ${res.path}`);
+    if (res.error) notifyApp(res.error, 'error');
+    else notifyApp(`Справочник сохранён: ${res.path}`);
     return;
   }
 
   if (item.dataset.tool === 'uv') {
     say('Построение UV-шаблона…');
     const res = await api.exportUv(1024);
-    if (res.error) sayError(res.error);
+    if (res.error) notifyApp(res.error, 'error');
     return;
   }
 
@@ -65,13 +68,13 @@ document.getElementById('tools').addEventListener('click', async (e) => {
   if (item.dataset.tool === 'model') {
     say('Извлечение модели…');
     const res = await api.extractModel();
-    if (res.error) sayError(res.error);
+    if (res.error) notifyApp(res.error, 'error');
     return;
   }
 
   if (item.dataset.tool === 'texture') {
     const res = await api.extractTexture();
-    if (res.error) { sayError(res.error); return; }
+    if (res.error) { notifyApp(res.error, 'error'); return; }
     // У тела персонажа текстур два десятка - какие брать, решает человек
     if (res.need_textures) {
       const picked = await ask({
@@ -81,7 +84,7 @@ document.getElementById('tools').addEventListener('click', async (e) => {
       });
       if (!picked || !picked.length) return;
       const again = await api.extractTexture(picked);
-      if (again.error) sayError(again.error);
+      if (again.error) notifyApp(again.error, 'error');
       return;
     }
     say('Извлечение текстуры…');
@@ -99,7 +102,7 @@ document.getElementById('tools').addEventListener('click', async (e) => {
  */
 export async function mergeMods() {
   const files = await api.exportVpks();
-  if (!files.length) { sayInfo('В папке экспорта нет собранных модов'); return; }
+  if (!files.length) { notifyApp('В папке экспорта нет собранных модов', 'info'); return; }
 
   const picked = await ask({ title: 'Какие моды объединить', list: files,
                              multi: true, ok: 'Далее' });
@@ -120,7 +123,7 @@ export async function mergeMods() {
     if (!go) return;
     res = await api.mergeVpk(picked, name, true);
   }
-  if (res.error) sayError(res.error);
+  if (res.error) notifyApp(res.error, 'error');
   else say('Объединение…');
 }
 

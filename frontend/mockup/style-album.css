@@ -80,10 +80,10 @@
      они выглядят выцветшими - непонятно, где прозрачность, а где светлый
      пиксель */
   background:
-    conic-gradient(var(--hairline) 25%, transparent 0 50%,
-                   var(--hairline) 0 75%, transparent 0)
+    conic-gradient(var(--checker) 25%, transparent 0 50%,
+                   var(--checker) 0 75%, transparent 0)
     0 0 / 16px 16px,
-    var(--surface);
+    var(--checker-bg);
   transition: border-color var(--dur);
   overflow: hidden;
 }

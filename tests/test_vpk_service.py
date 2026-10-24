@@ -1570,8 +1570,10 @@ class BuildVpkCharacterizationTests(unittest.TestCase):
             "materials/console/models/weapons/c_items/c_pocket_watch.vtf": self.VTF,
             "materials/models/weapons/c_items/c_pocket_watch.vmt": self.VMT,
         })
-        # Экран Звона смерти идёт своим путём - он в моде
-        self.assertIn("scripts/screens/pda_spy_invis_pocket.res", self.tree)
+        # Циферблат не меняли - свой .res экрана не нужен: он вёл бы картинки
+        # шкалы в мод, где их нет, и в игре они пропадали
+        self.assertNotIn("scripts/screens/pda_spy_invis_pocket.res", self.tree)
+        self.assertNotIn("info.vdf", self.tree)
 
     def test_snapshot_pocket_watch_hud_inserts(self):
         # Вставки циферблата по фиксированному пути: одна и та же картинка в
@@ -1607,6 +1609,9 @@ class BuildVpkCharacterizationTests(unittest.TestCase):
             d + "pocket_watch_bg.vtf": b"VTF\x00pocket_watch_fg",
             d + "pocket_watch_bg.vmt": vmt("pocket_watch_bg"),
         })
+        res = self.tree["scripts/screens/pda_spy_invis_pocket.res"].decode()
+        self.assertIn('"fg_image"\t"replay/thumbnails/deadringer/pocket_watch_fg"', res)
+        self.assertIn("info.vdf", self.tree)
 
     def test_snapshot_hands_mirror(self):
         P = "src.services.vpk_service."

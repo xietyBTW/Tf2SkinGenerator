@@ -43,9 +43,8 @@ def build_secondary_textures(
         tex.format_type, tex.flags, tex.vtf_options,
     )
 
-    # Доп. статические файлы мода (HUD .res, info.vdf) - напр. для
-    # кастомного циферблата Dead Ringer. Пишутся всегда (активируют мод)
-    fixed_extras.write_fixed_extra_files(weapon_key, ctx)
+    # Экран часов (.res и info.vdf) - только если циферблат меняли
+    fixed_extras.write_watch_screen(weapon_key, ctx, fixed_handled)
 
     # Картинки и карты частей, чей материал сборка пропустила (модель не
     # та), в мод не идут вовсе: их VMT некому показать. Родной материал,

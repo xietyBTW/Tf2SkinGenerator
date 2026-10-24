@@ -225,6 +225,34 @@ def _vtf_to_png(vtf_raw: bytes) -> Optional[tuple]:
                 pass
 
 
+def additive_card_url(data_url: str) -> str:
+    """Картинка для карточки аддитивного материала: то, что спрайт складывает
+    с фоном, - цвет, умноженный на альфу, на чёрном
+
+    Альфа у таких текстур бывает почти пустой (wispy_smoke_add: не выше 37 из
+    255), и карточка рисовала дым прозрачным - белый пропадал на любом фоне.
+    Цвет у неё же почти ровный, форма лежит в альфе, поэтому альфу растягиваем
+    до полной: в игре яркость набирают десятки наложенных частиц
+    """
+    try:
+        from PIL import Image, ImageChops
+        raw = base64.b64decode(data_url.split(",", 1)[1])
+        img = Image.open(io.BytesIO(raw)).convert("RGBA")
+        alpha = img.getchannel("A")
+        top = alpha.getextrema()[1]
+        # Совсем пустая альфа - текстура без неё, цвет и есть картинка
+        alpha = (alpha.point(lambda v: v * 255 // top) if top
+                 else Image.new("L", img.size, 255))
+        lit = ImageChops.multiply(img.convert("RGB"),
+                                  Image.merge("RGB", (alpha, alpha, alpha)))
+        buf = io.BytesIO()
+        lit.save(buf, format="PNG", compress_level=3)
+        return "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode("ascii")
+    except Exception as exc:
+        logger.warning(f"картинка карточки не получилась: {exc}")
+        return data_url
+
+
 def rename_material(pcf, old_material: str, new_material: str) -> bool:
     """
     Меняет путь материала у всех систем, где он используется

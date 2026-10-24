@@ -275,9 +275,9 @@
 .seg button:hover { color: var(--ink); border-color: var(--ink); position: relative; }
 .seg button.is-active {
   position: relative;
-  background: var(--ink);
+  background: var(--chosen);
   border-color: var(--ink);
-  color: var(--surface);
+  color: var(--chosen-ink);
 }
 .place__fields { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 .place__field { display: flex; flex-direction: column; gap: 2px; min-width: 0; }

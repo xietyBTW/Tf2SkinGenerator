@@ -236,9 +236,6 @@ class PreviewSession:
 
     # Командные кадры
     team_framerate: float = 0.0
-    #: У модели есть BLU-скин, но в стоке он не отличается от RED (та же
-    #: текстура и та же краска в VMT) - влияет только на подпись кнопки
-    blu_matches_red: bool = False
 
     # Что сейчас загружено в 3D
     #: (режим, obj_path, texture_path) показанной модели; None - ничего не грузили.
@@ -1026,7 +1023,6 @@ class PreviewSession:
         self.team_framerate = 0.0
         self.textures.reset_team_data()
         self.textures.reset_australium()
-        self.blu_matches_red = False
         # «Сделать командным» покажется снова, когда модель загрузится
         self.textures.force_team = False
 

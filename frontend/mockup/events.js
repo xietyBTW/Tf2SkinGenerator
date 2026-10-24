@@ -8,6 +8,7 @@
 
 import * as api from './api.js';
 import { say, sayError, sayBusy, withViewer } from './stage.js';
+import { notifyApp } from './app-note.js';
 import { setBusy, showResult, work } from './layout.js';
 import { plural } from './util.js';
 import { dockFx } from './buildfx.js';
@@ -87,9 +88,6 @@ api.subscribe((ev) => {
     case 'blu_materials':
     case 'blu_ready':
     case 'australium':
-    // «Синий есть, но он равен красному» меняет только подпись кнопки -
-    // состояние уже знает об этом (blu_matches_red)
-    case 'blu_same_as_red':
       refreshView();
       break;
 
@@ -255,14 +253,14 @@ api.subscribe((ev) => {
     }
 
     case 'uv_ready':
-      if (!ev.ok || !ev.path) { sayError(ev.message || 'UV-шаблон не построен'); break; }
+      if (!ev.ok || !ev.path) { notifyApp(ev.message || 'UV-шаблон не построен', 'error'); break; }
       // Кладём рядом с текстурами: сравнивать развёртку с текстурой удобнее
       // в одном ряду, чем в отдельном окне.
       // У многоматериальной модели разметок несколько: у каждого материала
       // своя текстура и своя развёртка в тех же координатах
       const uvFiles = (ev.paths && ev.paths.length) ? ev.paths : [ev.path];
-      say(uvFiles.length > 1 ? `UV-шаблоны: ${uvFiles.length} шт.`
-                             : `UV-шаблон: ${uvFiles[0]}`);
+      notifyApp(uvFiles.length > 1 ? `UV-шаблоны: ${uvFiles.length} шт.`
+                                   : `UV-шаблон: ${uvFiles[0]}`);
       uvFiles.forEach((file, index) => addFrame(
         uvFiles.length > 1 ? `UV-шаблон ${index + 1}` : 'UV-шаблон', file));
       break;
@@ -270,13 +268,13 @@ api.subscribe((ev) => {
     // Файлы декомпиляции готовы: пока выбор не сделан, за ними числится
     // временная папка - отказ тоже надо отправить, иначе она останется
     case 'extract_files':
-      if (!ev.ok) { sayError(ev.message || 'Модель не извлечена'); break; }
+      if (!ev.ok) { notifyApp(ev.message || 'Модель не извлечена', 'error'); break; }
       ask({ title: 'Что сохранить в папку экспорта', list: ev.files,
             multi: true, chosen: ev.selected || [], ok: 'Сохранить' })
         .then(async (picked) => {
           const res = await api.exportModelFiles(picked || []);
-          if (res.error) sayError(res.error);
-          else if (res.cancelled) say('Извлечение отменено');
+          if (res.error) notifyApp(res.error, 'error');
+          else if (res.cancelled) notifyApp('Извлечение отменено', 'info');
         });
       break;
 
@@ -302,7 +300,7 @@ api.subscribe((ev) => {
       break;
 
     case 'tool_done':
-      (ev.ok ? say : sayError)(ev.message || (ev.ok ? 'Готово' : 'Не получилось'));
+      notifyApp(ev.message || (ev.ok ? 'Готово' : 'Не получилось'), ev.ok ? 'done' : 'error');
       break;
 
     case 'failed':

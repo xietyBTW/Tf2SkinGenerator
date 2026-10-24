@@ -88,8 +88,6 @@ def check() -> list:
                | set(re.findall(r"done: str = '(\w+)'", session)))
     handled = set(re.findall(r"case '(\w+)':", app))
     for event in sorted(emitted - handled):
-        # Событие без обработчика - не всегда ошибка: страница может не
-        # интересоваться им (blu_same_as_red меняет только подпись кнопки)
         problems.append(f"событие Python без обработчика на странице: {event}")
     for event in sorted(handled - emitted):
         problems.append(f"обработчик события, которого никто не шлёт: {event}")

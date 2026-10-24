@@ -24,7 +24,6 @@ def _loaded_session() -> PreviewSession:
     s.skin_chosen = {1: {"mat_a"}}
     s.applied_3d_tex = {"mat_a": "C:/tex/a.png"}
     s.team_framerate = 12.0
-    s.blu_matches_red = True
     s.pending_2d_refresh = True
 
     t = s.textures
@@ -34,6 +33,7 @@ def _loaded_session() -> PreviewSession:
     t.red_frames = ["r0.png"]
     t.blu_frames = ["b0.png"]
     t.blu_name_map = {"mat_a": "mat_a_blue"}
+    t.blu_twins = {"mat_b_blue": "mat_b"}
     t.vpk_red_tex_map = {"mat_a": "r.png"}
     t.vpk_blu_tex_map = {"mat_a": "b.png"}
     t.active_team = Team.BLU
@@ -113,7 +113,7 @@ class BeginGameModelTests(unittest.TestCase):
         self.assertFalse(t.australium_active)
         self.assertIsNone(t.australium_frame)
         self.assertEqual(s.team_framerate, 0.0)
-        self.assertFalse(s.blu_matches_red)
+        self.assertEqual(t.blu_twins, {})
         self.assertEqual(s.applied_3d_tex, {})
 
     def test_forgets_misc_and_main_material(self):

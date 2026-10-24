@@ -24,7 +24,8 @@ function log(dir, text, kind) { if (sink) sink(dir, text, kind); }
 //: ленте обмена они вытесняют всё остальное. Отдельно смешно с log_tail -
 //: открытая консоль засоряла бы сама себя. icons - сотни килобайт картинок на
 //: каждую прокрутку каталога
-const QUIET = new Set(['log_tail', 'update_progress', 'window_control', 'icons']);
+const QUIET = new Set(['log_tail', 'update_progress', 'window_control', 'icons',
+                       'particle_size']);
 
 /** Вызывает метод прикладного API. Бросает Error с текстом от Python */
 export async function call(method, params = {}) {
@@ -114,8 +115,8 @@ export const setParticleAttr = (system, group, index, attr, value) =>
 export const particleModules  = (group) => cached('particle_module_catalog', { group });
 export const addParticleModule = (system, group, function_name) =>
   call('add_particle_module', { system, group, function_name });
-export const applyParticleGizmo = (system, edits) =>
-  call('apply_particle_gizmo', { system, edits });
+export const applyParticleGizmo = (system, edits, prepare = false) =>
+  call('apply_particle_gizmo', { system, edits, prepare });
 export const removeParticleModule = (system, group, index) =>
   call('remove_particle_module', { system, group, index });
 export const particleMissingAttrs = (system, group, index) =>
@@ -167,6 +168,7 @@ export const particleLint = (system = '') => call('particle_lint', { system });
 export const fixParticleLint = (system = '') => call('fix_particle_lint', { system });
 export const saveParticles = (path) => call('save_particles', { path });
 export const exportParticlesVpk = (name) => call('export_particles_vpk', { name });
+export const particleSize = () => call('particle_size');
 export const particleReference = (path = '', for_ai = false) =>
   call('particle_param_reference', { path, for_ai });
 export const hatFilters   = () => call('hat_filters');

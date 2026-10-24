@@ -104,6 +104,15 @@ cpEl('cp-reset').addEventListener('click', () => {
   cpPush();
 });
 
+// Гизмо двигает весь эффект или только открытую систему: обычно эффект
+// сдвигают целиком, а родитель без детей разваливает его на части
+document.getElementById('cp-scope').addEventListener('click', (e) => {
+  const btn = e.target.closest('[data-scope]');
+  if (!btn) return;
+  for (const b of btn.parentElement.children) b.classList.toggle('is-active', b === btn);
+  withParticles((w) => w.setGizmoScope(btn.dataset.scope));
+});
+
 document.getElementById('pcpbtn').addEventListener('click', (e) => {
   cpBox.hidden = !cpBox.hidden;
   e.target.classList.toggle('is-off', cpBox.hidden);
@@ -198,12 +207,12 @@ cpEl('cp-attach').addEventListener('change', () => {
 
 /** Переключает сцену: пустое пространство или модель под эффектом */
 function cpScene(onModel) {
-  document.querySelectorAll('.cp__scene .tag').forEach(
+  document.querySelectorAll('#cp-scene .tag').forEach(
     (b) => b.classList.toggle('is-active', (b.dataset.scene === 'model') === onModel));
   withParticles((w) => w.setModelVisible(onModel));
 }
 
-document.querySelector('.cp__scene').addEventListener('click', (e) => {
+document.getElementById('cp-scene').addEventListener('click', (e) => {
   const b = e.target.closest('[data-scene]');
   if (b) cpScene(b.dataset.scene === 'model');
 });

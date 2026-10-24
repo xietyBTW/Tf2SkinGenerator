@@ -13,25 +13,41 @@
 # материалы модели - путь зашит в игре. Здесь задаём такие текстуры явно:
 #   {weapon_key: [{"name", "vpk" (путь в VPK с materials/...vtf), "ru", "en"}]}
 # Превью покажет для них слот, сборка запишет картинку ровно по этому пути
+def _watch_face(name: str, game_dir: str, mod_dir: str) -> list[dict]:
+    """Две картинки шкалы на циферблате часов: заполнение (fg) и фон (bg)
+
+    Оригинал лежит в игре по `game_dir`, мод кладёт свою в папку обхода
+    sv_pure `mod_dir`, VMT - в ту же папку, что и VTF (так требует игра)
+    """
+    out = []
+    for role, ru, en in (("fg", "Центральная вставка", "Center insert"),
+                         ("bg", "Фон циферблата", "Watch background")):
+        stem = f"{name}_{role}"
+        out.append({
+            "name": stem, "role": role,
+            "vpk": f"materials/vgui/{mod_dir}/{stem}.vtf",
+            "game": f"materials/vgui/{game_dir}{stem}.vtf",
+            "vmt": f"materials/vgui/{mod_dir}/{stem}.vmt",
+            "ru": ru, "en": en,
+        })
+    return out
+
+
 WEAPON_EXTRA_TEXTURES: dict[str, list[dict]] = {
-    "c_pocket_watch": [
-        {
-            "name": "pocket_watch_fg",
-            "vpk":  "materials/vgui/replay/thumbnails/deadringer/pocket_watch_fg.vtf",
-            # Оригинал в игре - здесь, мод кладёт свою в папку обхода sv_pure
-            "game": "materials/vgui/pocket_watch_fg.vtf",
-            # VMT кладём В ТУ ЖЕ папку, что и VTF (так требует игра, без дублей vgui)
-            "vmt":  "materials/vgui/replay/thumbnails/deadringer/pocket_watch_fg.vmt",
-            "ru": "Центральная вставка", "en": "Center insert",
-        },
-        {
-            "name": "pocket_watch_bg",
-            "vpk":  "materials/vgui/replay/thumbnails/deadringer/pocket_watch_bg.vtf",
-            "game": "materials/vgui/pocket_watch_bg.vtf",
-            "vmt":  "materials/vgui/replay/thumbnails/deadringer/pocket_watch_bg.vmt",
-            "ru": "Фон циферблата", "en": "Watch background",
-        },
-    ],
+    "c_pocket_watch": _watch_face("pocket_watch", "", "replay/thumbnails/deadringer"),
+    "v_ttg_watch_spy": _watch_face("ttg_watch", "", "replay/thumbnails/ttgwatch"),
+    "v_hm_watch": _watch_face("hm_watch", "workshop_partner/hm_watch/",
+                              "replay/thumbnails/hmwatch"),
+}
+
+# Экран часов: какой .res игра берёт для модели вида. Выбор зашит в коде
+# игры по имени модели (CTFWeaponInvis::GetControlPanelInfo: «pocket»,
+# «ttg_watch_spy», «hm_watch»), картинки шкалы - в WEAPON_EXTRA_TEXTURES.
+# Мод кладёт свой .res с путями к своим картинкам
+WATCH_SCREEN_RES: dict[str, str] = {
+    "c_pocket_watch": "scripts/screens/pda_spy_invis_pocket.res",
+    "v_ttg_watch_spy": "scripts/screens/pda_spy_invis_pocket_ttg.res",
+    "v_hm_watch": "scripts/screens/pda_spy_invis_pocket_hm.res",
 }
 
 # Оружие без BLU-команды
@@ -81,36 +97,6 @@ def is_own_material(weapon_key: str, material: str) -> bool:
     """Свой ли материал модели (MODEL_MATERIAL_WHITELIST), без правила - все свои"""
     keep = MODEL_MATERIAL_WHITELIST.get(weapon_key)
     return not keep or any(s in (material or '').lower() for s in keep)
-
-# Доп. статические файлы мода (скрипты/метаданные)
-# Некоторым предметам нужны не-материальные файлы в моде: HUD-скрипты (.res),
-# метаданные мода (info.vdf) и т.п. Кладутся в корень VPK по указанному пути
-# ровно с заданным содержимым. {weapon_key: [{"path", "content"}]}
-WEAPON_EXTRA_FILES: dict[str, list[dict]] = {
-    "c_pocket_watch": [
-        {
-            "path": "scripts/screens/pda_spy_invis_pocket.res",
-            "content": (
-                '"pda_spy_invis.res"\n'
-                '{\n'
-                '\t"InvisProgress"\n'
-                '\t{\n'
-                '\t\t"ControlName"\t"CircularProgressBar"\t"fieldName"\t"InvisProgress"\n'
-                '\t\t"xpos"\t"10"\t"ypos"\t"10"\t"zpos"\t"1"\t"wide"\t"260"\t"tall"\t"80"\n'
-                '\t\t"visible"\t"1"\t"enabled"\t"1"\n'
-                '\n'
-                '\t\t"fg_image"\t"replay/thumbnails/deadringer/pocket_watch_fg"\t\n'
-                '\t\t"bg_image"\t"replay/thumbnails/deadringer/pocket_watch_bg"\n'
-                '\t}\t\n'
-                '}\n'
-            ),
-        },
-        {
-            "path": "info.vdf",
-            "content": '"stan-deadringer" { "ui_version" "3" }\n',
-        },
-    ],
-}
 
 # Нестандартные пути VTF (дополнительные пути для поиска текстур)
 # Используются как приоритетный список ПЕРЕД стандартными путями.

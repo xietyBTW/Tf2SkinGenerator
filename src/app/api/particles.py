@@ -87,10 +87,10 @@ def add_particle_module(system: str, group: str,
 
 
 @endpoint
-def apply_particle_gizmo(system: str, edits: list) -> Dict[str, object]:
+def apply_particle_gizmo(system: str, edits: list, prepare: bool = False) -> Dict[str, object]:
     """Итог перетаскивания ручек гизмо в превью частиц"""
     from src.app.session import session
-    return session().particles.apply_particle_gizmo(system, edits)
+    return session().particles.apply_particle_gizmo(system, edits, prepare)
 
 
 @endpoint
@@ -311,6 +311,14 @@ def particle_lint(system: str = '', lang: str = '') -> Dict[str, object]:
 def fix_particle_lint(system: str = '') -> Dict[str, object]:
     from src.app.session import session
     return session().particles.fix_particle_lint(system)
+
+
+@endpoint
+def particle_size() -> Dict[str, object]:
+    """Файл эффектов, его размер в моде и потолок казуала"""
+    from src.app.session import session
+    from src.services.particle_editor.export import size_summary
+    return size_summary(session().particles.pcf)
 
 
 @endpoint

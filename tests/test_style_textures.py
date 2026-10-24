@@ -100,6 +100,7 @@ class WorkerPairingTests(unittest.TestCase):
 
         w = object.__new__(Preview3DWorker)
         w._decomp_dir = 'x'
+        w.misc_vpk_path, w.weapon_key = '', 'c_sd_cleaver'
         layout = qc_skin_parser.classify_rows(rows)
         w._model = lambda _d: type('M', (), {'layout': layout})()
         w._extract_multi_textures = lambda names: {n: f'{n}.png' for n in names}
@@ -114,3 +115,27 @@ class WorkerPairingTests(unittest.TestCase):
         """RED/BLU - свой тумблер, а не стиль"""
         w = self._worker([['c_scattergun'], ['c_scattergun_blue']])
         self.assertEqual(w._extract_style_textures(), {})
+
+
+class ItemStyleRowTests(unittest.TestCase):
+    """Критокола - безымянная строка 2 модели Бонка, стилем её делает items_game"""
+
+    def _layout(self):
+        from src.services.qc_skin_parser import SkinLayout
+        return SkinLayout(all_rows=[['c_energydrink'], ['c_energydrink_blu'],
+                                    ['c_energydrink_purp']],
+                          skins=[{'index': 0, 'role': 'RED'}, {'index': 1, 'role': 'BLU'},
+                                 {'index': 2, 'role': 'Skin 2'}])
+
+    def test_item_row_gets_its_game_texture(self):
+        from src.services.texture_locator import style_pairs
+        self.assertEqual(style_pairs(self._layout()), ({}, []))
+        self.assertEqual(style_pairs(self._layout(), [2]),
+                         ({2: {'c_energydrink': 'c_energydrink_purp'}},
+                          ['c_energydrink_purp']))
+
+    def test_copy_of_an_earlier_row_is_not_a_style(self):
+        from src.services.texture_locator import style_pairs
+        layout = self._layout()
+        layout.all_rows[2] = ['c_energydrink_blu']
+        self.assertEqual(style_pairs(layout, [2]), ({}, []))

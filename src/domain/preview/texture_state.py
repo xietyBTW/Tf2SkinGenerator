@@ -105,6 +105,10 @@ class PreviewTextureState:
     main_material: Optional[str] = None
     #: {red_mat: blu_display_name} - командные пары материалов (персонажи/руки)
     blu_name_map: Dict[str, str] = field(default_factory=dict)
+    #: {синий материал в нижнем регистре: его RED-пара} - в игре синий
+    #: выглядит в точности как красный. Карточки у такого нет, поэтому
+    #: сборка отдаёт ему правку красного, иначе синие видели бы сток
+    blu_twins: Dict[str, str] = field(default_factory=dict)
     #: Игровые оригиналы из VPK: {red_mat: png} по командам (ключи - RED-имена)
     vpk_red_tex_map: Dict[str, str] = field(default_factory=dict)
     vpk_blu_tex_map: Dict[str, str] = field(default_factory=dict)
@@ -168,7 +172,10 @@ class PreviewTextureState:
         base = self.part_cards.get(mat)
         if base and base != mat:
             return self.is_team_material(base)
-        if self.blu_name_map:
+        # Карта ключуется настоящими именами, а карточка одноматериальной
+        # модели живёт под служебным ключом: по карте она всегда выходила
+        # общей, и на BLU шарф Stockbroker's Scarf оставался красным
+        if self.blu_name_map and mat != SINGLE_TEX_KEY:
             bn = self.blu_name_map.get(mat, mat)
             return bn.lower() != mat.lower()
         if self.blu_frames:
@@ -208,7 +215,7 @@ class PreviewTextureState:
             return not self._decor_team(mat)
         if mat in self.part_cards:
             return not self.is_team_material(mat)
-        if self.blu_name_map:
+        if self.blu_name_map and mat != SINGLE_TEX_KEY:
             blu = self.blu_name_map.get(mat)
             if blu is not None:
                 return blu.lower() == mat.lower()
@@ -446,13 +453,17 @@ class PreviewTextureState:
           3. Нейтральная при непустом маппинге -> обе команды.
           4. Маппинг пуст -> обе команды, суффикс '_blue'/'_blu' (force-team) ->
              textures[BLU][база], затем главная BLU как fallback
+        Синий двойник красного (blu_twins) получает правку своей RED-пары
         """
+        twin = self.blu_twins.get(mat.lower())
+        if twin:
+            mat = self._card_of(twin)
         if self.blu_name_map:
             if mat in self.blu_name_map:
-                return _existing(self.textures.get(Team.RED, {}).get(mat))
+                return _existing(self.textures.get(Team.RED, {}).get(self._card_of(mat)))
             for red_key, blu_name in self.blu_name_map.items():
                 if blu_name == mat:
-                    return _existing(self.textures.get(Team.BLU, {}).get(red_key))
+                    return _existing(self.textures.get(Team.BLU, {}).get(self._card_of(red_key)))
             for team in (Team.RED, Team.BLU):
                 p = _existing(self.textures.get(team, {}).get(mat))
                 if p:
@@ -482,6 +493,11 @@ class PreviewTextureState:
                         return r
                 return self.blu_main()
         return None
+
+    def _card_of(self, mat: str) -> str:
+        """Ключ карточки материала: у одноматериальной модели она одна и
+        лежит под служебным ключом, а сборка спрашивает настоящее имя"""
+        return SINGLE_TEX_KEY if self.material_names == [SINGLE_TEX_KEY] else mat
 
     def uploaded_slot_paths(self) -> Dict[str, str]:
         """{mat: path} всех заполненных слотов, активная команда приоритетнее.
@@ -540,6 +556,7 @@ class PreviewTextureState:
             'active_team': self.active_team,
             'force_team': self.force_team,
             'blu_name_map': dict(self.blu_name_map),
+            'blu_twins': dict(self.blu_twins),
             'vpk_red_tex_map': dict(self.vpk_red_tex_map),
             'vpk_blu_tex_map': dict(self.vpk_blu_tex_map),
             'red_frames': list(self.red_frames),
@@ -561,6 +578,7 @@ class PreviewTextureState:
         self.active_team = snap.get('active_team', Team.RED)
         self.force_team = snap.get('force_team', False)
         self.blu_name_map = dict(snap.get('blu_name_map') or {})
+        self.blu_twins = dict(snap.get('blu_twins') or {})
         self.vpk_red_tex_map = dict(snap.get('vpk_red_tex_map') or {})
         self.vpk_blu_tex_map = dict(snap.get('vpk_blu_tex_map') or {})
         self.red_frames = list(snap.get('red_frames') or [])
@@ -586,6 +604,7 @@ class PreviewTextureState:
         self.vpk_red_tex_map = {}
         self.vpk_blu_tex_map = {}
         self.blu_name_map = {}
+        self.blu_twins = {}
         self.active_team = Team.RED
         self.force_team = False
 

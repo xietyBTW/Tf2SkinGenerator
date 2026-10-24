@@ -55,7 +55,6 @@ class Preview3DController:
     materials = Signal(object)              # {материал: png} - многоматериальная
     blu_ready = Signal(object, float)       # ([кадры BLU], framerate)
     blu_materials = Signal(object, object)  # (tex_map, name_map) - уже разобранные
-    blu_same_as_red = Signal()              # BLU есть, но в стоке равен RED
     australium_ready = Signal(str, str)     # (png, имя материала)
     render_hints = Signal(object)           # свойства рисования материалов
     # ({материал: png} чужой геометрии, [материалы предмета]) - праздничная
@@ -217,9 +216,9 @@ class Preview3DController:
         t.australium_mat_name = mat_name or None
         self.australium_ready.emit(png_path, mat_name)
 
-    def _on_blu_same_as_red(self) -> None:
-        self._session.blu_matches_red = True
-        self.blu_same_as_red.emit()
+    def _on_blu_same_as_red(self, twins) -> None:
+        self._session.textures.blu_twins = {
+            str(blu).lower(): str(red) for blu, red in dict(twins or {}).items()}
 
     def _on_scene_extra(self, payload) -> None:
         """

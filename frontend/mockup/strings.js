@@ -618,8 +618,6 @@ export const EN = {
   'Не удалось показать модель: {}': 'Could not show the model: {}',
   'Не удалось показать сцену: {}': 'Could not show the scene: {}',
   'Не удалось загрузить: {}': 'Could not load: {}',
-  'В игре синий вариант этой модели не отличается от красного':
-    'In the game the BLU variant of this model is the same as RED',
   'Материалы стиля: остальные наследуют базовую текстуру.':
     'Materials of this style: the rest inherit the base texture.',
   'Стиль пока целиком наследует базу. Добавьте материал, чтобы дать ему свою текстуру.':
@@ -903,6 +901,13 @@ export const EN = {
   'Повтор': 'Loop',
   'Повторить': 'Redo',
   'Точки': 'Points',
+  'Гизмо двигает': 'Gizmo moves',
+  'у эффекта заняты все точки': 'the effect uses every control point',
+  'эффект считает свои точки': 'the effect counts its control points',
+  'не удалось добавить Set Control Point Positions': 'could not add Set Control Point Positions',
+  'Весь эффект': 'Whole effect',
+  'Эту систему': 'This system',
+  'Alt при перетаскивании - наоборот': 'Hold Alt while dragging to switch',
   'Вернуть': 'Restore',
   'Свернуть': 'Collapse',
   'Развернуть': 'Expand',
@@ -1097,8 +1102,13 @@ export const EN = {
   'Собрать как есть': 'Build as is',
   'Имя файла мода': 'Mod file name',
   'Сборка VPK…': 'Building the VPK…',
-  'Собрано, но PCF на {} Б больше оригинала - в казуале не загрузится':
-    'Built, but the PCF is {} B larger than the original - casual will not load it',
+  'Собрано, но файл эффектов больше оригинала на {} КБ: в казуале он не загрузится':
+    'Built, but the particle file is {} KB larger than the original: casual will not load it',
+  'Изменено систем: {}': 'Systems changed: {}',
+  'Больше оригинала на {} КБ': '{} KB larger than the original',
+  '{} из {} КБ': '{} of {} KB',
+  'В казуале файл эффектов больше оригинала не загрузится':
+    'In casual, a particle file larger than the original does not load',
 
   // Сообщения Python: ошибки сеанса
   'Сначала выберите предмет': 'Select an item first',
@@ -1854,4 +1864,8 @@ export const EN = {
   'Изменить узор': 'Edit pattern',
   'Узор не найден': 'Pattern not found',
   'Узор не сохранился: {}': 'The pattern was not saved: {}',
+  'Редактор частиц в тестовом режиме': 'The particle editor is in testing',
+  'Некоторые эффекты в превью выглядят не так, как в игре. Проверяйте результат в игре.':
+    'Some effects look different in the preview than in the game. Check the result in the game.',
+  'Понятно': 'Got it',
 };

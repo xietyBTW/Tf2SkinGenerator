@@ -22,7 +22,7 @@ import { ensureEffectMaterials } from './materials.js';
 // Один разбор ответа на всех: правка структуры отдаёт свежие systems и tree,
 // и после неё надо обновить и кадр, и каталог, и панель свойств
 
-export async function applyStructure(res, { reselect = null } = {}) {
+export async function applyStructure(res, { reselect = null, soft = false } = {}) {
   if (!res || res.error) { say(res?.error || 'не получилось'); return false; }
   if (res.diff) setDiff(res.diff);
   if (res.tree) {
@@ -35,7 +35,7 @@ export async function applyStructure(res, { reselect = null } = {}) {
     setTitle(pSystem);
   }
   if (res.systems) {
-    withParticles((w) => w.updateSystems(res.systems, pSystem));
+    withParticles((w) => w.updateSystems(res.systems, pSystem, { soft }));
     ensureEffectMaterials();
   }
   if (pSystem) await showParams(pSystem);
@@ -445,8 +445,9 @@ export async function buildParticles() {
   // Обход sv_pure в казуале не грузит PCF больше оригинального: выросший
   // файл просто не заработает, и знать об этом надо до похода в игру
   const over = res.overflow;
+  const kb = (over / 1024).toFixed(over < 10240 ? 1 : 0);
   dockFx.finish(true, over && over > 0
-    ? `Собрано, но PCF на ${over} Б больше оригинала - в казуале не загрузится`
+    ? `Собрано, но файл эффектов больше оригинала на ${kb} КБ: в казуале он не загрузится`
     : `Мод собран · ${String(res.path || name).split(/[\\/]/).pop()}`);
   showResult(true, !(over > 0));
 }

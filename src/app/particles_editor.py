@@ -587,11 +587,12 @@ class ParticlesEditor:
     # системы И дерево: добавленный модуль виден в свойствах, а созданная или
     # переименованная система - ещё и в каталоге слева
 
-    def _particles_state(self, **extra: Any) -> Dict[str, Any]:
+    def _particles_state(self, commit: bool = True, **extra: Any) -> Dict[str, Any]:
         """Свежий снимок для страницы после правки структуры"""
         from src.services.particle_editor_service import system_hierarchy
 
-        self._history_commit()
+        if commit:
+            self._history_commit()
         systems = self.pcf.systems_json()
         out: Dict[str, Any] = {
             'systems': systems,
@@ -719,11 +720,15 @@ class ParticlesEditor:
             return {'error': f'не удалось добавить {function_name}'}
         return self._particles_state()
 
-    def apply_particle_gizmo(self, system: str, edits: list) -> Dict[str, Any]:
-        """Итог перетаскивания ручек гизмо - одним шагом истории"""
+    def apply_particle_gizmo(self, system: str, edits: list, prepare: bool = False) -> Dict[str, Any]:
+        """Итог перетаскивания ручек гизмо - одним шагом истории. prepare - только точка
+        «начало эффекта» до первого сдвига всего эффекта: шаг запишет сам сдвиг"""
         if (err := self._need_pcf()):
             return err
         paths = self._host.tf2_paths()
+        if prepare:
+            res = self.pcf.ensure_effect_origin(system, paths.get('root', ''))
+            return res if 'error' in res else self._particles_state(commit=False, **res)
         error = self.pcf.apply_gizmo_edits(
             system, edits or [], '' if 'error' in paths else paths['root'])
         return {'error': error} if error else self._particles_state()
@@ -1284,6 +1289,7 @@ class ParticlesEditor:
 
     def particle_materials(self, system: str = '') -> List[dict]:
         """Материалы эффекта с их картинками - карточки 2D"""
+        from src.services.particle_editor.materials import additive_card_url
         paths = self._host.tf2_paths()
         if self.pcf is None or 'error' in paths:
             return []
@@ -1296,9 +1302,10 @@ class ParticlesEditor:
         out: List[dict] = []
         for name in names:
             info = found.get(name) or {}
+            url = info.get('dataUrl') or ''
             out.append({
                 'name': name,
-                'dataUrl': info.get('dataUrl', ''),
+                'dataUrl': additive_card_url(url) if url and info.get('additive') else url,
                 'width': info.get('width', 0),
                 'height': info.get('height', 0),
                 # Покадровая анимация: своя картинка её собьёт, и об этом

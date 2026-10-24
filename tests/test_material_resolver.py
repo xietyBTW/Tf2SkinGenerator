@@ -155,8 +155,9 @@ class ResolverTests(unittest.TestCase):
             self.assertEqual(img.convert("RGBA").getpixel((0, 0)), (8, 8, 8, 255))
         self.assertIsNotNone(raw.tint, "краску всё равно распознали")
 
-    def test_same_look_compares_texture_and_paint(self):
-        """Ответ на «отличается ли BLU от RED» даёт сам резолвер"""
+    def test_twin_needs_same_texture_and_paint(self):
+        """Ответ на «отличается ли BLU от RED» - по всему VMT"""
+        from src.services.team_twins import is_twin
         files = {
             f"materials/{CD[0]}/hat.vmt": vmt(
                 basetexture="models/hat/hat_color",
@@ -173,9 +174,9 @@ class ResolverTests(unittest.TestCase):
         red = r.resolve("hat", CD)
         blu = r.resolve("hat_blue", CD, out_name="blu_hat")
         copy = r.resolve("hat_copy", CD, out_name="copy_hat")
-        self.assertFalse(red.same_look(blu), "разная краска - разный вид")
-        self.assertTrue(red.same_look(copy), "та же текстура и та же краска")
-        self.assertFalse(red.same_look(None))
+        self.assertFalse(is_twin(red, blu, None), "разная краска - разный вид")
+        self.assertTrue(is_twin(red, copy, None), "та же текстура и та же краска")
+        self.assertFalse(is_twin(red, None, None))
 
     def test_resolve_many_and_texture_map(self):
         files = {

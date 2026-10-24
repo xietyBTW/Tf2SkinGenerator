@@ -184,30 +184,55 @@ def _write_fixed_extra_vmt(ex: dict, base_texture_path: str, ctx,
     logger.info(f"Фикс. доп. VMT записан: {vmt_rel} ($basetexture → {base_texture_path})")
 
 
-def write_fixed_extra_files(weapon_key: str, ctx) -> None:
+def watch_screen_res(weapon_key: str, handled: set) -> Optional[str]:
     """
-    Пишет доп. статические файлы мода (HUD-скрипты .res, метаданные info.vdf
-    и т.п.) по их зашитому пути в корень VPK - см. WEAPON_EXTRA_FILES
+    Текст .res экрана часов: заменённая картинка - из мода, остальные - игры
 
-    Содержимое фиксированное (из конфига). Пишется независимо от того,
-    загрузил ли пользователь HUD-текстуры: эти файлы активируют мод
-    (напр. кастомный циферблат Dead Ringer)
+    None - часы не те или на циферблате ничего не меняли: тогда игра
+    обходится своим .res. Прежде .res писался всегда и вёл обе картинки в
+    мод - нетронутая показывалась в игре отсутствующей текстурой
     """
-    from src.data.weapon_quirks import WEAPON_EXTRA_FILES
-    files = WEAPON_EXTRA_FILES.get(weapon_key, [])
-    for f in files:
-        rel = f.get("path", "").replace("\\", "/")
-        content = f.get("content", "")
-        if not rel:
-            continue
+    from src.data.weapon_quirks import WATCH_SCREEN_RES, WEAPON_EXTRA_TEXTURES
+    if weapon_key not in WATCH_SCREEN_RES or not handled:
+        return None
+    images = {}
+    for ex in WEAPON_EXTRA_TEXTURES.get(weapon_key, []):
+        path = ex["vpk"] if ex["name"] in handled else ex["game"]
+        # Картинку шкалы игра ищет от materials/vgui и без расширения
+        images[ex["role"]] = os.path.splitext(path)[0][len("materials/vgui/"):]
+    return (
+        '"InvisProgress.res"\n{\n'
+        '\t"InvisProgress"\n\t{\n'
+        '\t\t"ControlName"\t"CircularProgressBar"\n'
+        '\t\t"fieldName"\t"InvisProgress"\n'
+        '\t\t"xpos"\t"10"\n\t\t"ypos"\t"10"\n\t\t"zpos"\t"1"\n'
+        '\t\t"wide"\t"260"\n\t\t"tall"\t"80"\n'
+        '\t\t"autoResize"\t"0"\n\t\t"pinCorner"\t"0"\n'
+        '\t\t"visible"\t"1"\n\t\t"enabled"\t"1"\n'
+        f'\t\t"fg_image"\t"{images["fg"]}"\n'
+        f'\t\t"bg_image"\t"{images["bg"]}"\n'
+        '\t}\n}\n'
+    )
+
+
+def write_watch_screen(weapon_key: str, ctx, handled: set) -> None:
+    """
+    Кладёт в мод .res экрана часов (см. watch_screen_res) и info.vdf
+
+    info.vdf с ui_version 3 нужен, чтобы игра вообще читала файлы интерфейса
+    из папки мода
+    """
+    from src.data.weapon_quirks import WATCH_SCREEN_RES
+    content = watch_screen_res(weapon_key, handled)
+    if content is None:
+        return
+    for rel, text in ((WATCH_SCREEN_RES[weapon_key], content),
+                      ("info.vdf", '"tf2sg-watch" { "ui_version" "3" }\n')):
         try:
-            target = ctx.vpkroot_dir
-            for part in rel.split("/"):
-                if part:
-                    target = target / part
+            target = _under_root(ctx.vpkroot_dir, rel)
             ensure_directory_exists(target.parent)
             with open(target, "w", encoding="utf-8") as out:
-                out.write(content)
+                out.write(text)
             logger.info(f"Доп. файл мода записан: {rel}")
         except Exception as exc:
             logger.warning(f"Не удалось записать доп. файл '{rel}': {exc}", exc_info=True)

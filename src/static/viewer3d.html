@@ -48,6 +48,17 @@
     border-color: #cc5522;
     color: #ffae80;
   }
+  body.is-light #inspect-btn {
+    background: rgba(20, 18, 15, 0.04);
+    border-color: rgba(20, 18, 15, 0.28);
+    color: #57534d;
+  }
+  body.is-light #inspect-btn:hover { background: rgba(20, 18, 15, 0.08); color: #14120f; }
+  body.is-light #inspect-btn.active {
+    background: rgba(204, 85, 34, 0.14);
+    border-color: #cc5522;
+    color: #cc5522;
+  }
 
   /* Тултип материала/текстуры у курсора */
   #inspect-tip {
@@ -372,6 +383,12 @@ window.setViewerBackground = function(css) {
     // Светлый фон - подписи темнее. Тему хост не называет, судим по яркости
     const luma = (0.2126 * rgb[0] + 0.7152 * rgb[1] + 0.0722 * rgb[2]) / 255;
     document.body.classList.toggle('is-light', luma > 0.5);
+    // Рядом со светлым фоном та же модель кажется темнее и мутнее, чем на
+    // тёмном, поэтому света больше
+    const light = luma > 0.5;
+    ambient.intensity = light ? 1.0 : 0.5;
+    key.intensity = light ? 1.6 : 1.2;
+    requestRender();
   }
 };
 document.getElementById('canvas-container').appendChild(renderer.domElement);
@@ -394,7 +411,8 @@ controls.maxDistance   = 20;
 controls.addEventListener('change', requestRender);
 
 // Lighting
-scene.add(new THREE.AmbientLight(0xffffff, 0.5));
+const ambient = new THREE.AmbientLight(0xffffff, 0.5);
+scene.add(ambient);
 const key  = new THREE.DirectionalLight(0xffffff, 1.2);
 key.position.set(2, 4, 3);
 scene.add(key);

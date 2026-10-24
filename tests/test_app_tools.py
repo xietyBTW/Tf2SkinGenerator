@@ -451,6 +451,20 @@ class MissingTextureAnswerTests(unittest.TestCase):
         self.assertEqual(events, [])
         self.assertEqual(s.answers, [EXTRA_TEX_USE_GAME_ORIGINAL])
 
+    def test_blu_twin_takes_red_upload_or_stays_stock_silently(self):
+        """Синий двойник красного: переключателя нет, и спрашивать о нём
+        человека нечем - он не видел этой карточки"""
+        from src.shared.constants import EXTRA_TEX_USE_GAME_ORIGINAL
+        s = self._session()
+        s.preview.textures.blu_twins = {'hat_blue': 'hat'}
+        events = []
+        s._put = lambda name, **payload: events.append(name)
+        s.building._on_build_needs_texture('hat_blue', 'key')
+        s.preview.textures.set_texture('hat', __file__)
+        s.building._on_build_needs_texture('hat_blue', 'key')
+        self.assertEqual(events, [])
+        self.assertEqual(s.answers, [EXTRA_TEX_USE_GAME_ORIGINAL, __file__])
+
 
 class MissingPartModelAnswerTests(unittest.TestCase):
     """Сменная часть модели (`$bodygroup`): вопрос доходит до страницы, ответ -

@@ -322,3 +322,26 @@ class KeyValuesTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class WornTests(unittest.TestCase):
+    """Что смотрят на персонаже, а что в руке"""
+
+    def _worn(self, **info):
+        with patch.object(viewmodel_anims, "anim_info",
+                          lambda _key, _root: WeaponAnimInfo(**info)):
+            return viewmodel_anims.is_worn("key", "root")
+
+    def test_spy_watch_is_held_despite_force_not_used(self):
+        """Quäckenbirdt и Enthusiast's Timepiece показывались «На персонаже»"""
+        self.assertFalse(self._worn(item_class="tf_weapon_invis",
+                                    anim_slot="force_not_used", item_slot="pda2"))
+
+    def test_boots_and_shields_are_worn(self):
+        self.assertTrue(self._worn(item_class="tf_wearable", anim_slot="force_not_used"))
+        self.assertTrue(self._worn(item_class="tf_wearable_demoshield",
+                                   anim_slot="force_not_used"))
+
+    def test_v_model_watches_show_their_own_view_model(self):
+        for key in ("v_hm_watch", "v_ttg_watch_spy"):
+            self.assertTrue(viewmodel_anims.viewmodel_mdl(key), key)

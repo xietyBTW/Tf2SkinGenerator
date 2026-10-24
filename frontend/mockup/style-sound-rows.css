@@ -280,9 +280,4 @@
   padding-top: 4px;
 }
 .sounds__foot #snd-note { flex: 1; }
-.sounds__foot .btn--primary:disabled { opacity: .4; cursor: default; }
-.sounds__foot .btn--primary:disabled:hover {
-  background: var(--ink);
-  border-color: var(--ink);
-}
 

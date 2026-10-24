@@ -70,7 +70,7 @@ export function sync(index) {
   tabs.forEach((t, n) => t.classList.toggle('is-active', n === i));
   albumCount.textContent = frames.length
     ? `${String(i + 1).padStart(2, '0')} / ${String(frames.length).padStart(2, '0')}`
-    : '-';
+    : '';
   // Стрелку, которой некуда вести, не показываем: на одной текстуре их не
   // должно быть вовсе, а на краю списка щелчок по ней молча ничего не делал бы
   stepPrev.hidden = i <= 0;

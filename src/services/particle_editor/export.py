@@ -136,6 +136,7 @@ def serialize_pcf(pcf) -> bytes:
         unicode="silent")
     copy_root, _, _ = Element.parse(io.BytesIO(raw0.getvalue()))
     strip_default_attrs(copy_root)
+    merge_duplicate_elements(copy_root)
 
     out = io.BytesIO()
     copy_root.export_binary(
@@ -185,9 +186,98 @@ def strip_default_attrs(root) -> int:
     return removed
 
 
+#: Эти элементы различаются именем, а не содержимым: системы игра ищет по
+#: имени, сливать их нельзя. casual-pre-loader оставляет первые три, ссылки
+#: на дочерние системы мы не сливаем тоже: дочернюю систему движок умеет
+#: искать и по имени (ParticleChildrenInfo_t.m_bUseNameBasedLookup), а
+#: выигрыш на них - байты
+_NAMED_TYPES = {"dmelement", "dmeelement", "dmeparticlesystemdefinition",
+                "dmeparticlechild"}
+
+
+def _element_key(el) -> Optional[tuple]:
+    """Содержимое элемента для сравнения: тип и атрибуты, кроме имени.
+    None - у элемента есть значение, которое не сравнить (матрица)"""
+    attrs = []
+    for attr in el.values():
+        if attr.name.casefold() == "name":
+            continue
+        if attr.type is ValueType.ELEMENT:
+            subs = list(attr.iter_elem()) if attr.is_array else [attr.val_elem]
+            value = tuple(getattr(sub, "uuid", None) for sub in subs)
+        else:
+            value = tuple(attr._value) if attr.is_array else attr._value
+        attrs.append((attr.name.casefold(), attr.type.name, value))
+    key = (el.type.casefold(), tuple(sorted(attrs, key=lambda a: a[0])))
+    try:
+        hash(key)
+    except TypeError:
+        return None
+    return key
+
+
+def merge_duplicate_elements(root) -> int:
+    """
+    Одинаковые модули разных систем записываются один раз
+
+    Операторы и инициализаторы в файле эффектов часто повторяются слово в
+    слово, и в списках модулей их можно заменить ссылкой на один элемент:
+    формат это позволяет, файлы Valve так и устроены. casual-pre-loader
+    делает то же перед тем, как вписать PCF в игру, поэтому без этого размер
+    файла у нас выходил больше, чем у него. Возвращает число замен
+    """
+    canon: Dict[tuple, object] = {}
+    merged, seen, stack = 0, set(), [root]
+    while stack:
+        el = stack.pop()
+        if el.uuid in seen:
+            continue
+        seen.add(el.uuid)
+        for attr in el.values():
+            if attr.type is not ValueType.ELEMENT:
+                continue
+            if not attr.is_array:
+                if attr.val_elem is not None:
+                    stack.append(attr.val_elem)
+                continue
+            for i, sub in enumerate(list(attr.iter_elem())):
+                if sub is None:
+                    continue
+                stack.append(sub)
+                if sub.type.casefold() in _NAMED_TYPES:
+                    continue
+                key = _element_key(sub)
+                if key is None:
+                    continue
+                first = canon.setdefault(key, sub)
+                if first is not sub:
+                    attr[i] = first
+                    merged += 1
+    return merged
+
+
 def serialized_size(pcf) -> int:
     """Размер экспортируемого (сжатого) PCF в байтах"""
     return len(serialize_pcf(pcf))
+
+
+def size_summary(pcf) -> Dict[str, object]:
+    """
+    Файл эффектов, его размер в моде и потолок - для сводки внизу страницы
+
+    Размер считается так же, как пишется мод, со сжатием: в казуале PCF
+    больше оригинала не загрузится, и узнать об этом лучше до сборки.
+    Пусто - файл не открыт или не сериализуется
+    """
+    if pcf is None or pcf.root is None:
+        return {}
+    try:
+        size = serialized_size(pcf)
+    except Exception as exc:                     # noqa: BLE001 - сводка, не сборка
+        logger.debug(f"размер PCF для сводки: {exc}")
+        return {}
+    return {"file": pcf_vpk_path(pcf).rsplit("/", 1)[-1],
+            "size": size, "ceiling": pcf._loaded_size}
 
 
 def casual_size_overflow(pcf) -> Optional[int]:

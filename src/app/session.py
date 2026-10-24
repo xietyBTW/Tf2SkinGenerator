@@ -192,7 +192,6 @@ class AppSession:
             lambda tex, names: self._put('blu_materials',
                                          materials=dict(tex or {}),
                                          names=dict(names or {})))
-        c.blu_same_as_red.connect(lambda: self._put('blu_same_as_red'))
         c.australium_ready.connect(
             lambda png, mat: self._put('australium', png=png, material=mat))
         c.render_hints.connect(lambda h: self._put('render_hints', hints=h or {}))
@@ -1667,7 +1666,6 @@ class AppSession:
             # меняется, а огоньки фестивайзера у синих синие
             'has_teams': (self.preview.has_team_variant(is_hands) or t.force_team
                           or bool(self.decor.shown() and self.decor.shown().has_team)),
-            'blu_matches_red': self.preview.blu_matches_red,
             'has_australium': bool(t.australium_frame),
             'australium_active': t.australium_active,
             # «Прочее» - не для рук и не для мода из VPK: там карточки строятся
@@ -1798,6 +1796,12 @@ class AppSession:
         # (`_name_for_scene`), а его игровой оригинал лежит под ключом карточки
         cards = {base: entries[0].get('card') or base
                  for base, entries in self.preview.part_materials.items() if entries}
+        # Одноматериальный предмет в сцене на персонаже назван настоящим именем
+        # меша, а его оригинал лежит под служебным ключом: без этой связки
+        # шапка на персонаже не перекрашивалась (Big Elfin Deal)
+        from src.domain.preview.texture_state import SINGLE_TEX_KEY
+        if t.material_names == [SINGLE_TEX_KEY]:
+            cards.update({m: SINGLE_TEX_KEY for m in self.preview.scene_item_materials})
         out: Dict[str, str] = {}
         for mat, path in textures.items():
             stock = t.game_base(cards.get(mat, mat)) or ''

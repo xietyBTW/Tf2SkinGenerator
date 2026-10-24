@@ -184,6 +184,9 @@ if (Test-Path $ToolsSource) {
 
 Set-Content -Path (Join-Path $PayloadDir "VERSION") -Value $Version -Encoding UTF8 -NoNewline
 
+# GPL, LGPL и CC BY-SA требуют, чтобы текст лицензии шёл вместе с копией программы
+Copy-Item -Path (Join-Path $Root "LICENSE"), (Join-Path $Root "THIRD_PARTY_LICENSES.md") -Destination $PayloadDir -Force
+
 # Страховка: конфиг с вашим путём к игре и вашими ключами в релиз попасть не
 # должен. Спека его больше не пакует, но проверить дешевле, чем отозвать ключ.
 $leaked = Get-ChildItem -Recurse -File $PayloadDir -Filter "app_config.json" -ErrorAction SilentlyContinue

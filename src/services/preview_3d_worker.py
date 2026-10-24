@@ -18,7 +18,7 @@ from src.services.base_worker import Signal
 
 from src.data.item_kinds import kind_of
 from src.services import model_decompile_service
-from src.services import qc_skin_parser, smd_locator, texture_locator, vmt_tint
+from src.services import qc_skin_parser, smd_locator, team_twins, texture_locator, vmt_tint
 from src.services.base_worker import BaseWorker
 from src.services.game_vpk_reader import GameVpkReader
 from src.services.material_resolver import MaterialResolver
@@ -82,10 +82,10 @@ class Preview3DWorker(BaseWorker):
     # Australium/Gold/Festive вариант оружия: (png_path, material_name)
     # Эмитируется когда в QC skinfamilies есть вариантная строка без 'blue'
     australium_ready = Signal(str, str)
-    # BLU-скин есть, но в стоке он выглядит ТОЧНО как RED (та же текстура,
-    # та же краска в VMT). Переключатель команд оставляем - свою BLU-текстуру
-    # сделать можно, - но честно предупреждаем, что в игре разницы нет
-    blu_same_as_red = Signal()
+    # {синий материал: его RED-пара} - в игре синий выглядит ТОЧНО как
+    # красный. Переключатель ради них не показывается, а сборка отдаёт им
+    # правку красного
+    blu_same_as_red = Signal(object)
     # Как рисовать материалы: {имя материала: {blend, opacity, twoSided…}}.
     # Без этого вьювер рисует всё непрозрачным и матовым: стекло банки
     # Мутировавшего молока ($additive) превращается в серый пластик
@@ -158,6 +158,8 @@ class Preview3DWorker(BaseWorker):
         #: {материал: ResolvedMaterial} для RED - с чем сравнивать BLU,
         #: чтобы понять, отличаются ли команды вообще
         self._red_looks: dict = {}
+        #: {папка декомпиляции: {материал: треугольники развёртки}}
+        self._uv_cache: dict = {}
         #: Ленивый резолвер материалов и кэш разбора QC (по папке декомпиляции)
         self._materials: Optional[MaterialResolver] = None
         self._models: dict = {}
@@ -469,7 +471,9 @@ class Preview3DWorker(BaseWorker):
                 _editable = [m for m in mat_names if is_editable_material(m)]
                 if len(tex_map) == 1 and len(_editable or mat_names) <= 1:
                     self.blu_ready.emit(list(tex_map.values()), 0.0)
-            else:
+            elif not mat_names:
+                # Карта по материалам решает сама, даже когда отличий нет.
+                # Одна BLU-текстура на модель - только если материалов не знаем
                 blu_paths, blu_fps = self._extract_blu_via_qc(
                     _qc_dir, 0.0, mat_names)
                 if blu_paths:
@@ -799,7 +803,12 @@ class Preview3DWorker(BaseWorker):
             model = self._model(self._decomp_dir)
             if model is None:
                 return {}
-            wanted, names = texture_locator.style_pairs(model.layout)
+            from src.data.item_skin_styles import item_skin_styles
+            from src.data.weapon_model_index import tf2_root_from_misc_vpk
+            root = tf2_root_from_misc_vpk(self.misc_vpk_path)
+            item_rows = item_skin_styles(root).get((self.weapon_key or "").lower(), {}) \
+                if root else {}
+            wanted, names = texture_locator.style_pairs(model.layout, list(item_rows))
             if not wanted:
                 return {}
             resolved = self._extract_multi_textures(names)
@@ -940,15 +949,6 @@ class Preview3DWorker(BaseWorker):
                 if blu_look is not None:
                     for frame in frame_paths:
                         vmt_tint.apply_to_png(frame, blu_look[1])
-                    # _red_looks хранит ResolvedMaterial - сравниваем по .look
-                    first_red = next(iter(self._red_looks.values()), None)
-                    if first_red is not None and vmt_tint.same_material_look(
-                            first_red.look, blu_look):
-                        logger.info(
-                            "[3D] BLU-скин совпадает с RED и текстурой, и "
-                            "краской - в игре команды не отличаются"
-                        )
-                        self.blu_same_as_red.emit()
 
                 fps = red_framerate if len(frame_paths) > 1 else 0.0
                 logger.info(
@@ -1052,6 +1052,7 @@ class Preview3DWorker(BaseWorker):
             return {}
 
         result: dict = {}
+        twins: dict = {}
         for mat_name in mat_names:
             mat_lower = mat_name.lower()
             blu_name = texture_locator.team_partner(by_lower, mat_lower)
@@ -1067,9 +1068,16 @@ class Preview3DWorker(BaseWorker):
             blu = self.materials.resolve(blu_name, model.cdmaterials,
                                          out_name=f"blu_{mat_lower}")
             png_path = blu.png_path
-            if png_path and blu.same_look(self._red_looks.get(mat_lower)):
+            red = self._red_looks.get(mat_lower)
+            # Развёртку читаем, только когда решают пиксели: обычно VMT
+            # различаются краской, и SMD не нужны
+            tris = (self._uv_tris(decomp_dir, model).get(mat_lower)
+                    if red is not None and red.params == blu.params
+                    and red.basetexture != blu.basetexture else None)
+            if png_path and team_twins.is_twin(red, blu, tris):
                 # Числится командным, а выглядит точно как RED - для панели
-                # это такой же общий материал
+                # это такой же общий материал, а сборка отдаст ему правку RED
+                twins[blu_name] = mat_name
                 png_path, blu_name = None, mat_name
             elif not png_path:
                 # Материал командный, но его текстуру в игре не нашли. Показать
@@ -1082,16 +1090,26 @@ class Preview3DWorker(BaseWorker):
                 blu_name = mat_name
             result[mat_lower] = (png_path, blu_name)
 
-        # Ни одной реальной BLU-текстуры - сообщать не о чем
+        if twins:
+            logger.info(f"[3D] BLU выглядит как RED: {sorted(twins)}")
+            self.blu_same_as_red.emit(twins)
+        # Ни одной реальной BLU-текстуры: в игре команды не отличаются, и
+        # переключателю нечего показывать
         if not any(png for png, _ in result.values()):
-            if result:
-                logger.info(
-                    "[3D] BLU-скин шапки не отличается от RED ни одной "
-                    "текстурой - команды выглядят одинаково"
-                )
-                self.blu_same_as_red.emit()
             return {}
         return result
+
+    def _uv_tris(self, decomp_dir: str, model) -> dict:
+        """Треугольники развёртки по материалам - один разбор SMD за прогон"""
+        if decomp_dir not in self._uv_cache:
+            from src.services.model_build_service import ModelBuildService
+            try:
+                smds = ModelBuildService.extract_all_mesh_smds(model.qc_path)
+            except Exception as exc:
+                logger.debug(f"[3D] SMD модели для развёртки: {exc}")
+                smds = []
+            self._uv_cache[decomp_dir] = team_twins.uv_triangles(smds)
+        return self._uv_cache[decomp_dir]
 
     def _extract_hat_textures_via_qc_vmt(
         self, decomp_dir: str, mat_names: list

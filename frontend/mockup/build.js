@@ -12,6 +12,7 @@ import { chooseFile } from './util.js';
 import { build as buildPanel, endResult, floating, root, setBusy, setStatus } from './layout.js';
 import { dockFx } from './buildfx.js';
 import { buildParticles } from './particles/index.js';
+import { pcfDiff } from './particles/state.js';
 import { texEdit } from './controls.js';
 import { hatClasses } from './preview.js';
 import { pickClasses } from './classpick.js';
@@ -111,6 +112,9 @@ export function buildParams({ live = false } = {}) {
  */
 export async function updateDockSummary() {
   const el = document.getElementById('docksum');
+  if (root.dataset.section === 'particles') { await particlesSummary(el); return; }
+  el.classList.remove('is-over');
+  el.title = '';
   const p = buildParams({ live: true });
   const parts = [p.size + ' × ' + p.size, p.format];
   try {
@@ -122,6 +126,40 @@ export async function updateDockSummary() {
   if (p.filename) parts.push(p.filename);
   el.textContent = parts.join(' · ');
 }
+
+/** Размер в КБ для сводки: у мелких файлов с десятыми */
+const kb = (bytes) => (bytes / 1024).toFixed(bytes < 10240 ? 1 : 0);
+
+/**
+ * Сводка частиц: параметры текстур к ним не относятся, а важен размер.
+ * В казуале файл эффектов больше оригинала не загрузится - видно до сборки
+ */
+async function particlesSummary(el) {
+  const res = await api.particleSize().catch(() => ({}));
+  if (root.dataset.section !== 'particles') return;   // ушли, пока считали
+  const parts = [];
+  if (res.file) parts.push(res.file);
+  const changed = [...pcfDiff.values()].filter((s) => s !== 'same').length;
+  if (res.file && pcfDiff.size) parts.push(t(`Изменено систем: ${changed}`));
+  const over = res.ceiling ? res.size - res.ceiling : 0;
+  if (res.size && res.ceiling) {
+    parts.push(over > 0 ? t(`Больше оригинала на ${kb(over)} КБ`)
+                        : t(`${kb(res.size)} из ${kb(res.ceiling)} КБ`));
+  }
+  el.textContent = parts.join(' · ');
+  el.classList.toggle('is-over', over > 0);
+  el.title = over > 0 ? t('В казуале файл эффектов больше оригинала не загрузится') : '';
+}
+
+//: Пересчёт размера после серии правок, а не на каждый шаг ползунка: на
+//: больших файлах эффектов он занимает до полусекунды
+let sizeTimer = null;
+document.addEventListener('particles:changed', () => {
+  clearTimeout(sizeTimer);
+  sizeTimer = setTimeout(updateDockSummary, 600);
+});
+new MutationObserver(updateDockSummary)
+  .observe(root, { attributes: true, attributeFilter: ['data-section'] });
 
 // Любая правка параметров меняет то, что соберётся
 document.querySelector('.build__grid').addEventListener('change', updateDockSummary);

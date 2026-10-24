@@ -35,6 +35,8 @@ export function setDiff(diff) {
   if (!diff) return;
   pcfDiff.clear();
   for (const [name, status] of Object.entries(diff)) pcfDiff.set(name, status);
+  // Отличия приходят после каждой правки: сводка внизу пересчитает размер
+  document.dispatchEvent(new Event('particles:changed'));
 }
 
 //: Обычный режим или экспертный. Выбор держится до смены раздела

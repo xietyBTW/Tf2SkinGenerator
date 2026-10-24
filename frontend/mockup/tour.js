@@ -20,6 +20,7 @@
 
 import * as api from './api.js';
 import { t } from './i18n.js';
+import { noticePending } from './notices.js';
 
 const root = document.documentElement;
 const $ = (sel) => document.querySelector(sel);
@@ -198,7 +199,8 @@ const TOURS = {
 
   particles: {
     bit: 16,
-    when: () => section() === 'particles',
+    // Сначала предупреждение о тестовом режиме, потом обучение
+    when: () => section() === 'particles' && !noticePending('particles'),
     steps: [
       { at: () => firstShown('#catalog', '#opencat'), title: 'Эффекты',
         text: 'Выберите эффект. Необычные эффекты подписаны именами из игры, поиск находит и по имени системы.',

@@ -90,27 +90,121 @@ def apply_gizmo_edits(pcf, system_name: str, edits: list,
 
     Модуль ищется по номеру, а если там другой - по имени функции. Модуля
     может не быть вовсе: превью само дописывает Position Modify Offset Random
-    в начале перетаскивания сферы, и здесь он создаётся так же. Возвращает
-    текст ошибки или None
+    в начале перетаскивания сферы, и здесь он создаётся так же. У правки может
+    быть своя system: гизмо двигает весь эффект, корень вместе с дочерними.
+    Возвращает текст ошибки или None
     """
+    names = list(dict.fromkeys(e.get("system") or system_name for e in edits))
+    own = own_effect_children(pcf, system_name, names)
     for edit in edits:
         group, fn = edit.get("group"), str(edit.get("fn") or "")
-        d = pcf._find_definition(system_name)
+        name = edit.get("system") or system_name
+        name = own.get(name, name)
+        d = pcf._find_definition(name)
         if d is None:
-            return f"система не найдена: {system_name}"
+            return f"система не найдена: {name}"
         mods = list(d[group].iter_elem()) if group in d else []
         index = int(edit.get("index", -1))
         if not (0 <= index < len(mods) and module_fn(mods[index]) == fn.lower()):
             index = next((i for i, m in enumerate(mods)
                           if module_fn(m) == fn.lower()), -1)
         if index < 0:
-            if not pcf.add_module(system_name, group, fn, tf2_root_dir):
+            if not pcf.add_module(name, group, fn, tf2_root_dir):
                 return f"не удалось добавить {fn}"
             index = len(mods)
-        if not pcf.ensure_attr(system_name, group, index, edit.get("attr"),
+        if not pcf.ensure_attr(name, group, index, edit.get("attr"),
                                edit.get("type"), edit.get("value")):
             return f"не удалось записать {edit.get('attr')}"
     return None
+
+
+def _kid_refs(el) -> list:
+    """Ссылки системы на детей: [(элемент-ссылка, дочерняя система)]"""
+    out = []
+    if "children" not in el:
+        return out
+    try:
+        for ch in el["children"].iter_elem():
+            if "child" in ch:
+                try:
+                    out.append((ch, ch["child"].val_elem))
+                except Exception:
+                    continue
+    except Exception:
+        pass
+    return out
+
+
+def _subtree(root) -> Dict[int, "Element"]:
+    """Система и все её потомки, по id элемента"""
+    out, stack = {}, [root]
+    while stack:
+        el = stack.pop()
+        if el is None or id(el) in out:
+            continue
+        out[id(el)] = el
+        stack.extend(kid for _, kid in _kid_refs(el))
+    return out
+
+
+def own_effect_children(pcf, root_name: str, names: list) -> Dict[str, str]:
+    """
+    Свои копии общих дочерних систем эффекта: {старое имя: новое}
+
+    Система бывает дочерней у нескольких эффектов (gas_can_impact_red и
+    _blue делят троих детей). Гизмо двигает эффект целиком, и правка общей
+    уехала бы и у соседа - копируем при записи, как общие модули. Имена
+    идут от родителей к детям: внук скопированной системы становится общим
+    с оригиналом, и копируется следом
+    """
+    root = pcf._find_definition(root_name)
+    if root is None:
+        return {}
+    own: Dict[str, str] = {}
+    for name in names:
+        target = pcf._find_definition(name)
+        if target is None or target is root:
+            continue
+        tree = _subtree(root)
+        parents = [el for el in tree.values()
+                   if any(kid is target for _, kid in _kid_refs(el))]
+        outside = any(kid is target
+                      for el in pcf._all_definition_elements()
+                      if id(el) not in tree for _, kid in _kid_refs(el))
+        if not parents or not outside:
+            continue
+        new_name, n = f"{name}_{root_name}", 2
+        while pcf._find_definition(new_name) is not None:
+            new_name, n = f"{name}_{root_name}_{n}", n + 1
+        if not duplicate_system(pcf, name, new_name):
+            continue
+        copy = pcf._find_definition(new_name)
+        for el in parents:
+            _relink_child(el, target, copy)
+        own[name] = new_name
+    return own
+
+
+def _relink_child(parent, target, copy) -> None:
+    """Ссылки parent на target ведут теперь на copy
+
+    Ссылку не правим на месте, а ставим новую: у Valve общими бывают и
+    сами элементы-ссылки (gas_can_impact_red и _blue держат одни и те же),
+    и правка на месте перевела бы на копию и соседа
+    """
+    attr = parent["children"]
+    arr = Attribute.array(attr.name, ValueType.ELEMENT)
+    for ref, kid in [(r, r["child"].val_elem if "child" in r else None)
+                     for r in attr.iter_elem()]:
+        if kid is target:
+            fresh = Element(copy.name, ref.type)
+            for a in ref.values():
+                if a.name.casefold() not in ("child", "name"):
+                    fresh[a.name] = a.copy()
+            fresh["child"] = Attribute("child", ValueType.ELEMENT, copy)
+            ref = fresh
+        arr.append(ref)
+    parent[attr.name] = arr
 
 
 def seed_spawn_area(definition, mod) -> bool:

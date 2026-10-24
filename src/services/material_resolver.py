@@ -44,24 +44,13 @@ class ResolvedMaterial:
     #: Как материал рисуется: прозрачность, смешивание, блик (см. vmt_render).
     #: Без этого превью рисует стекло банки серым пластиком
     render: vmt_render.RenderSpec = field(default_factory=vmt_render.RenderSpec)
+    #: Весь VMT кроме $basetexture (vmt_parse.fingerprint): по нему видно,
+    #: что синий материал отличается от красного одной лишь текстурой
+    params: str = ""
 
     @property
     def ok(self) -> bool:
         return bool(self.png_path)
-
-    @property
-    def look(self) -> tuple:
-        """Из чего складывается вид материала: текстура + краска
-
-        По этой паре материалы сравнивают между собой (`same_look`): у 46
-        стоковых шапок BLU-скин отличается от RED только именем
-        """
-        return (self.basetexture, self.tint)
-
-    def same_look(self, other: Optional["ResolvedMaterial"]) -> bool:
-        if other is None:
-            return False
-        return vmt_tint.same_material_look(self.look, other.look)
 
 
 class MaterialResolver:
@@ -188,7 +177,8 @@ class MaterialResolver:
         return ResolvedMaterial(
             name=mat_lower, vmt_path=vmt_path, basetexture=basetexture,
             tint=vmt_tint.parse_tint(vmt_text), shader=doc.shader,
-            render=vmt_render.from_doc(doc))
+            render=vmt_render.from_doc(doc),
+            params=vmt_parse.fingerprint(doc, skip=("basetexture",)))
 
     def _resolve_uncached(self, mat_name: str, cdmaterials: List[str],
                           out_name: Optional[str]) -> ResolvedMaterial:
@@ -208,7 +198,8 @@ class MaterialResolver:
         return ResolvedMaterial(
             name=info.name, vmt_path=info.vmt_path,
             basetexture=info.basetexture, png_path=png_path,
-            tint=info.tint, shader=info.shader, render=info.render)
+            tint=info.tint, shader=info.shader, render=info.render,
+            params=info.params)
 
     def _find_vmt(self, mat_lower: str, cdmaterials: List[str]):
         """VMT материала: сначала по $cdmaterials, потом по пути внутри имени

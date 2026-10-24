@@ -53,6 +53,9 @@ VIEWMODEL_ONLY: Dict[str, str] = {
     "c_spy_watch": f"{_V_MODELS}/v_watch_spy.mdl",
     "c_leather_watch": f"{_V_MODELS}/v_watch_leather_spy.mdl",
     "c_pocket_watch": f"{_V_MODELS}/v_watch_pocket_spy.mdl",
+    # У этих двух в каталоге и есть модель вида: мировой c_-модели нет
+    "v_hm_watch": "models/workshop_partner/weapons/v_models/v_hm_watch/v_hm_watch.mdl",
+    "v_ttg_watch_spy": f"{_V_MODELS}/v_ttg_watch_spy.mdl",
 }
 
 #: Класс TF2 -> основа имени его моделей. Совпадает не всегда: demoman -> demo
@@ -105,7 +108,8 @@ _CACHE_FILE = data_dir() / "cache" / "weapon_anim_slots.json"
 #: 7 - своё пустое anim_slot отменяет префаб (Полу-Дзатоити).
 #: 8 - рюкзаки знамён (extra_wearable) и модель в руке (held).
 #: 9 - что предмет прячет у персонажа (hides)
-_CACHE_VERSION = 9
+#: 10 - hides сливается с префабами, как в игре
+_CACHE_VERSION = 10
 
 #: tf2_root -> индекс (чтобы не разбирать 8 МБ повторно за сессию)
 _MEM: Dict[str, Dict[str, "WeaponAnimInfo"]] = {}
@@ -252,7 +256,9 @@ def is_worn(weapon_key: str, tf2_root: str) -> bool:
     info = anim_info(weapon_key, tf2_root)
     if info is None:
         return False
-    return (bool(info.held) or info.anim_slot == "force_not_used"
+    # `anim_slot force_not_used` не признак: он стоит и у всех часов шпиона,
+    # а их держат в руке. Надеваемое и без него узнаётся по классу предмета
+    return (bool(info.held)
             or info.item_class.startswith(("tf_wearable", "tf_weapon_parachute")))
 
 
@@ -377,7 +383,7 @@ def _build_index(items_path: Path) -> Dict[str, WeaponAnimInfo]:
             item_slot=(game.inherited(block, "item_slot") or "").lower(),
             animation_replacement=_replacement(game, block),
             hides=tuple(sorted(_bodygroup_pairs(
-                game.inherited_block(block, "player_bodygroups")).items())),
+                game.merged_block(block, "player_bodygroups")).items())),
         )
         stems = _model_stems(game, block)
         for stem in stems:

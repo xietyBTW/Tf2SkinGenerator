@@ -9,7 +9,8 @@
 import * as api from './api.js';
 import { fillSelect, fileSize, plural } from './util.js';
 import { ask } from './ask.js';
-import { say, sayInfo, sayError, withViewer } from './stage.js';
+import { withViewer } from './stage.js';
+import { notifyApp } from './app-note.js';
 import { showTf2Path, setPinned, pinnedFits } from './layout.js';
 import { setParamsWidth, setCatalogWidth, setBuildWidth } from './panel-resize.js';
 import { setSplit } from './split.js';
@@ -20,6 +21,7 @@ import { EN } from './strings.js';
 import { refreshView, stopPartsAnimation } from './preview.js';
 import { setTexSize } from './particles/materials.js';
 import { setToursDone, replayTours } from './tour.js';
+import { setNoticesDone } from './notices.js';
 import { FX_DEFAULTS, FX_GROUPS, createFx, dockFx, fxChoice } from './buildfx.js';
 
 // Настройки
@@ -51,6 +53,7 @@ export function applyLook(values) {
   setConsoleFilter(values.console_filter);
   setTexSize(values.particle_tex_size);
   setToursDone(values.tours_done);
+  setNoticesDone(values.notices_done);
   // Язык: ответы Python берут его из общего конфига сами, а вьюверу сказать
   // некому - он живёт отдельным документом и до конфига не дотягивается
   api.setLang(values.language);
@@ -275,7 +278,7 @@ document.getElementById('cfg-cache').addEventListener('click', async () => {
   if (!go) return;
   const res = await api.clearModelCache();
   document.getElementById('cfg-cache-size').textContent = 'пусто';
-  say(`Кэш очищен, записей удалено: ${res.removed ?? 0}`);
+  notifyApp(`Кэш очищен, записей удалено: ${res.removed ?? 0}`);
 });
 
 /**
@@ -303,7 +306,7 @@ async function showDrafts() {
 // на диске, и добраться до них было можно только заново открыв тот же предмет.
 // Список даём отметить: удалять всё разом человек может и не хотеть
 document.getElementById('cfg-drafts').addEventListener('click', async () => {
-  if (!draftList.length) { sayInfo('Черновиков нет'); return; }
+  if (!draftList.length) { notifyApp('Черновиков нет', 'info'); return; }
   const picked = await ask({
     title: 'Удалить черновики',
     text: 'Это молчаливые записи автосохранения - работы, сохранённые кнопкой, '
@@ -320,8 +323,8 @@ document.getElementById('cfg-drafts').addEventListener('click', async () => {
   });
   if (!picked || !picked.length) return;
   const res = await api.forgetDrafts(picked);
-  if (res.error) { sayError(res.error); return; }
-  say(`Черновиков удалено: ${res.removed ?? 0}`);
+  if (res.error) { notifyApp(res.error, 'error'); return; }
+  notifyApp(`Черновиков удалено: ${res.removed ?? 0}`);
   // Ушёл черновик открытого предмета - вместе с ним ушли и правки на экране
   if (res.reset) refreshView();
   showDrafts();
@@ -422,7 +425,7 @@ document.getElementById('cfg-save').addEventListener('click', async () => {
     build_fx: readFx(),
     model_cache_mb: Number(document.getElementById('cfg-cachecap').value),
   });
-  if (res.error) { sayError(res.error); return; }
+  if (res.error) { notifyApp(res.error, 'error'); return; }
   cfgDlg.close();
   // Язык пропитывает всё: разметку, то, что построил код, и то, что
   // присылает Python уже словами (звуки, подписи эффектов, фасеты).
@@ -431,7 +434,7 @@ document.getElementById('cfg-save').addEventListener('click', async () => {
   const before = api.lang();
   api.setLang((res.values || {}).language);
   if (api.lang() !== before) { restart(res.values || {}); return; }
-  say('Настройки сохранены');
+  notifyApp('Настройки сохранены');
   // Гифки на модели: выключили - сцена перекрашивается неподвижной склейкой;
   // включили - кадры приедут событием parts_animated
   if (!(res.values || {}).parts_animation) stopPartsAnimation();
@@ -479,13 +482,13 @@ document.getElementById('cfg-findtf2').addEventListener('click', async (e) => {
   try {
     const found = (await api.findTf2()).found || [];
     if (!found.length) {
-      say(t('Игра не нашлась - укажите папку вручную'));
+      notifyApp(t('Игра не нашлась - укажите папку вручную'), 'info');
       return;
     }
     document.getElementById('cfg-tf2').value = found[0];
     // Копий больше одной - редкость (вторая библиотека Steam). Берём первую,
     // но молчать об этом нельзя: путь могли ждать другой
-    say(found.length > 1
+    notifyApp(found.length > 1
       ? t('Найдено копий игры: ') + found.length + t(', взял первую')
       : t('Игра найдена: ') + found[0]);
   } finally {
@@ -516,7 +519,7 @@ export async function offerTf2() {
   if (!answer || !String(answer).trim()) return;
 
   const res = await api.setSettings({ tf2_game_folder: String(answer).trim() });
-  if (res.error) { sayError(res.error); return; }
+  if (res.error) { notifyApp(res.error, 'error'); return; }
   showTf2Path();
   // Обложки предметов приезжают из игры: список на экране нарисован без них
   api.forgetCached();
@@ -533,7 +536,7 @@ document.querySelectorAll('[data-pick]').forEach((btn) => {
     btn.disabled = true;
     try {
       const res = await api.pickFolder(input.value);
-      if (res.error) { sayError(res.error); return; }
+      if (res.error) { notifyApp(res.error, 'error'); return; }
       if (!res.path) return;
       input.value = res.path;
       // Правка руками и выбор - одно и то же для тех, кто слушает поле

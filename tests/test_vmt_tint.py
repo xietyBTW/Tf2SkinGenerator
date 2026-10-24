@@ -67,18 +67,6 @@ def test_parse_tint_defaults_to_white_without_color():
     assert spec.is_neutral
 
 
-def test_same_look():
-    red = vmt_tint.TintSpec((189, 59, 59), 0.99)
-    blu = vmt_tint.TintSpec((91, 122, 140), 0.99)
-    assert not vmt_tint.same_look(red, blu)
-    assert vmt_tint.same_look(red, vmt_tint.TintSpec((189, 59, 59), 0.99))
-    assert vmt_tint.same_look(None, None)
-    assert not vmt_tint.same_look(red, None)
-    # Нейтральные краски одинаковы, даже если записаны по-разному
-    assert vmt_tint.same_look(vmt_tint.TintSpec((255, 255, 255), 0.0),
-                              vmt_tint.TintSpec((255, 255, 255), 0.0))
-
-
 def _sample(tmp_path, rgb, alpha):
     Image = pytest.importorskip("PIL.Image")
     img = Image.new("RGBA", (2, 2), rgb + (alpha,))
@@ -134,26 +122,6 @@ def test_apply_to_png_neutral_still_flattens_alpha(tmp_path):
     with Image.open(path) as img:
         px = img.convert("RGBA").getpixel((0, 0))
     assert px == (30, 40, 50, 255)
-
-
-def test_same_material_look_compares_texture_and_paint():
-    """Ответ на «отличаются ли команды»: сравниваем текстуру И краску
-
-    Big Elfin Deal - та же текстура, но разная краска: разница есть.
-    46 стоковых шапок - совпадает и то, и другое: разницы нет
-    """
-    red_tint = vmt_tint.TintSpec((189, 59, 59), 0.99)
-    blu_tint = vmt_tint.TintSpec((91, 122, 140), 0.99)
-    tex = "models/workshop/player/items/scout/elf/elf_color"
-
-    assert not vmt_tint.same_material_look((tex, red_tint), (tex, blu_tint))
-    assert vmt_tint.same_material_look((tex, red_tint), (tex, red_tint))
-    # Разные текстуры - разница есть даже при одинаковой краске
-    assert not vmt_tint.same_material_look((tex, red_tint), (tex + "_blue", red_tint))
-    # Материалы без краски вообще: решает только текстура
-    assert vmt_tint.same_material_look((tex, None), (tex, None))
-    assert not vmt_tint.same_material_look(None, (tex, None))
-    assert not vmt_tint.same_material_look((tex, None), None)
 
 
 def test_lacks_alpha(tmp_path):

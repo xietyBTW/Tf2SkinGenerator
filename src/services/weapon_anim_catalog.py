@@ -264,6 +264,11 @@ _OWN_HITS: Dict[str, Dict[Action, Optional[str]]] = {
         Action.CRIT: "ACT_ITEM2_VM_SWINGHARD",
     },
 }
+# Еда и напитки (`CTFLunchBox`) на выстрел запускают насмешку и анимацию вида
+# не шлют: `ed_throw` того же набора ITEM1 - бросок Безумного молока
+_OWN_HITS["tf_weapon_lunchbox"] = _OWN_HITS["tf_weapon_lunchbox_drink"] = {
+    Action.FIRE: None, Action.ALT_FIRE: None, Action.CRIT: None,
+}
 
 _LOWERED = ("IDLE_TO_LOWERED", "IDLE_LOWERED", "LOWERED_TO_IDLE")
 

@@ -240,6 +240,54 @@ class ResolveTests(TextureStateBase):
         self.state.active_team = Team.BLU
         self.assertEqual(self.state.resolve_base("balloon"), blu_f)
 
+    def single_material_team_hat(self):
+        """Шарф Stockbroker's Scarf: карточка под служебным ключом, а карта
+        синих имён и синий оригинал - под настоящим именем материала"""
+        s = self.state
+        s.material_names = [SINGLE_TEX_KEY]
+        s.vpk_red_tex_map = {SINGLE_TEX_KEY: self.png("red")}
+        s.blu_name_map = {"pyro_tripwire_mask": "pyro_tripwire_mask_blue"}
+        s.vpk_blu_tex_map = {"pyro_tripwire_mask": self.png("blu")}
+        s.blu_frames = [s.vpk_blu_tex_map["pyro_tripwire_mask"]]
+        return s
+
+    def test_single_material_hat_shows_blu_on_blu(self):
+        s = self.single_material_team_hat()
+        self.assertTrue(s.is_team_material(SINGLE_TEX_KEY))
+        self.assertFalse(s.is_neutral(SINGLE_TEX_KEY))
+        s.active_team = Team.BLU
+        self.assertEqual(s.resolve_card(SINGLE_TEX_KEY), s.blu_frames[0])
+
+    def test_single_material_hat_build_finds_team_uploads(self):
+        """Сборка спрашивает настоящие имена, правки лежат под служебным"""
+        s = self.single_material_team_hat()
+        red, blu = self.png("my_red"), self.png("my_blu")
+        s.set_texture(SINGLE_TEX_KEY, red)
+        s.active_team = Team.BLU
+        s.set_texture(SINGLE_TEX_KEY, blu)
+        self.assertEqual(s.uploaded_for_mat("pyro_tripwire_mask"), red)
+        self.assertEqual(s.uploaded_for_mat("pyro_tripwire_mask_blue"), blu)
+
+    def test_blu_twin_gets_red_upload_in_build(self):
+        """Синий двойник: переключателя нет, правка RED уходит и синим"""
+        s = self.state
+        s.material_names = [SINGLE_TEX_KEY]
+        s.blu_twins = {"hat_blue": "hat"}
+        red = self.png("my_red")
+        s.set_texture(SINGLE_TEX_KEY, red)
+        self.assertEqual(s.uploaded_for_mat("hat_blue"), red)
+
+    def test_partial_twin_in_multi_material_hat(self):
+        """Корпус командный, ремешок - двойник: ремешку правка красного"""
+        s = self.state
+        s.material_names = ["body", "strap"]
+        s.blu_name_map = {"body": "body_blue", "strap": "strap"}
+        s.blu_twins = {"strap_blue": "strap"}
+        strap = self.png("strap")
+        s.set_texture("strap", strap)
+        self.assertEqual(s.uploaded_for_mat("strap_blue"), strap)
+        self.assertIsNone(s.uploaded_for_mat("body_blue"))
+
     def test_missing_file_is_skipped(self):
         self.state.textures[Team.RED]["mat"] = str(self.dir / "deleted.png")
         self.assertIsNone(self.state.resolve_base("mat"))

@@ -324,9 +324,10 @@ def controls_for(mode: str, key: str = '') -> Dict[str, object]:
     # Предмет оружия из каталога (не снаряд и не реквизит насмешки)
     held_weapon = (is_normal and kind_of(mode).is_weapon
                    and not category_of_mode(mode))
-    # Надетое без модели в руке (ботинки, щит, парашют): от первого лица его
-    # не видно, вместо этого - «На персонаже»
-    worn_only = held_weapon and _worn_empty_handed(mode)
+    # Надетое (ботинки, щит, парашют, рюкзак знамени): от первого лица его не
+    # видно, вместо этого - «На персонаже». Горн знамени - своя запись каталога
+    # со своим видом от первого лица
+    worn_only = held_weapon and _worn(mode)
 
     # «Модельные» режимы: geometry идёт через декомпиляцию, материал -
     # VertexLitGeneric. От этого зависят Normal Map, карты и инструменты
@@ -407,9 +408,10 @@ def controls_for(mode: str, key: str = '') -> Dict[str, object]:
     }
 
 
-def _worn_empty_handed(mode: str) -> bool:
-    """Предмет надевают, и в руке вместо него ничего (viewmodel_anims.is_worn
-    без `held`). Игра не найдена - считаем, что держат: вкладка останется"""
+def _worn(mode: str) -> bool:
+    """Предмет надевают, а не держат (viewmodel_anims.is_worn). Рюкзак знамени
+    тоже: горн в руке - другая запись каталога. Игра не найдена - считаем,
+    что держат: вкладка останется"""
     from src.config.app_config import AppConfig
     from src.data import viewmodel_anims
     from src.domain.preview.model_key import model_key_for
@@ -418,8 +420,7 @@ def _worn_empty_handed(mode: str) -> bool:
     key = model_key_for(mode)
     if not (root and key):
         return False
-    info = viewmodel_anims.anim_info(key, root)
-    return viewmodel_anims.is_worn(key, root) and not (info and info.held)
+    return viewmodel_anims.is_worn(key, root)
 
 
 def icon_png(key: str) -> Optional[bytes]:

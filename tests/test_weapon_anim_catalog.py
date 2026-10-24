@@ -285,6 +285,17 @@ class CatalogTests(unittest.TestCase):
                          "ACT_SECONDARY_VM_PRIMARYATTACK")
         self.assertIsNone(cat.activity_for(gun, Action.CRIT))
 
+    def test_drink_has_no_throw(self):
+        """Бонк и Безумное молоко - один набор ITEM1, но бросает только молоко"""
+        drink = cat.WeaponProfile(slot="item1", loadout_slot="secondary",
+                                  item_class="tf_weapon_lunchbox_drink")
+        milk = cat.WeaponProfile(slot="item1", loadout_slot="secondary",
+                                 item_class="tf_weapon_jar_milk")
+        self.assertIsNone(cat.activity_for(drink, Action.FIRE))
+        self.assertEqual(cat.activity_for(drink, Action.IDLE), "ACT_ITEM1_VM_IDLE")
+        self.assertEqual(cat.activity_for(milk, Action.FIRE),
+                         "ACT_ITEM1_VM_PRIMARYATTACK")
+
     def test_buff_banner_translates_itself_to_item1(self):
         """Горн с ролью melee играет ITEM1, а не лопату"""
         horn = cat.WeaponProfile(slot="melee", loadout_slot="secondary",

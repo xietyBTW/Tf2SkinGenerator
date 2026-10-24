@@ -294,7 +294,7 @@
       </div>
 
       <div class="half__foot">
-        <span class="album__count"><b>-</b></span>
+        <span class="album__count"><b></b></span>
         <div class="acts">
           <button class="textbtn textbtn--sm" id="keep" hidden
                   title="Положить работу в раздел «Кастомный мод»">Сохранить работу</button>
@@ -752,6 +752,15 @@
            модели: в игре анюжуал висит именно на attachment -->
       <div class="cp" id="cp" hidden>
         <div class="cp__row">
+          <span class="label label--inline">Гизмо двигает</span>
+          <div class="cp__scene" id="cp-scope">
+            <button class="tag is-active" data-scope="effect">Весь эффект</button>
+            <button class="tag" data-scope="system">Эту систему</button>
+          </div>
+          <span class="mono cp__hint">Alt при перетаскивании - наоборот</span>
+        </div>
+
+        <div class="cp__row">
           <span class="label label--inline">Точка</span>
           <div class="cp__pick" id="cp-index"></div>
           <span class="mono cp__used" id="cp-used"></span>
@@ -788,7 +797,7 @@
         <div class="cp__row">
           <button class="textbtn textbtn--sm" id="cp-model">Модель…</button>
           <span class="mono" id="cp-model-name"></span>
-          <div class="cp__scene">
+          <div class="cp__scene" id="cp-scene">
             <button class="tag is-active" data-scene="world">В мире</button>
             <button class="tag" data-scene="model">На модели</button>
           </div>
@@ -1094,6 +1103,9 @@
     <span class="dock__more">Параметры</span>
   </button>
   <span class="mono dock__tf2">TF2 найден · tf/tf2_misc_dir.vpk</span>
+  <!-- Уведомление про приложение (app-note.js): на время встаёт поверх
+       сводки и пути к игре -->
+  <div class="dock__note" id="docknote" role="status" aria-live="polite"><span></span></div>
   <button class="btn--primary" id="buildvpk">Собрать VPK</button>
   <!-- После удачной сборки на время встаёт на место «Собрать VPK»: следующий
        шаг после сборки - найти мод (layout.js, offerOpen) -->
